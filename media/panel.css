@@ -51,6 +51,33 @@ body {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  cursor: pointer;
+  user-select: none;
+}
+.card-top:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+  opacity: 0.7;
+  transition: transform 0.12s ease;
+  transform: rotate(90deg);
+}
+.card.collapsed .chevron {
+  transform: rotate(0deg);
+}
+.chevron svg {
+  width: 12px;
+  height: 12px;
+}
+.card-body {
+  overflow: hidden;
+}
+.card.collapsed .card-body {
+  display: none;
 }
 .dot {
   width: 7px;
@@ -89,6 +116,44 @@ body {
 .badge.warn {
   background: var(--vscode-inputValidation-warningBackground, #6b5300);
   color: var(--vscode-foreground);
+}
+.badge.count {
+  background: var(--vscode-activityBarBadge-background, var(--vscode-badge-background));
+  color: var(--vscode-activityBarBadge-foreground, var(--vscode-badge-foreground));
+}
+
+.agents {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.08));
+}
+.agent-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+.agent-icon svg {
+  width: 12px;
+  height: 12px;
+}
+.agent-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agents-empty {
+  margin: 8px 0 0;
+  font-size: 11px;
+  opacity: 0.6;
 }
 
 .path {
@@ -129,6 +194,13 @@ button.primary {
   background: var(--vscode-button-background);
 }
 button.primary:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+button.agent {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+button.agent:hover {
   background: var(--vscode-button-hoverBackground);
 }
 button:disabled {

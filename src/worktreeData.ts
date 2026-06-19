@@ -2,6 +2,12 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { findRepoRoot, listWorktrees } from "./git";
 
+/** A single agent session created within a worktree. */
+export interface AgentVM {
+  id: number;
+  label: string;
+}
+
 /** View-model for a single worktree row sent to the webview. */
 export interface WorktreeVM {
   path: string;
@@ -11,6 +17,7 @@ export interface WorktreeVM {
   detached: boolean;
   locked: boolean;
   inWorkspace: boolean;
+  agents: AgentVM[];
 }
 
 export interface WorktreeData {
@@ -36,7 +43,9 @@ export function folderIndex(fsPath: string): number {
 }
 
 /** Gather worktrees of the repo containing the first workspace folder. */
-export async function gatherWorktrees(): Promise<WorktreeData> {
+export async function gatherWorktrees(
+  agentsByPath?: Map<string, AgentVM[]>
+): Promise<WorktreeData> {
   const cwd = primaryFolder();
   if (!cwd) return { worktrees: [] };
 
@@ -67,6 +76,7 @@ export async function gatherWorktrees(): Promise<WorktreeData> {
       detached: wt.detached,
       locked: wt.locked,
       inWorkspace: openPaths.has(normalize(wt.path)),
+      agents: agentsByPath?.get(normalize(wt.path)) ?? [],
     })),
   };
 }

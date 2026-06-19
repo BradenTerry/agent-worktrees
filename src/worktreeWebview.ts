@@ -1,10 +1,15 @@
 import * as vscode from "vscode";
-import { gatherWorktrees, folderIndex, normalize } from "./worktreeData";
+import {
+  gatherWorktrees,
+  folderIndex,
+  normalize,
+  AgentVM,
+} from "./worktreeData";
 
 /** Messages sent from the webview to the extension. */
 interface ActionMessage {
   type: "action";
-  action: "open" | "remove" | "terminal" | "reveal" | "refresh";
+  action: "open" | "remove" | "refresh" | "agent";
   path?: string;
 }
 
@@ -12,6 +17,10 @@ export class WorktreeWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "worktreeView.panel";
 
   private view?: vscode.WebviewView;
+
+  /** Agents created per worktree, keyed by normalized path. */
+  private agents = new Map<string, AgentVM[]>();
+  private nextAgentId = 1;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -36,7 +45,7 @@ export class WorktreeWebviewProvider implements vscode.WebviewViewProvider {
   /** Recompute worktree data and push it to the webview. */
   async refresh(): Promise<void> {
     if (!this.view) return;
-    const data = await gatherWorktrees();
+    const data = await gatherWorktrees(this.agents);
     void this.view.webview.postMessage({ type: "update", data });
   }
 
@@ -49,10 +58,8 @@ export class WorktreeWebviewProvider implements vscode.WebviewViewProvider {
         return this.open(msg.path);
       case "remove":
         return this.remove(msg.path);
-      case "terminal":
-        return this.terminal(msg.path);
-      case "reveal":
-        return this.reveal(msg.path);
+      case "agent":
+        return this.agent(msg.path);
     }
   }
 
@@ -91,21 +98,31 @@ export class WorktreeWebviewProvider implements vscode.WebviewViewProvider {
     await this.refresh();
   }
 
-  private terminal(fsPath?: string): void {
+  /**
+   * Spin up a Claude CLI session in the given worktree. Each click gets its
+   * own terminal so multiple agents can run side by side across worktrees,
+   * and is tracked as a row under the worktree's section.
+   */
+  private async agent(fsPath?: string): Promise<void> {
     if (!fsPath) return;
+
+    const key = normalize(fsPath);
+    const list = this.agents.get(key) ?? [];
+    const id = this.nextAgentId++;
+    const ordinal = list.length + 1;
+    const label = `Claude ${ordinal}`;
+    list.push({ id, label });
+    this.agents.set(key, list);
+
     const terminal = vscode.window.createTerminal({
-      name: nameOf(fsPath),
+      name: `${label} · ${nameOf(fsPath)}`,
       cwd: fsPath,
+      iconPath: new vscode.ThemeIcon("sparkle"),
     });
     terminal.show();
-  }
+    terminal.sendText("claude");
 
-  private async reveal(fsPath?: string): Promise<void> {
-    if (!fsPath) return;
-    await vscode.commands.executeCommand(
-      "revealInExplorer",
-      vscode.Uri.file(fsPath)
-    );
+    await this.refresh();
   }
 
   private html(webview: vscode.Webview): string {

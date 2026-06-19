@@ -8,11 +8,17 @@
     add: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 3v10M3 8h10"/></svg>',
     remove:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 8h10"/></svg>',
-    terminal:
-      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 4l4 4-4 4M8 12h5"/></svg>',
-    reveal:
-      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 2H13a1 1 0 0 1 1 1v5.5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5z"/></svg>',
+    agent:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2l1.3 3.7L13 7l-3.7 1.3L8 12 6.7 8.3 3 7l3.7-1.3z"/></svg>',
+    chevron:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 4l4 4-4 4"/></svg>',
   };
+
+  // Collapsed worktree paths, persisted so re-renders keep the toggle state.
+  const collapsed = new Set((vscode.getState() || {}).collapsed || []);
+  function persist() {
+    vscode.setState({ collapsed: Array.from(collapsed) });
+  }
 
   function esc(s) {
     return String(s).replace(
@@ -23,6 +29,92 @@
 
   function send(action, path) {
     vscode.postMessage({ type: "action", action, path });
+  }
+
+  function agentRows(agents) {
+    if (!agents || !agents.length) {
+      return '<div class="agents-empty">No agents yet. Use “Agent” to start one.</div>';
+    }
+    return (
+      '<div class="agents">' +
+      agents
+        .map(
+          (a) =>
+            '<div class="agent-row">' +
+            '<span class="agent-icon">' +
+            icons.agent +
+            "</span>" +
+            '<span class="agent-label">' +
+            esc(a.label) +
+            "</span>" +
+            "</div>"
+        )
+        .join("") +
+      "</div>"
+    );
+  }
+
+  function card(wt) {
+    const isCollapsed = collapsed.has(wt.path);
+    const badges = [];
+    if (wt.isPrimary) badges.push('<span class="badge">primary</span>');
+    if (wt.detached) badges.push('<span class="badge warn">detached</span>');
+    if (wt.locked) badges.push('<span class="badge warn">locked</span>');
+
+    const agents = wt.agents || [];
+    if (agents.length)
+      badges.unshift('<span class="badge count">' + agents.length + "</span>");
+
+    const canRemove = wt.inWorkspace && !wt.isPrimary;
+    const openBtn = wt.inWorkspace
+      ? '<button class="act" data-action="remove" data-path="' +
+        esc(wt.path) +
+        '"' +
+        (canRemove ? "" : " disabled") +
+        ">" +
+        icons.remove +
+        "Remove</button>"
+      : '<button class="act primary" data-action="open" data-path="' +
+        esc(wt.path) +
+        '">' +
+        icons.add +
+        "Open</button>";
+
+    return (
+      '<div class="card' +
+      (wt.inWorkspace ? " open" : "") +
+      (isCollapsed ? " collapsed" : "") +
+      '">' +
+      '<div class="card-top" data-toggle="' +
+      esc(wt.path) +
+      '" role="button" tabindex="0">' +
+      '<span class="chevron">' +
+      icons.chevron +
+      "</span>" +
+      '<span class="dot"></span>' +
+      '<span class="branch">' +
+      esc(wt.name) +
+      "</span>" +
+      '<span class="badges">' +
+      badges.join("") +
+      "</span>" +
+      "</div>" +
+      '<div class="path">' +
+      esc(wt.path) +
+      "</div>" +
+      '<div class="actions">' +
+      openBtn +
+      '<button class="act agent" data-action="agent" data-path="' +
+      esc(wt.path) +
+      '" title="Start a Claude CLI session in this worktree">' +
+      icons.agent +
+      "Agent</button>" +
+      "</div>" +
+      '<div class="card-body">' +
+      agentRows(agents) +
+      "</div>" +
+      "</div>"
+    );
   }
 
   function render(data) {
@@ -40,71 +132,41 @@
       (wts.length === 1 ? " worktree" : " worktrees") +
       "</span></div>";
 
-    const cards = wts
-      .map((wt) => {
-        const badges = [];
-        if (wt.isPrimary) badges.push('<span class="badge">primary</span>');
-        if (wt.detached)
-          badges.push('<span class="badge warn">detached</span>');
-        if (wt.locked) badges.push('<span class="badge warn">locked</span>');
-
-        const canRemove = wt.inWorkspace && !wt.isPrimary;
-        const openBtn = wt.inWorkspace
-          ? '<button class="act" data-action="remove" data-path="' +
-            esc(wt.path) +
-            '"' +
-            (canRemove ? "" : " disabled") +
-            ">" +
-            icons.remove +
-            "Remove</button>"
-          : '<button class="act primary" data-action="open" data-path="' +
-            esc(wt.path) +
-            '">' +
-            icons.add +
-            "Open</button>";
-
-        return (
-          '<div class="card' +
-          (wt.inWorkspace ? " open" : "") +
-          '">' +
-          '<div class="card-top">' +
-          '<span class="dot"></span>' +
-          '<span class="branch">' +
-          esc(wt.name) +
-          "</span>" +
-          '<span class="badges">' +
-          badges.join("") +
-          "</span>" +
-          "</div>" +
-          '<div class="path">' +
-          esc(wt.path) +
-          "</div>" +
-          '<div class="actions">' +
-          openBtn +
-          '<button class="act" data-action="terminal" data-path="' +
-          esc(wt.path) +
-          '">' +
-          icons.terminal +
-          "Terminal</button>" +
-          '<button class="act" data-action="reveal" data-path="' +
-          esc(wt.path) +
-          '">' +
-          icons.reveal +
-          "Reveal</button>" +
-          "</div>" +
-          "</div>"
-        );
-      })
-      .join("");
+    const cards = wts.map(card).join("");
 
     root.innerHTML =
       head + (cards || '<div class="empty">No worktrees found.</div>');
   }
 
+  function toggle(path) {
+    if (collapsed.has(path)) collapsed.delete(path);
+    else collapsed.add(path);
+    persist();
+    const el = root.querySelector('[data-toggle="' + cssEscape(path) + '"]');
+    if (el && el.parentElement) el.parentElement.classList.toggle("collapsed");
+  }
+
+  // Minimal attribute-selector escaping for paths in querySelector.
+  function cssEscape(s) {
+    return String(s).replace(/["\\]/g, "\\$&");
+  }
+
   root.addEventListener("click", (e) => {
     const btn = e.target.closest("button.act");
-    if (!btn) return;
-    send(btn.getAttribute("data-action"), btn.getAttribute("data-path"));
+    if (btn) {
+      send(btn.getAttribute("data-action"), btn.getAttribute("data-path"));
+      return;
+    }
+    const header = e.target.closest(".card-top");
+    if (header) toggle(header.getAttribute("data-toggle"));
+  });
+
+  root.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const header = e.target.closest(".card-top");
+    if (!header) return;
+    e.preventDefault();
+    toggle(header.getAttribute("data-toggle"));
   });
 
   window.addEventListener("message", (e) => {

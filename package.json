@@ -21,7 +21,7 @@
       "activitybar": [
         {
           "id": "worktreeView",
-          "title": "Worktrees",
+          "title": "Agent Worktrees",
           "icon": "media/worktree.svg"
         }
       ]
@@ -30,7 +30,7 @@
       "worktreeView": [
         {
           "id": "worktreeView.panel",
-          "name": "Worktrees",
+          "name": "Agent Worktrees",
           "type": "webview",
           "icon": "media/worktree.svg"
         }
