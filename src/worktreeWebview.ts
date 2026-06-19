@@ -111,7 +111,8 @@ export class WorktreeWebviewProvider implements vscode.WebviewViewProvider {
     const id = this.nextAgentId++;
     const ordinal = list.length + 1;
     const label = `Claude ${ordinal}`;
-    list.push({ id, label });
+    // A freshly created agent starts idle until it begins working.
+    list.push({ id, label, status: "idle" });
     this.agents.set(key, list);
 
     const terminal = vscode.window.createTerminal({

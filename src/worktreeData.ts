@@ -2,10 +2,19 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { findRepoRoot, listWorktrees } from "./git";
 
+/**
+ * Lifecycle status of an agent session.
+ * - active:  doing work
+ * - waiting: needs user interaction (permission or a question)
+ * - idle:    completed its task, or freshly created
+ */
+export type AgentStatus = "active" | "waiting" | "idle";
+
 /** A single agent session created within a worktree. */
 export interface AgentVM {
   id: number;
   label: string;
+  status: AgentStatus;
 }
 
 /** View-model for a single worktree row sent to the webview. */

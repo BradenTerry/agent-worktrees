@@ -8,8 +8,6 @@
     add: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 3v10M3 8h10"/></svg>',
     remove:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 8h10"/></svg>',
-    agent:
-      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2l1.3 3.7L13 7l-3.7 1.3L8 12 6.7 8.3 3 7l3.7-1.3z"/></svg>',
     chevron:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 4l4 4-4 4"/></svg>',
   };
@@ -41,15 +39,62 @@
         .map(
           (a) =>
             '<div class="agent-row">' +
-            '<span class="agent-icon">' +
-            icons.agent +
-            "</span>" +
+            '<span class="status-dot ' +
+            statusOf(a) +
+            '"></span>' +
             '<span class="agent-label">' +
             esc(a.label) +
+            "</span>" +
+            '<span class="agent-status">' +
+            STATUS[statusOf(a)].label +
             "</span>" +
             "</div>"
         )
         .join("") +
+      "</div>"
+    );
+  }
+
+  // Status metadata. Colors come from VS Code chart variables in panel.css.
+  const STATUS = {
+    active: { label: "Active" },
+    waiting: { label: "Waiting" },
+    idle: { label: "Idle" },
+  };
+
+  function statusOf(a) {
+    return STATUS[a && a.status] ? a.status : "idle";
+  }
+
+  /**
+   * Aggregate stat strip: total + a colored marker and count per status.
+   * Zero-count statuses are dimmed so the row reads at a glance.
+   */
+  function statusStrip(agents) {
+    const counts = { active: 0, waiting: 0, idle: 0 };
+    for (const a of agents) counts[statusOf(a)]++;
+
+    const stat = (key) =>
+      '<span class="stat ' +
+      key +
+      (counts[key] ? "" : " zero") +
+      '" title="' +
+      STATUS[key].label +
+      '"><span class="status-dot ' +
+      key +
+      '"></span>' +
+      counts[key] +
+      "</span>";
+
+    return (
+      '<div class="status-strip">' +
+      '<span class="stat total" title="Total agents">' +
+      agents.length +
+      "<span class='stat-label'>agents</span></span>" +
+      '<span class="stat-sep"></span>' +
+      stat("active") +
+      stat("waiting") +
+      stat("idle") +
       "</div>"
     );
   }
@@ -62,8 +107,6 @@
     if (wt.locked) badges.push('<span class="badge warn">locked</span>');
 
     const agents = wt.agents || [];
-    if (agents.length)
-      badges.unshift('<span class="badge count">' + agents.length + "</span>");
 
     const canRemove = wt.inWorkspace && !wt.isPrimary;
     const openBtn = wt.inWorkspace
@@ -99,15 +142,13 @@
       badges.join("") +
       "</span>" +
       "</div>" +
-      '<div class="path">' +
-      esc(wt.path) +
-      "</div>" +
+      statusStrip(agents) +
       '<div class="actions">' +
       openBtn +
       '<button class="act agent" data-action="agent" data-path="' +
       esc(wt.path) +
       '" title="Start a Claude CLI session in this worktree">' +
-      icons.agent +
+      icons.add +
       "Agent</button>" +
       "</div>" +
       '<div class="card-body">' +
