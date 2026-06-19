@@ -40,15 +40,27 @@
       {
         "command": "worktreeView.refresh",
         "title": "Refresh Worktrees",
+        "category": "Worktrees",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "worktreeView.newWorktree",
+        "title": "New Worktree",
+        "category": "Worktrees",
+        "icon": "$(add)"
       }
     ],
     "menus": {
       "view/title": [
         {
+          "command": "worktreeView.newWorktree",
+          "when": "view == worktreeView.panel",
+          "group": "navigation@1"
+        },
+        {
           "command": "worktreeView.refresh",
           "when": "view == worktreeView.panel",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ]
     }

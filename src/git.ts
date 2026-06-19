@@ -33,6 +33,98 @@ export async function findRepoRoot(cwd: string): Promise<string | undefined> {
   }
 }
 
+/** Working-tree state of a single worktree, relative to its upstream. */
+export interface GitStatus {
+  /** Number of changed/untracked entries (0 means clean). */
+  dirty: number;
+  /** Commits ahead of the upstream branch. */
+  ahead: number;
+  /** Commits behind the upstream branch. */
+  behind: number;
+}
+
+/**
+ * Summarize the working-tree state of a worktree using
+ * `git status --porcelain=v2 --branch`: a count of changed entries plus the
+ * ahead/behind distance from the upstream branch.
+ */
+export async function getStatus(cwd: string): Promise<GitStatus> {
+  let dirty = 0;
+  let ahead = 0;
+  let behind = 0;
+  try {
+    const { stdout } = await execAsync("git status --porcelain=v2 --branch", {
+      cwd,
+    });
+    for (const raw of stdout.split("\n")) {
+      const line = raw.trimEnd();
+      if (line === "") continue;
+      if (line.startsWith("# branch.ab ")) {
+        // e.g. "# branch.ab +2 -1"
+        const m = line.match(/\+(\d+)\s+-(\d+)/);
+        if (m) {
+          ahead = Number(m[1]);
+          behind = Number(m[2]);
+        }
+      } else if (!line.startsWith("#")) {
+        // 1/2/u = tracked changes, ? = untracked, ! = ignored (excluded below).
+        if (line[0] !== "!") dirty++;
+      }
+    }
+  } catch {
+    /* leave zeros on error */
+  }
+  return { dirty, ahead, behind };
+}
+
+/**
+ * Create a new worktree at `dir`. When `branch` does not already exist it is
+ * created from `base` (default HEAD); otherwise the existing branch is checked
+ * out. Returns nothing on success and throws with git's stderr on failure.
+ */
+export async function addWorktree(
+  repoRoot: string,
+  dir: string,
+  branch: string,
+  base = "HEAD"
+): Promise<void> {
+  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
+  try {
+    await execAsync(
+      `git worktree add -b ${q(branch)} ${q(dir)} ${q(base)}`,
+      { cwd: repoRoot }
+    );
+  } catch (err) {
+    // Branch may already exist; fall back to checking it out into the worktree.
+    const msg = String((err as { stderr?: string }).stderr ?? err);
+    if (/already exists/i.test(msg)) {
+      await execAsync(`git worktree add ${q(dir)} ${q(branch)}`, {
+        cwd: repoRoot,
+      });
+    } else {
+      throw new Error(msg.trim());
+    }
+  }
+}
+
+/** Remove a worktree. Passes `--force` only when explicitly requested. */
+export async function removeWorktree(
+  repoRoot: string,
+  dir: string,
+  force = false
+): Promise<void> {
+  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
+  try {
+    await execAsync(
+      `git worktree remove ${force ? "--force " : ""}${q(dir)}`,
+      { cwd: repoRoot }
+    );
+  } catch (err) {
+    const msg = String((err as { stderr?: string }).stderr ?? err);
+    throw new Error(msg.trim());
+  }
+}
+
 /**
  * List the worktrees of the repository containing `cwd`, parsed from
  * `git worktree list --porcelain`. The first entry is the primary worktree.

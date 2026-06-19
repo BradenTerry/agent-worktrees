@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { findRepoRoot, listWorktrees } from "./git";
+import { findRepoRoot, listWorktrees, getStatus, GitStatus } from "./git";
 
 /**
- * Lifecycle status of an agent session.
- * - active:  doing work
- * - waiting: needs user interaction (permission or a question)
+ * Lifecycle status of an agent session, derived from Claude Code hooks.
+ * - active:  doing work (a prompt is being processed or a tool is running)
+ * - waiting: needs user interaction (a permission prompt or a question)
  * - idle:    completed its task, or freshly created
  */
 export type AgentStatus = "active" | "waiting" | "idle";
@@ -15,6 +15,10 @@ export interface AgentVM {
   id: number;
   label: string;
   status: AgentStatus;
+  /** Epoch ms when the session was created. */
+  startedAt: number;
+  /** Epoch ms of the most recent hook event. */
+  lastActivity: number;
 }
 
 /** View-model for a single worktree row sent to the webview. */
@@ -26,6 +30,7 @@ export interface WorktreeVM {
   detached: boolean;
   locked: boolean;
   inWorkspace: boolean;
+  git?: GitStatus;
   agents: AgentVM[];
 }
 
@@ -51,6 +56,13 @@ export function folderIndex(fsPath: string): number {
   return folders.findIndex((f) => normalize(f.uri.fsPath) === target);
 }
 
+/** Highest-priority agent status on a worktree, for attention sorting. */
+function attentionRank(wt: WorktreeVM): number {
+  if (wt.agents.some((a) => a.status === "waiting")) return 0;
+  if (wt.agents.some((a) => a.status === "active")) return 1;
+  return 2;
+}
+
 /** Gather worktrees of the repo containing the first workspace folder. */
 export async function gatherWorktrees(
   agentsByPath?: Map<string, AgentVM[]>
@@ -74,18 +86,27 @@ export async function gatherWorktrees(
     )
   );
 
-  return {
-    repoRoot,
-    repoName: path.basename(repoRoot),
-    worktrees: worktrees.map((wt) => ({
-      path: wt.path,
-      name: wt.branch ?? path.basename(wt.path),
-      branch: wt.branch,
-      isPrimary: wt.isPrimary,
-      detached: wt.detached,
-      locked: wt.locked,
-      inWorkspace: openPaths.has(normalize(wt.path)),
-      agents: agentsByPath?.get(normalize(wt.path)) ?? [],
-    })),
-  };
+  // Fetch git status for every worktree concurrently.
+  const statuses = await Promise.all(worktrees.map((wt) => getStatus(wt.path)));
+
+  const vms: WorktreeVM[] = worktrees.map((wt, i) => ({
+    path: wt.path,
+    name: wt.branch ?? path.basename(wt.path),
+    branch: wt.branch,
+    isPrimary: wt.isPrimary,
+    detached: wt.detached,
+    locked: wt.locked,
+    inWorkspace: openPaths.has(normalize(wt.path)),
+    git: statuses[i],
+    agents: agentsByPath?.get(normalize(wt.path)) ?? [],
+  }));
+
+  // Primary stays pinned to the top; the rest float by attention so worktrees
+  // with a waiting/active agent surface first.
+  vms.sort((a, b) => {
+    if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+    return attentionRank(a) - attentionRank(b);
+  });
+
+  return { repoRoot, repoName: path.basename(repoRoot), worktrees: vms };
 }
