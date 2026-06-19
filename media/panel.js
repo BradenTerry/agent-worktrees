@@ -10,6 +10,17 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 8h10"/></svg>',
     chevron:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 4l4 4-4 4"/></svg>',
+    sparkle:
+      '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l1.3 3.7L13 6l-3.7 1.3L8 11 6.7 7.3 3 6l3.7-1.3z"/></svg>',
+    focus:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 3h4v4M13 3l-5 5M7 13H3V9M3 13l5-5"/></svg>',
+    stop: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+    trash:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 4h10M6 4V3h4v1M5 4l.5 9h5L11 4"/></svg>',
+    refresh:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/></svg>',
+    collapse:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>',
   };
 
   // Collapsed worktree paths, persisted so re-renders keep the toggle state.
@@ -18,6 +29,9 @@
     vscode.setState({ collapsed: Array.from(collapsed) });
   }
 
+  // Last data we rendered, so the relative-time tick can re-render in place.
+  let lastData = null;
+
   function esc(s) {
     return String(s).replace(
       /[&<>"]/g,
@@ -25,34 +39,19 @@
     );
   }
 
-  function send(action, path) {
-    vscode.postMessage({ type: "action", action, path });
+  function send(action, extra) {
+    vscode.postMessage(Object.assign({ type: "action", action }, extra || {}));
   }
 
-  function agentRows(agents) {
-    if (!agents || !agents.length) {
-      return '<div class="agents-empty">No agents yet. Use “Agent” to start one.</div>';
-    }
-    return (
-      '<div class="agents">' +
-      agents
-        .map(
-          (a) =>
-            '<div class="agent-row">' +
-            '<span class="status-dot ' +
-            statusOf(a) +
-            '"></span>' +
-            '<span class="agent-label">' +
-            esc(a.label) +
-            "</span>" +
-            '<span class="agent-status">' +
-            STATUS[statusOf(a)].label +
-            "</span>" +
-            "</div>"
-        )
-        .join("") +
-      "</div>"
-    );
+  /** Compact relative time, e.g. "just now", "3m", "2h". */
+  function rel(ts) {
+    if (!ts) return "";
+    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 10) return "just now";
+    if (s < 60) return s + "s";
+    const m = Math.round(s / 60);
+    if (m < 60) return m + "m";
+    return Math.round(m / 60) + "h";
   }
 
   // Status metadata. Colors come from VS Code chart variables in panel.css.
@@ -64,6 +63,59 @@
 
   function statusOf(a) {
     return STATUS[a && a.status] ? a.status : "idle";
+  }
+
+  /** Per-agent secondary text, derived from status and timestamps. */
+  function agentMeta(a) {
+    const s = statusOf(a);
+    if (s === "active") return "running · " + rel(a.startedAt);
+    if (s === "waiting") return "needs input";
+    if (a.lastActivity && a.lastActivity - a.startedAt > 1500) {
+      return "done · " + rel(a.lastActivity);
+    }
+    return "idle";
+  }
+
+  function agentRows(agents) {
+    if (!agents || !agents.length) {
+      return '<div class="agents-empty">No agents yet. Use “New Agent” to start one.</div>';
+    }
+    return (
+      '<div class="agents">' +
+      agents
+        .map((a) => {
+          const s = statusOf(a);
+          return (
+            '<div class="agent-row' +
+            (s === "waiting" ? " attention" : "") +
+            '">' +
+            '<span class="status-dot ' +
+            s +
+            '"></span>' +
+            '<span class="agent-label">' +
+            esc(a.label) +
+            "</span>" +
+            '<span class="agent-meta">' +
+            esc(agentMeta(a)) +
+            "</span>" +
+            '<span class="row-actions">' +
+            '<button class="iconbtn" data-action="focusAgent" data-agent="' +
+            a.id +
+            '" title="Reveal terminal">' +
+            icons.focus +
+            "</button>" +
+            '<button class="iconbtn" data-action="stopAgent" data-agent="' +
+            a.id +
+            '" title="Stop agent">' +
+            icons.stop +
+            "</button>" +
+            "</span>" +
+            "</div>"
+          );
+        })
+        .join("") +
+      "</div>"
+    );
   }
 
   /**
@@ -90,13 +142,32 @@
       '<div class="status-strip">' +
       '<span class="stat total" title="Total agents">' +
       agents.length +
-      "<span class='stat-label'>agents</span></span>" +
+      "<span class='stat-label'>" +
+      (agents.length === 1 ? "agent" : "agents") +
+      "</span></span>" +
       '<span class="stat-sep"></span>' +
       stat("active") +
       stat("waiting") +
       stat("idle") +
       "</div>"
     );
+  }
+
+  /** Git working-tree summary line: dirty/clean and ahead/behind. */
+  function gitLine(g) {
+    if (!g) return "";
+    const segs = [];
+    segs.push(
+      g.dirty
+        ? '<span class="seg dirty"><span class="gdot"></span>' +
+            g.dirty +
+            (g.dirty === 1 ? " change" : " changes") +
+            "</span>"
+        : '<span class="seg clean">✓ clean</span>'
+    );
+    if (g.ahead) segs.push('<span class="seg">↑' + g.ahead + "</span>");
+    if (g.behind) segs.push('<span class="seg">↓' + g.behind + "</span>");
+    return '<div class="gitline">' + segs.join("") + "</div>";
   }
 
   function card(wt) {
@@ -108,20 +179,37 @@
 
     const agents = wt.agents || [];
 
-    const canRemove = wt.inWorkspace && !wt.isPrimary;
-    const openBtn = wt.inWorkspace
-      ? '<button class="act" data-action="remove" data-path="' +
+    // Mount / unmount control. Primary folder 0 cannot be unmounted.
+    let mountBtn = "";
+    if (!wt.isPrimary) {
+      mountBtn = wt.inWorkspace
+        ? '<button class="act" data-action="unmount" data-path="' +
+          esc(wt.path) +
+          '" title="Remove from workspace">' +
+          icons.remove +
+          "Unmount</button>"
+        : '<button class="act primary" data-action="open" data-path="' +
+          esc(wt.path) +
+          '" title="Add to workspace (no reload)">' +
+          icons.add +
+          "Open</button>";
+    }
+
+    const agentBtn =
+      '<button class="act agent" data-action="agent" data-path="' +
+      esc(wt.path) +
+      '" title="Start a Claude session in this worktree">' +
+      icons.sparkle +
+      "New Agent</button>";
+
+    // Delete (git worktree remove) — never for the primary worktree.
+    const deleteBtn = wt.isPrimary
+      ? ""
+      : '<button class="act ghost danger" data-action="removeWorktree" data-path="' +
         esc(wt.path) +
-        '"' +
-        (canRemove ? "" : " disabled") +
-        ">" +
-        icons.remove +
-        "Remove</button>"
-      : '<button class="act primary" data-action="open" data-path="' +
-        esc(wt.path) +
-        '">' +
-        icons.add +
-        "Open</button>";
+        '" title="Delete this worktree from disk">' +
+        icons.trash +
+        "</button>";
 
     return (
       '<div class="card' +
@@ -142,14 +230,13 @@
       badges.join("") +
       "</span>" +
       "</div>" +
+      gitLine(wt.git) +
       statusStrip(agents) +
       '<div class="actions">' +
-      openBtn +
-      '<button class="act agent" data-action="agent" data-path="' +
-      esc(wt.path) +
-      '" title="Start a Claude CLI session in this worktree">' +
-      icons.add +
-      "Agent</button>" +
+      mountBtn +
+      agentBtn +
+      '<span class="actions-spacer"></span>' +
+      deleteBtn +
       "</div>" +
       '<div class="card-body">' +
       agentRows(agents) +
@@ -158,25 +245,39 @@
     );
   }
 
+  function toolbar(data) {
+    return (
+      '<div class="repo-head">' +
+      "<span>" +
+      esc(data.repoName || "Repository") +
+      "</span>" +
+      '<span class="tools">' +
+      '<button class="tbtn" data-action="newWorktree" title="Create a new worktree">' +
+      icons.add +
+      "New Worktree</button>" +
+      '<button class="tbtn ghost" data-tool="collapseAll" title="Collapse all">' +
+      icons.collapse +
+      "</button>" +
+      '<button class="tbtn ghost" data-action="refresh" title="Refresh">' +
+      icons.refresh +
+      "</button>" +
+      "</span>" +
+      "</div>"
+    );
+  }
+
   function render(data) {
+    lastData = data;
     if (!data || !data.repoRoot) {
       root.innerHTML =
         '<div class="empty">No git repository in this window.<br/>Open a folder that is a git repository to see its worktrees.</div>';
       return;
     }
     const wts = data.worktrees || [];
-    const head =
-      '<div class="repo-head"><span>' +
-      esc(data.repoName || "Repository") +
-      '</span><span class="count">' +
-      wts.length +
-      (wts.length === 1 ? " worktree" : " worktrees") +
-      "</span></div>";
-
     const cards = wts.map(card).join("");
-
     root.innerHTML =
-      head + (cards || '<div class="empty">No worktrees found.</div>');
+      toolbar(data) +
+      (cards || '<div class="empty">No worktrees found.</div>');
   }
 
   function toggle(path) {
@@ -187,15 +288,34 @@
     if (el && el.parentElement) el.parentElement.classList.toggle("collapsed");
   }
 
+  function collapseAll() {
+    const wts = (lastData && lastData.worktrees) || [];
+    const allCollapsed = wts.every((w) => collapsed.has(w.path));
+    if (allCollapsed) collapsed.clear();
+    else for (const w of wts) collapsed.add(w.path);
+    persist();
+    if (lastData) render(lastData);
+  }
+
   // Minimal attribute-selector escaping for paths in querySelector.
   function cssEscape(s) {
     return String(s).replace(/["\\]/g, "\\$&");
   }
 
   root.addEventListener("click", (e) => {
-    const btn = e.target.closest("button.act");
+    const tool = e.target.closest("[data-tool='collapseAll']");
+    if (tool) {
+      collapseAll();
+      return;
+    }
+    const btn = e.target.closest("[data-action]");
     if (btn) {
-      send(btn.getAttribute("data-action"), btn.getAttribute("data-path"));
+      e.stopPropagation();
+      const agent = btn.getAttribute("data-agent");
+      send(btn.getAttribute("data-action"), {
+        path: btn.getAttribute("data-path") || undefined,
+        agentId: agent != null ? Number(agent) : undefined,
+      });
       return;
     }
     const header = e.target.closest(".card-top");
@@ -214,6 +334,11 @@
     const msg = e.data;
     if (msg && msg.type === "update") render(msg.data);
   });
+
+  // Keep relative times fresh without round-tripping to the extension.
+  setInterval(() => {
+    if (lastData) render(lastData);
+  }, 30000);
 
   // Ask for data in case we mounted after the first push.
   send("refresh");
