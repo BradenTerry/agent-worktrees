@@ -1,0 +1,66 @@
+{
+  "name": "worktree-view",
+  "displayName": "Worktree View",
+  "description": "Browse and switch between git worktrees from a side panel, without reloading the window.",
+  "version": "0.0.1",
+  "publisher": "bradenterry",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "worktreeView",
+          "title": "Worktrees",
+          "icon": "media/worktree.svg"
+        }
+      ]
+    },
+    "views": {
+      "worktreeView": [
+        {
+          "id": "worktreeView.panel",
+          "name": "Worktrees",
+          "type": "webview",
+          "icon": "media/worktree.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "worktreeView.refresh",
+        "title": "Refresh Worktrees",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "worktreeView.refresh",
+          "when": "view == worktreeView.panel",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.x",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.4.0"
+  }
+}
