@@ -26,7 +26,6 @@
     edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-7 7-3.5.5.5-3.5z"/></svg>',
     window:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
-    info: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5h.01"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
     gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>',
@@ -113,15 +112,6 @@
               ? a.name + " — " + a.summary
               : a.summary
             : a.label;
-          const infoBtn = a.summary
-            ? '<span class="agent-info" title="' +
-              esc(fullInfo) +
-              '" aria-label="Full summary: ' +
-              esc(fullInfo) +
-              '">' +
-              icons.info +
-              "</span>"
-            : "";
           const skills = a.skills || [];
           const skillChip = skills.length
             ? '<button class="skill-chip" data-action="showSkills" data-session="' +
@@ -144,10 +134,11 @@
             '<span class="status-dot ' +
             s +
             '"></span>' +
-            '<span class="agent-label">' +
+            '<span class="agent-label" title="' +
+            esc(fullInfo) +
+            '">' +
             esc(a.label) +
             "</span>" +
-            infoBtn +
             '<span class="agent-meta">' +
             esc(agentMeta(a)) +
             "</span>" +
