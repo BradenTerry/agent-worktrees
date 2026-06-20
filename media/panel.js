@@ -37,7 +37,8 @@
     dot: '<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="3.2"/></svg>',
     comment:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
-    link: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>',
+    external:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h4v4"/><path d="M13 3L7.5 8.5"/><path d="M11 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h3"/></svg>',
   };
 
   // Worktree paths whose agent list is expanded, persisted so re-renders keep
@@ -262,30 +263,53 @@
         "</span>"
     );
 
-    // CI rollup: a colored glyph plus the failing/pending count when relevant.
+    // CI checks: one colored, counted segment per non-zero state (passing,
+    // failing, running) so the whole rollup is visible at a glance.
     if (pr.checks && pr.checks !== "none") {
-      var ci = "";
-      if (pr.checks === "pass")
-        ci =
-          '<span class="pr-seg pass" title="Checks passing">' +
-          icons.check +
-          "</span>";
-      else if (pr.checks === "fail")
-        ci =
+      const pass = pr.checksPass || 0;
+      const fail = pr.checksFail || 0;
+      const pending = pr.checksPending || 0;
+      const total = pass + fail + pending;
+      const plural = (n) => (n === 1 ? "" : "s");
+      if (pass)
+        segs.push(
+          '<span class="pr-seg pass" title="' +
+            pass +
+            " of " +
+            total +
+            " check" +
+            plural(total) +
+            ' passing">' +
+            icons.check +
+            pass +
+            "</span>"
+        );
+      if (fail)
+        segs.push(
           '<span class="pr-seg fail" title="' +
-          (pr.checksFail || 0) +
-          ' check(s) failing">' +
-          icons.cross +
-          (pr.checksFail ? pr.checksFail : "") +
-          "</span>";
-      else
-        ci =
+            fail +
+            " of " +
+            total +
+            " check" +
+            plural(total) +
+            ' failing">' +
+            icons.cross +
+            fail +
+            "</span>"
+        );
+      if (pending)
+        segs.push(
           '<span class="pr-seg pending" title="' +
-          (pr.checksPending || 0) +
-          ' check(s) running">' +
-          icons.dot +
-          "</span>";
-      segs.push(ci);
+            pending +
+            " of " +
+            total +
+            " check" +
+            plural(total) +
+            ' running">' +
+            icons.dot +
+            pending +
+            "</span>"
+        );
     }
 
     // Review decision.
@@ -328,7 +352,7 @@
       "</span>" +
       segs.join("") +
       '<span class="pr-open">' +
-      icons.link +
+      icons.external +
       "</span>" +
       "</a>"
     );
