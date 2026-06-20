@@ -272,6 +272,17 @@ button.accept {
   margin-left: -2px;
   margin-right: -2px;
 }
+/* Scope is set: this worktree's repo is the one shown in Source Control. */
+.gitline .scm-scope.active {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+.gitline .scm-scope.active:hover {
+  background: var(
+    --vscode-button-hoverBackground,
+    var(--vscode-button-background, #0e639c)
+  );
+}
 .gitline .clean {
   color: var(--vscode-charts-green, #89d185);
 }

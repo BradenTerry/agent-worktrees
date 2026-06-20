@@ -208,14 +208,22 @@
   }
 
   /** Git working-tree summary line: diff totals and ahead/behind. */
-  function gitLine(g, path) {
+  function gitLine(g, path, scmActive) {
     // Scope the Source Control view to this worktree. Opt-in (Settings →
-    // Integrations); sits to the left of the diff totals when enabled.
+    // Integrations); sits to the left of the diff totals when enabled. The
+    // active state marks the worktree whose repo is currently shown in Source
+    // Control (the scope is already set).
     const scopeBtn =
       lastData && lastData.scmEnabled
-        ? '<button class="iconbtn scm-scope" data-action="scopeScm" data-path="' +
+        ? '<button class="iconbtn scm-scope' +
+          (scmActive ? " active" : "") +
+          '" data-action="scopeScm" data-path="' +
           esc(path) +
-          '" title="Show only this worktree in Source Control">' +
+          '" title="' +
+          (scmActive
+            ? "Showing in Source Control. Click to re-scope to this worktree."
+            : "Show only this worktree in Source Control") +
+          '">' +
           icons.branch +
           "</button>"
         : "";
@@ -421,7 +429,7 @@
       "</div>" +
       '<hr class="card-sep" />' +
       '<div class="meta-row">' +
-      gitLine(wt.git, wt.path) +
+      gitLine(wt.git, wt.path, wt.scmActive) +
       '<span class="actions-spacer"></span>' +
       agentBtn +
       "</div>" +

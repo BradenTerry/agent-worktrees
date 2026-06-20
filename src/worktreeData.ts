@@ -57,6 +57,10 @@ export interface WorktreeVM {
   /** GitHub PR status for this worktree's branch (when the integration is on
    *  and a PR exists). null = looked up, no PR; undefined = not looked up. */
   pr?: PrInfo | null;
+  /** True when this worktree's repository is currently open in the Source
+   *  Control view (i.e. the scope is "set"). Only set when the SCM integration
+   *  is enabled. */
+  scmActive?: boolean;
 }
 
 export interface WorktreeData {

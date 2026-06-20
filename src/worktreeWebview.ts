@@ -85,6 +85,9 @@ export class WorktreeWebviewProvider
   private readonly prService: PrService;
   /** Resolved GitHub origin per worktree path (null = no github remote). */
   private readonly remotes = new Map<string, RemoteInfo | null>();
+  /** True once we've subscribed to the Git extension's repo open/close events,
+   *  so the panel re-renders when the Source Control scope changes. */
+  private scmWatchSet = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     initGithub(context);
@@ -195,6 +198,7 @@ export class WorktreeWebviewProvider
     }
     const data = await gatherWorktrees(agents, installed, force);
     data.scmEnabled = this.isScmEnabled();
+    if (data.scmEnabled) await this.annotateScmActive(data);
     if (!installed) {
       data.hooks = HOOKS.map((h) => ({
         label: h.label,
@@ -325,12 +329,38 @@ export class WorktreeWebviewProvider
     }
   }
 
+  /** Subscribe (once) to repo open/close so the panel re-renders when the
+   *  Source Control scope changes underneath us. */
+  private async ensureScmWatch(): Promise<void> {
+    if (this.scmWatchSet) return;
+    const api = await this.gitApi();
+    if (!api) return;
+    this.scmWatchSet = true;
+    const onScm = () => this.scheduleRefresh();
+    this.context.subscriptions.push(
+      api.onDidOpenRepository(onScm),
+      api.onDidCloseRepository(onScm)
+    );
+  }
+
+  /** Mark each worktree whose repository is currently open in Source Control as
+   *  scmActive, so the panel can show whether the scope is already set. */
+  private async annotateScmActive(data: WorktreeData): Promise<void> {
+    await this.ensureScmWatch();
+    const api = await this.gitApi();
+    const open = new Set<string>();
+    if (api) for (const r of api.repositories) open.add(normalize(r.rootUri.fsPath));
+    for (const wt of data.worktrees) {
+      wt.scmActive = open.has(normalize(wt.path));
+    }
+  }
+
   /**
-   * Scope the Source Control view to the selected worktree. Open its repository
-   * if it isn't already shown, then: when more than one repo is currently listed
-   * just reveal Source Control (non-destructive focus); when a single repo is
-   * listed, swap it out (close the previous one) so only this worktree's diffs
-   * remain.
+   * Scope the Source Control view to the selected worktree by opening its
+   * repository if needed, then: when more than one repo is currently listed,
+   * leave the others (non-destructive); when a single repo is listed, swap it
+   * out (close the previous one) so only this worktree's diffs remain. Does not
+   * switch the user to the Source Control view.
    */
   private async scopeScm(fsPath?: string): Promise<void> {
     if (!fsPath || !this.isScmEnabled()) return;
@@ -343,7 +373,7 @@ export class WorktreeWebviewProvider
     }
 
     const target = normalize(fsPath);
-    // Repos shown before we add the selected worktree, to decide swap vs. focus.
+    // Repos shown before we add the selected worktree, to decide swap vs. keep.
     const wasMultiple = api.repositories.length > 1;
 
     const uri = vscode.Uri.file(fsPath);
@@ -363,7 +393,8 @@ export class WorktreeWebviewProvider
       }
     }
 
-    await vscode.commands.executeCommand("workbench.view.scm");
+    // Reflect the new scope on the buttons without switching to the SCM view.
+    await this.refresh();
   }
 
   // --- GitHub settings -------------------------------------------------------
@@ -837,6 +868,8 @@ interface GitApi {
   readonly repositories: GitApiRepository[];
   getRepository(uri: vscode.Uri): GitApiRepository | null;
   openRepository(uri: vscode.Uri): Promise<GitApiRepository | null>;
+  readonly onDidOpenRepository: vscode.Event<GitApiRepository>;
+  readonly onDidCloseRepository: vscode.Event<GitApiRepository>;
 }
 interface GitExtensionExports {
   getAPI(version: 1): GitApi;
