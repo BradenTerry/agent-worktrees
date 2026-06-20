@@ -62,6 +62,17 @@ function safeId(s) {
   return typeof s === "string" && /^[A-Za-z0-9._-]+$/.test(s) ? s : null;
 }
 
+/** Reduce a Skill tool's `skill` input to its bare name: `plugin:foo` and
+ *  `path/to/foo` both normalize to `foo`, so the panel dedupes either form. */
+function normalizeSkill(raw) {
+  if (typeof raw !== "string") return null;
+  const n = raw
+    .split(/[/:\\]/)
+    .filter(Boolean)
+    .pop();
+  return n && /^[a-z0-9][a-z0-9._-]*$/i.test(n) ? n : null;
+}
+
 function main() {
   let payload = {};
   const raw = readStdin();
@@ -107,6 +118,17 @@ function main() {
   const now = Date.now();
   let name = typeof prior.name === "string" ? prior.name : undefined;
 
+  // Accumulate the skills this session has invoked. PreToolUse fires the moment
+  // a Skill tool starts, so this captures skills the agent has "started to use".
+  // Carried forward across events; deduped by bare name.
+  const skills = Array.isArray(prior.skills)
+    ? prior.skills.filter((s) => typeof s === "string")
+    : [];
+  if (event === "PreToolUse" && payload.tool_name === "Skill") {
+    const skill = normalizeSkill(payload.tool_input && payload.tool_input.skill);
+    if (skill && !skills.includes(skill)) skills.push(skill);
+  }
+
   // Pseudo-command: `/rename-agent <name>` typed in the session (optional
   // leading whitespace, nothing else before the slash). `/rename` is a Claude
   // built-in handled client-side that never reaches a hook, so we use our own
@@ -129,6 +151,7 @@ function main() {
           ts: now,
           ...(prior.task ? { task: prior.task } : {}),
           ...(name ? { name } : {}),
+          ...(skills.length ? { skills } : {}),
         }) + "\n"
       );
       process.stderr.write(`Agent Worktrees: renamed agent to "${name}"\n`);
@@ -160,6 +183,7 @@ function main() {
     ts: now,
     ...(task ? { task } : {}),
     ...(name ? { name } : {}),
+    ...(skills.length ? { skills } : {}),
   };
 
   writeFileSync(target, JSON.stringify(ev) + "\n");

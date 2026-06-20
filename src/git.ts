@@ -37,6 +37,10 @@ export async function findRepoRoot(cwd: string): Promise<string | undefined> {
 export interface GitStatus {
   /** Number of changed/untracked entries (0 means clean). */
   dirty: number;
+  /** Lines added across tracked changes vs HEAD. */
+  insertions: number;
+  /** Lines removed across tracked changes vs HEAD. */
+  deletions: number;
   /** Commits ahead of the upstream branch. */
   ahead: number;
   /** Commits behind the upstream branch. */
@@ -74,7 +78,33 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
   } catch {
     /* leave zeros on error */
   }
-  return { dirty, ahead, behind };
+  const { insertions, deletions } = await getDiffStat(cwd);
+  return { dirty, insertions, deletions, ahead, behind };
+}
+
+/**
+ * Total lines added/removed across tracked changes (staged and unstaged) vs
+ * HEAD, via `git diff --numstat HEAD`. Binary files (reported as "-\t-") and
+ * untracked files are not counted.
+ */
+async function getDiffStat(
+  cwd: string
+): Promise<{ insertions: number; deletions: number }> {
+  let insertions = 0;
+  let deletions = 0;
+  try {
+    const { stdout } = await execAsync("git diff --numstat HEAD", { cwd });
+    for (const line of stdout.split("\n")) {
+      const m = line.match(/^(\d+)\t(\d+)\t/);
+      if (m) {
+        insertions += Number(m[1]);
+        deletions += Number(m[2]);
+      }
+    }
+  } catch {
+    /* no HEAD yet, or not a repo: leave zeros */
+  }
+  return { insertions, deletions };
 }
 
 /**

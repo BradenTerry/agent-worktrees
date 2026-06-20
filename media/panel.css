@@ -6,15 +6,34 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+}
 body {
   margin: 0;
   padding: 8px;
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
   color: var(--vscode-foreground);
+  overflow: hidden;
+}
+
+/* Sticky toolbar above a single scroll region for the worktree cards. */
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.cards {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .repo-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -167,18 +186,6 @@ button.accept {
 .card.collapsed .card-body {
   display: none;
 }
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-  background: transparent;
-  border: 1px solid var(--vscode-descriptionForeground);
-}
-.card.open .dot {
-  background: var(--vscode-charts-green, #4caf50);
-  border-color: var(--vscode-charts-green, #4caf50);
-}
 .branch {
   font-weight: 600;
   flex: 0 1 auto;
@@ -207,20 +214,39 @@ button.accept {
   background: var(--vscode-inputValidation-warningBackground, #6b5300);
   color: var(--vscode-foreground);
 }
+.badge.primary {
+  background: var(--vscode-charts-blue, #3794ff);
+  color: #fff;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+.card-sep {
+  border: none;
+  border-top: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  margin: 8px 0 0;
+}
 /* Git diff info and the New Agent button share one row. */
 .meta-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
 }
 .meta-row .gitline {
   margin-top: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.meta-row .act.agent {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 /* Git working-tree summary line. */
 .gitline {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 6px;
   font-size: 11px;
@@ -236,6 +262,14 @@ button.accept {
 }
 .gitline .dirty {
   color: var(--vscode-charts-yellow, #cca700);
+}
+.gitline .ins {
+  color: var(--vscode-charts-green, #89d185);
+  font-variant-numeric: tabular-nums;
+}
+.gitline .del {
+  color: var(--vscode-charts-red, #f14c4c);
+  font-variant-numeric: tabular-nums;
 }
 .gitline .gdot {
   width: 6px;
@@ -467,4 +501,95 @@ button:disabled {
 button svg {
   width: 13px;
   height: 13px;
+}
+
+/* Per-agent skill counter; opens the skills modal on click. */
+.skill-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px 1px 5px;
+  font-size: 10px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+}
+.skill-chip:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+}
+.skill-chip svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Skills modal. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.modal {
+  width: 100%;
+  max-width: 320px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 10px 12px;
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+}
+.modal-title {
+  flex: 1;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.skill-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+.skill-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+.skill-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+.skill-bullet {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+}
+.skill-bullet svg {
+  width: 13px;
+  height: 13px;
+}
+.skill-empty {
+  padding: 10px 8px;
+  font-size: 12px;
+  opacity: 0.7;
 }

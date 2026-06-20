@@ -12,6 +12,8 @@ interface SessionState {
   task?: string;
   /** User-given name (pencil button or /rename). */
   name?: string;
+  /** Bare names of skills this session has invoked (deduped, in first-use order). */
+  skills?: string[];
   /** Epoch ms when the session was first seen. */
   startedAt?: number;
   /** Epoch ms of the most recent hook event. */
@@ -69,6 +71,9 @@ export async function readSessionsByWorktree(
       sessions.map((s, i) => {
         const summary = s.task && s.task.trim() ? s.task.trim() : undefined;
         const name = s.name && s.name.trim() ? s.name.trim() : undefined;
+        const skills = Array.isArray(s.skills)
+          ? s.skills.filter((x) => typeof x === "string")
+          : [];
         return {
           sessionId: s.sessionId,
           // User-given name wins, then the work summary, then an ordinal before
@@ -76,6 +81,7 @@ export async function readSessionsByWorktree(
           label: name || summary || `Claude ${i + 1}`,
           name,
           summary,
+          skills,
           status: s.state,
           startedAt: s.startedAt ?? s.ts,
           lastActivity: s.ts,

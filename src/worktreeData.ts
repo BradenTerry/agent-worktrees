@@ -21,6 +21,8 @@ export interface AgentVM {
   name?: string;
   /** The raw work summary (last prompt), when known. */
   summary?: string;
+  /** Bare names of skills this session has invoked (deduped, in first-use order). */
+  skills?: string[];
   status: AgentStatus;
   /** Epoch ms when the session was first seen. */
   startedAt: number;

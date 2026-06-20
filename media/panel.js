@@ -22,6 +22,8 @@
     collapse:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>',
     edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-7 7-3.5.5.5-3.5z"/></svg>',
+    skill:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
   };
 
   // Worktree paths whose agent list is expanded, persisted so re-renders keep
@@ -88,6 +90,19 @@
       agents
         .map((a) => {
           const s = statusOf(a);
+          const skills = a.skills || [];
+          const skillChip = skills.length
+            ? '<button class="skill-chip" data-action="showSkills" data-session="' +
+              esc(a.sessionId) +
+              '" title="' +
+              skills.length +
+              " skill" +
+              (skills.length === 1 ? "" : "s") +
+              ' used, click to view">' +
+              icons.skill +
+              skills.length +
+              "</button>"
+            : "";
           return (
             '<div class="agent-row' +
             (s === "waiting" ? " attention" : "") +
@@ -103,6 +118,7 @@
             '<span class="agent-meta">' +
             esc(agentMeta(a)) +
             "</span>" +
+            skillChip +
             '<span class="row-actions">' +
             '<button class="iconbtn" data-action="rename" data-session="' +
             esc(a.sessionId) +
@@ -176,6 +192,10 @@
             "</span>"
         : '<span class="seg clean">✓ clean</span>'
     );
+    if (g.insertions)
+      segs.push('<span class="seg ins">+' + g.insertions + "</span>");
+    if (g.deletions)
+      segs.push('<span class="seg del">−' + g.deletions + "</span>");
     if (g.ahead) segs.push('<span class="seg">↑' + g.ahead + "</span>");
     if (g.behind) segs.push('<span class="seg">↓' + g.behind + "</span>");
     return '<div class="gitline">' + segs.join("") + "</div>";
@@ -184,6 +204,7 @@
   function card(wt) {
     const isCollapsed = !expanded.has(wt.path);
     const badges = [];
+    if (wt.isPrimary) badges.push('<span class="badge primary">Primary</span>');
     if (wt.detached) badges.push('<span class="badge warn">detached</span>');
     if (wt.locked) badges.push('<span class="badge warn">locked</span>');
 
@@ -194,7 +215,7 @@
       esc(wt.path) +
       '" title="Start a Claude session in this worktree">' +
       icons.sparkle +
-      "New Agent</button>";
+      "Agent</button>";
 
     // Delete (git worktree remove) — never for the primary worktree.
     const deleteBtn = wt.isPrimary
@@ -211,7 +232,6 @@
       (isCollapsed ? " collapsed" : "") +
       '">' +
       '<div class="card-top">' +
-      '<span class="dot"></span>' +
       '<span class="branch">' +
       esc(wt.name) +
       "</span>" +
@@ -220,6 +240,7 @@
       "</span>" +
       deleteBtn +
       "</div>" +
+      '<hr class="card-sep" />' +
       '<div class="meta-row">' +
       gitLine(wt.git) +
       '<span class="actions-spacer"></span>' +
@@ -298,7 +319,9 @@
     const cards = wts.map(card).join("");
     root.innerHTML =
       toolbar(data) +
-      (cards || '<div class="empty">No worktrees found.</div>');
+      '<div class="cards">' +
+      (cards || '<div class="empty">No worktrees found.</div>') +
+      "</div>";
   }
 
   function toggle(path) {
@@ -323,6 +346,68 @@
     return String(s).replace(/["\\]/g, "\\$&");
   }
 
+  // --- Skills modal ----------------------------------------------------------
+  // Lives on document.body, not inside #root, so a data re-render never wipes it.
+  let modalEl = null;
+
+  function findAgent(sessionId) {
+    const wts = (lastData && lastData.worktrees) || [];
+    for (const w of wts) {
+      for (const a of w.agents || []) {
+        if (a.sessionId === sessionId) return a;
+      }
+    }
+    return null;
+  }
+
+  function closeModal() {
+    if (modalEl) {
+      modalEl.remove();
+      modalEl = null;
+    }
+  }
+
+  function openSkills(sessionId) {
+    const a = findAgent(sessionId);
+    if (!a) return;
+    const skills = a.skills || [];
+    const items = skills.length
+      ? skills
+          .map(
+            (s) =>
+              '<li class="skill-item"><span class="skill-bullet">' +
+              icons.skill +
+              "</span>" +
+              esc(s) +
+              "</li>"
+          )
+          .join("")
+      : '<li class="skill-empty">No skills used yet.</li>';
+    closeModal();
+    modalEl = document.createElement("div");
+    modalEl.className = "modal-backdrop";
+    modalEl.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true">' +
+      '<div class="modal-head">' +
+      '<span class="modal-title">Skills · ' +
+      esc(a.label) +
+      "</span>" +
+      '<button class="iconbtn modal-close" title="Close">' +
+      icons.stop +
+      "</button>" +
+      "</div>" +
+      '<ul class="skill-list">' +
+      items +
+      "</ul>" +
+      "</div>";
+    modalEl.addEventListener("click", (ev) => {
+      if (ev.target === modalEl || ev.target.closest(".modal-close")) {
+        closeModal();
+      }
+    });
+    document.body.appendChild(modalEl);
+  }
+
   root.addEventListener("click", (e) => {
     const tool = e.target.closest("[data-tool='collapseAll']");
     if (tool) {
@@ -332,7 +417,14 @@
     const btn = e.target.closest("[data-action]");
     if (btn) {
       e.stopPropagation();
-      send(btn.getAttribute("data-action"), {
+      const action = btn.getAttribute("data-action");
+      // Skills modal is handled entirely in the webview: the list is already
+      // in the data, so there is no round-trip to the extension.
+      if (action === "showSkills") {
+        openSkills(btn.getAttribute("data-session"));
+        return;
+      }
+      send(action, {
         path: btn.getAttribute("data-path") || undefined,
         sessionId: btn.getAttribute("data-session") || undefined,
       });
@@ -340,6 +432,13 @@
     }
     const bar = e.target.closest(".agents-bar");
     if (bar) toggle(bar.getAttribute("data-toggle"));
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modalEl) {
+      closeModal();
+      return;
+    }
   });
 
   root.addEventListener("keydown", (e) => {
