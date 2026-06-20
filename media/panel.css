@@ -614,3 +614,254 @@ button svg {
   font-size: 12px;
   opacity: 0.7;
 }
+
+/* --- PR status line on a worktree card ----------------------------------- */
+.prline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  text-decoration: none;
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
+}
+.prline:hover {
+  color: var(--vscode-foreground);
+  border-color: var(--vscode-focusBorder);
+}
+.prline .pr-ico {
+  display: inline-flex;
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+.prline .pr-ico svg {
+  width: 13px;
+  height: 13px;
+}
+.pr-state {
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: #fff;
+}
+.pr-state.open {
+  background: var(--vscode-charts-green, #2da44e);
+}
+.pr-state.draft {
+  background: var(--vscode-descriptionForeground, #6e7781);
+}
+.pr-state.merged {
+  background: var(--vscode-charts-purple, #8957e5);
+}
+.pr-state.closed {
+  background: var(--vscode-charts-red, #cf222e);
+}
+.pr-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.pr-seg svg {
+  width: 12px;
+  height: 12px;
+}
+.pr-seg.pass,
+.pr-seg.approved {
+  color: var(--vscode-charts-green, #89d185);
+}
+.pr-seg.fail,
+.pr-seg.changes {
+  color: var(--vscode-charts-red, #f14c4c);
+}
+.pr-seg.pending {
+  color: var(--vscode-charts-yellow, #cca700);
+}
+.pr-seg.pending svg {
+  width: 8px;
+  height: 8px;
+}
+.pr-seg.required {
+  color: var(--vscode-charts-yellow, #cca700);
+  font-weight: 600;
+}
+.pr-seg.comments {
+  opacity: 0.8;
+}
+.prline .pr-open {
+  margin-left: auto;
+  display: inline-flex;
+  flex: 0 0 auto;
+  opacity: 0.5;
+}
+.prline:hover .pr-open {
+  opacity: 1;
+}
+.prline .pr-open svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* --- Settings modal ------------------------------------------------------ */
+.settings-modal {
+  max-width: 360px;
+}
+.settings-modal .modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings-modal .modal-title svg {
+  width: 14px;
+  height: 14px;
+}
+.settings-body {
+  padding: 12px;
+  overflow-y: auto;
+}
+.gh-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gh-h {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.gh-h svg {
+  width: 13px;
+  height: 13px;
+  opacity: 0.8;
+}
+.gh-lead {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground);
+}
+.gh-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.gh-toggle input {
+  margin: 0;
+}
+.gh-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+}
+.gh-status.ok {
+  color: var(--vscode-foreground);
+}
+.gh-status.err {
+  color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
+  background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.15));
+}
+.gh-type {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+.gh-field {
+  display: flex;
+  gap: 6px;
+}
+.gh-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, rgba(128, 128, 128, 0.3)));
+}
+.gh-field input:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.gh-help {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground);
+}
+.gh-help.dim {
+  opacity: 0.85;
+}
+.gh-help a {
+  color: var(--vscode-textLink-foreground);
+}
+.gh-help code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.18));
+}
+.gh-perms {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
+  color: var(--vscode-descriptionForeground);
+}
+.gh-perms-h {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+.gh-perms-h + ul {
+  margin: 3px 0 8px;
+}
+.gh-perms ul {
+  margin: 3px 0;
+  padding-left: 18px;
+}
+.gh-perms li {
+  margin: 1px 0;
+}
+.gh-perms .dim {
+  opacity: 0.7;
+}
+.gh-perms code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.22));
+}
+
+.gh-disconnect {
+  align-self: flex-start;
+}
+.gh-disconnect:hover {
+  color: var(--vscode-errorForeground, #f14c4c);
+}

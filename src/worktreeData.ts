@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { findRepoRoot, listWorktrees, getStatus, GitStatus } from "./git";
 import { normalizePath } from "./worktreeUtils";
+import { GithubConnection, PrInfo } from "./github";
 
 /**
  * Lifecycle status of an agent session, derived from Claude Code hooks.
@@ -47,6 +48,9 @@ export interface WorktreeVM {
   inWorkspace: boolean;
   git?: GitStatus;
   agents: AgentVM[];
+  /** GitHub PR status for this worktree's branch (when the integration is on
+   *  and a PR exists). null = looked up, no PR; undefined = not looked up. */
+  pr?: PrInfo | null;
 }
 
 export interface WorktreeData {
@@ -57,6 +61,10 @@ export interface WorktreeData {
   hooksInstalled: boolean;
   /** The hooks the consent page lists when they are not yet installed. */
   hooks?: HookInfoVM[];
+  /** GitHub connection summary for the settings modal. */
+  github?: GithubConnection;
+  /** Whether the PR integration is toggled on. */
+  prEnabled?: boolean;
 }
 
 export function normalize(p: string): string {
