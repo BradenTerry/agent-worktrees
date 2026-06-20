@@ -14,7 +14,8 @@
  *   ~/.claude/agent-worktrees/sessions  (legacy fallback)
  *
  * Per-session file: <dir>/<session_id>.json
- *   = { sessionId, worktree, branch, state, task, model, startedAt, ts }
+ *   = { sessionId, worktree, branch, state, task, skills, subagents, model,
+ *       startedAt, ts }
  * SessionEnd removes the file so the agent disappears when its session exits.
  */
 import { execFileSync } from "node:child_process";
@@ -200,6 +201,15 @@ function main() {
     if (skill && !skills.includes(skill)) skills.push(skill);
   }
 
+  // Count subagents this session has spawned. The Task tool launches one
+  // subagent per call and PreToolUse fires the moment it starts, so this is a
+  // running tally of "subagents used". Carried forward across events.
+  let subagents =
+    typeof prior.subagents === "number" && prior.subagents >= 0
+      ? prior.subagents
+      : 0;
+  if (event === "PreToolUse" && payload.tool_name === "Task") subagents++;
+
   const state = EVENT_STATE[event] || "active";
 
   // The summary: Claude's own generated title from the transcript, which tracks
@@ -231,6 +241,7 @@ function main() {
     ts: now,
     ...(task ? { task } : {}),
     ...(skills.length ? { skills } : {}),
+    ...(subagents ? { subagents } : {}),
   };
 
   writeFileSync(target, JSON.stringify(ev) + "\n");

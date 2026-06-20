@@ -118,6 +118,37 @@ test("Stop marks idle", () => {
   assert.strictEqual(s.state, "idle");
 });
 
+test("counts each Task tool call as a subagent and carries the tally forward", () => {
+  const sid = "session-subagents";
+  // No subagents yet: a plain prompt leaves the count off the state file.
+  run({ hook_event_name: "UserPromptSubmit", session_id: sid, cwd: repo });
+  assert.strictEqual(stateOf(sid).subagents, undefined);
+
+  // Two Task spawns -> two subagents, accumulated across events.
+  run({
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    cwd: repo,
+    tool_name: "Task",
+  });
+  run({
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    cwd: repo,
+    tool_name: "Task",
+  });
+  assert.strictEqual(stateOf(sid).subagents, 2);
+
+  // A non-Task tool does not bump the count, but keeps the carried tally.
+  run({
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    cwd: repo,
+    tool_name: "Bash",
+  });
+  assert.strictEqual(stateOf(sid).subagents, 2);
+});
+
 test("SessionEnd removes the state file", () => {
   const r = run({ hook_event_name: "SessionEnd", session_id: SID, cwd: repo });
   assert.strictEqual(r.status, 0);

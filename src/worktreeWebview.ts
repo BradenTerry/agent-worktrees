@@ -18,6 +18,7 @@ import {
 } from "./git";
 import { hooksInstalled, installHooks, sessionsDir, HOOKS } from "./hooks";
 import { readSessionsByWorktree } from "./sessionStore";
+import { applyScopeScm, ScmModel } from "./scmScope";
 import {
   initGithub,
   connection,
@@ -395,10 +396,8 @@ export class WorktreeWebviewProvider
     }
 
     const target = normalize(fsPath);
-    // Repos shown before we add the selected worktree, to decide swap vs. keep.
-    const wasMultiple = api.repositories.length > 1;
-
     const uri = vscode.Uri.file(fsPath);
+    // Confirm a repo exists at the target before mutating the current scope.
     const repo =
       api.getRepository(uri) ?? (await api.openRepository(uri).catch(() => null));
     if (!repo) {
@@ -406,40 +405,22 @@ export class WorktreeWebviewProvider
       return;
     }
 
-    // Only one repo was listed -> swap it for this worktree by closing the
-    // previously-open repositories that aren't the selected one.
-    if (!wasMultiple) {
-      for (const r of api.repositories) {
-        if (normalize(r.rootUri.fsPath) === target) continue;
-        await vscode.commands.executeCommand("git.close", r.rootUri);
-      }
-    }
+    // Drive the (testable) scope algorithm against the live Git model. It opens
+    // the target, swaps out a lone previous scope, self-heals if that close
+    // drops the worktree, and waits for the model to settle.
+    const model: ScmModel = {
+      list: () => api.repositories.map((r) => normalize(r.rootUri.fsPath)),
+      open: async (p) => {
+        await api.openRepository(vscode.Uri.file(p)).catch(() => {});
+      },
+      close: async (p) => {
+        await vscode.commands.executeCommand("git.close", vscode.Uri.file(p));
+      },
+    };
+    await applyScopeScm(model, target);
 
-    // Wait for the Git model to reflect the change before re-rendering:
-    // openRepository can resolve a tick before `repositories` lists the repo,
-    // which would leave the just-scoped worktree un-highlighted until the next
-    // click. Reflect the new scope on the buttons without switching to the view.
-    await this.waitForScmRepo(api, target, !wasMultiple);
+    // Reflect the new scope on the buttons without switching to the view.
     await this.refresh();
-  }
-
-  /**
-   * Poll the Git model (briefly, bounded) until it reflects the just-applied
-   * scope: the target repo is present and, when we swapped a single repo, it is
-   * the only one. Returns early once settled, or after the timeout regardless.
-   */
-  private async waitForScmRepo(
-    api: GitApi,
-    target: string,
-    sole: boolean
-  ): Promise<void> {
-    for (let i = 0; i < 24; i++) {
-      const paths = api.repositories.map((r) => normalize(r.rootUri.fsPath));
-      const present = paths.includes(target);
-      const settled = present && (!sole || paths.every((p) => p === target));
-      if (settled) return;
-      await new Promise((r) => setTimeout(r, 25));
-    }
   }
 
   // --- GitHub settings -------------------------------------------------------

@@ -11,6 +11,8 @@ interface SessionState {
   task?: string;
   /** Bare names of skills this session has invoked (deduped, in first-use order). */
   skills?: string[];
+  /** Count of subagents this session has spawned via the Task tool. */
+  subagents?: number;
   /** Epoch ms when the session was first seen. */
   startedAt?: number;
   /** Epoch ms of the most recent hook event. */
@@ -70,12 +72,15 @@ export async function readSessionsByWorktree(
         const skills = Array.isArray(s.skills)
           ? s.skills.filter((x) => typeof x === "string")
           : [];
+        const subagents =
+          typeof s.subagents === "number" && s.subagents > 0 ? s.subagents : 0;
         return {
           sessionId: s.sessionId,
           // The work summary, then an ordinal until Claude generates a title.
           label: summary || `Claude ${i + 1}`,
           summary,
           skills,
+          subagents,
           status: s.state,
           startedAt: s.startedAt ?? s.ts,
           lastActivity: s.ts,
