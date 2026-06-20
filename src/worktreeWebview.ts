@@ -341,6 +341,12 @@ export class WorktreeWebviewProvider
       api.onDidOpenRepository(onScm),
       api.onDidCloseRepository(onScm)
     );
+    // On a fresh window the Git extension may still be discovering repositories
+    // when we first read them, leaving the active scope un-highlighted. Refresh
+    // once it finishes initializing so the state populates on load.
+    if (api.onDidChangeState) {
+      this.context.subscriptions.push(api.onDidChangeState(onScm));
+    }
   }
 
   /** Mark each worktree whose repository is currently open in Source Control as
@@ -893,6 +899,9 @@ interface GitApi {
   openRepository(uri: vscode.Uri): Promise<GitApiRepository | null>;
   readonly onDidOpenRepository: vscode.Event<GitApiRepository>;
   readonly onDidCloseRepository: vscode.Event<GitApiRepository>;
+  /** "uninitialized" until the extension finishes its first repository scan. */
+  readonly state?: "uninitialized" | "initialized";
+  readonly onDidChangeState?: vscode.Event<unknown>;
 }
 interface GitExtensionExports {
   getAPI(version: 1): GitApi;

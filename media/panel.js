@@ -264,35 +264,27 @@
   };
 
   /**
-   * One-line PR summary for a worktree branch: state + number, CI rollup, review
-   * decision and comment count, the whole row linking out to the PR. Rendered
-   * only when PR data is present (the integration is on and a PR exists).
+   * PR summary for a worktree branch, linking out to the PR. A header row with
+   * the state badge, then separate "Checks" and "Reviews" rows so the CI rollup
+   * and the review decision don't read as one ambiguous run of checkmarks.
+   * Rendered only when PR data is present (the integration is on and a PR
+   * exists).
    */
   function prLine(pr) {
     if (!pr) return "";
     const st = PR_STATE[pr.state] || PR_STATE.open;
-    const segs = [];
-
-    segs.push(
-      '<span class="pr-state ' +
-        st.cls +
-        '">' +
-        st.label +
-        " #" +
-        pr.number +
-        "</span>"
-    );
+    const plural = (n) => (n === 1 ? "" : "s");
 
     // CI checks: one colored, counted segment per non-zero state (passing,
     // failing, running) so the whole rollup is visible at a glance.
+    const checkSegs = [];
     if (pr.checks && pr.checks !== "none") {
       const pass = pr.checksPass || 0;
       const fail = pr.checksFail || 0;
       const pending = pr.checksPending || 0;
       const total = pass + fail + pending;
-      const plural = (n) => (n === 1 ? "" : "s");
       if (pass)
-        segs.push(
+        checkSegs.push(
           '<span class="pr-seg pass" title="' +
             pass +
             " of " +
@@ -305,7 +297,7 @@
             "</span>"
         );
       if (fail)
-        segs.push(
+        checkSegs.push(
           '<span class="pr-seg fail" title="' +
             fail +
             " of " +
@@ -318,7 +310,7 @@
             "</span>"
         );
       if (pending)
-        segs.push(
+        checkSegs.push(
           '<span class="pr-seg pending" title="' +
             pending +
             " of " +
@@ -332,33 +324,81 @@
         );
     }
 
-    // Review decision.
-    if (pr.review === "approved")
-      segs.push(
-        '<span class="pr-seg approved" title="Approved">' +
+    // Review decision + comments. Counted segments are additive so a mixed
+    // state (e.g. some approvals with reviewers still pending) shows all of it.
+    const reviewSegs = [];
+    if (pr.approvals)
+      reviewSegs.push(
+        '<span class="pr-seg approved" title="' +
+          pr.approvals +
+          " approval" +
+          plural(pr.approvals) +
+          '">' +
           icons.check +
-          (pr.approvals ? pr.approvals : "") +
+          pr.approvals +
           "</span>"
       );
-    else if (pr.review === "changes")
-      segs.push(
-        '<span class="pr-seg changes" title="Changes requested">' +
+    if (pr.changesRequested)
+      reviewSegs.push(
+        '<span class="pr-seg changes" title="' +
+          pr.changesRequested +
+          " change request" +
+          plural(pr.changesRequested) +
+          '">' +
           icons.cross +
+          pr.changesRequested +
           "</span>"
       );
-    else if (pr.review === "required")
-      segs.push(
-        '<span class="pr-seg required" title="Review requested">@</span>'
+    if (pr.reviewsPending)
+      reviewSegs.push(
+        '<span class="pr-seg review-pending" title="' +
+          pr.reviewsPending +
+          " review" +
+          plural(pr.reviewsPending) +
+          ' pending">@' +
+          pr.reviewsPending +
+          "</span>"
       );
-
     if (pr.comments)
-      segs.push(
+      reviewSegs.push(
         '<span class="pr-seg comments" title="' +
           pr.comments +
-          ' comment(s)">' +
+          " comment" +
+          plural(pr.comments) +
+          '">' +
           icons.comment +
           pr.comments +
           "</span>"
+      );
+
+    const rows = [
+      '<div class="pr-row pr-head">' +
+        '<span class="pr-ico">' +
+        icons.pr +
+        "</span>" +
+        '<span class="pr-state ' +
+        st.cls +
+        '">' +
+        st.label +
+        " #" +
+        pr.number +
+        "</span>" +
+        '<span class="pr-open">' +
+        icons.external +
+        "</span>" +
+        "</div>",
+    ];
+    if (reviewSegs.length)
+      rows.push(
+        '<div class="pr-row"><span class="pr-row-label">Reviews</span>' +
+          reviewSegs.join("") +
+          "</div>"
+      );
+    if (checkSegs.length)
+      rows.push(
+        '<div class="pr-row"><span class="pr-row-label">Checks</span>' +
+          checkSegs.join("") +
+          "</div>"
       );
 
     return (
@@ -367,13 +407,7 @@
       '" title="' +
       esc(pr.title) +
       ' — open on GitHub">' +
-      '<span class="pr-ico">' +
-      icons.pr +
-      "</span>" +
-      segs.join("") +
-      '<span class="pr-open">' +
-      icons.external +
-      "</span>" +
+      rows.join("") +
       "</a>"
     );
   }

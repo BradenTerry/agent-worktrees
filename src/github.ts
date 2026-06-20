@@ -50,9 +50,14 @@ export interface PrInfo {
   review: "approved" | "changes" | "required" | "none";
   approvals: number;
   changesRequested: number;
+  /** Reviewers requested but who haven't submitted a review yet. */
+  reviewsPending: number;
   /** Issue + review-thread comments. */
   comments: number;
   updatedAt?: string;
+  /** Head commit SHA. Used to detect a new push so polling can speed up while
+   *  the fresh checks register; not displayed. */
+  headSha?: string;
 }
 
 export function initGithub(context: vscode.ExtensionContext): void {
@@ -314,8 +319,10 @@ export async function fetchPr(
     review: rev.review,
     approvals: rev.approvals,
     changesRequested: rev.changesRequested,
+    reviewsPending: requested,
     comments,
     updatedAt: raw.updated_at,
+    headSha: sha,
   };
 }
 

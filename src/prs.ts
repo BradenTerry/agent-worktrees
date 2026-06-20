@@ -24,6 +24,10 @@ const ENABLED_KEY = "agentWorktrees.prEnabled";
 /** Poll cadence while CI is settled vs. while a check is still running. */
 const IDLE_MS = 90_000;
 const ACTIVE_MS = 15_000;
+/** After a push (head SHA changed) poll quickly for a window so the new pending
+ *  checks appear soon, even before any "pending" status exists to fetch. */
+const PUSH_MS = 7_000;
+const PUSH_WINDOW_MS = 90_000;
 /** Refuse to refetch within this window unless forced. */
 const THROTTLE_MS = 4_000;
 
@@ -40,6 +44,10 @@ export class PrService implements vscode.Disposable {
   private timer?: ReturnType<typeof setTimeout>;
   private lastFetch = 0;
   private inFlight = false;
+  /** Last seen head SHA per target, to detect a push between fetches. */
+  private headShas = new Map<string, string | undefined>();
+  /** While now < this, poll on the fast push cadence. */
+  private fastUntil = 0;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.enabled = context.globalState.get<boolean>(ENABLED_KEY, true);
@@ -89,6 +97,7 @@ export class PrService implements vscode.Disposable {
     for (const k of [...this.cache.keys()]) {
       if (!live.has(k)) {
         this.cache.delete(k);
+        this.headShas.delete(k);
         pruned = true;
       }
     }
@@ -108,6 +117,8 @@ export class PrService implements vscode.Disposable {
   /** Clear the cache and force a fresh fetch (after a token change). */
   reauth(): void {
     this.cache.clear();
+    this.headShas.clear();
+    this.fastUntil = 0;
     this._onChange.fire();
     void this.refresh(true);
   }
@@ -128,13 +139,12 @@ export class PrService implements vscode.Disposable {
     const anyPending = [...this.cache.values()].some(
       (p) => p && p.checks === "pending"
     );
-    this.timer = setTimeout(
-      () => {
-        this.timer = undefined;
-        void this.refresh(false);
-      },
-      anyPending ? ACTIVE_MS : IDLE_MS
-    );
+    const pushing = Date.now() < this.fastUntil;
+    const delay = pushing ? PUSH_MS : anyPending ? ACTIVE_MS : IDLE_MS;
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.refresh(false);
+    }, delay);
   }
 
   /**
@@ -183,6 +193,14 @@ export class PrService implements vscode.Disposable {
         const next = results[i];
         if (sigOf(this.cache.get(t.key)) !== sigOf(next)) changed = true;
         this.cache.set(t.key, next);
+        // A new head SHA means a push landed; the fresh checks may not exist
+        // yet, so poll fast for a window instead of dropping back to idle.
+        const prevSha = this.headShas.get(t.key);
+        const nextSha = next?.headSha;
+        if (prevSha && nextSha && prevSha !== nextSha) {
+          this.fastUntil = now + PUSH_WINDOW_MS;
+        }
+        this.headShas.set(t.key, nextSha);
       });
     } finally {
       this.inFlight = false;
@@ -205,6 +223,7 @@ function sigOf(p: PrInfo | null | undefined): string {
     p.review,
     p.approvals,
     p.changesRequested,
+    p.reviewsPending,
     p.comments,
   ].join(":");
 }

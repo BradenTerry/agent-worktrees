@@ -654,9 +654,8 @@ button svg {
 /* --- PR status line on a worktree card ----------------------------------- */
 .prline {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 8px;
   padding: 6px 8px;
   border-radius: 4px;
@@ -665,6 +664,17 @@ button svg {
   color: var(--vscode-foreground);
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
+}
+.pr-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pr-row-label {
+  flex: 0 0 auto;
+  min-width: 52px;
+  color: var(--vscode-descriptionForeground);
 }
 .prline:hover {
   color: var(--vscode-foreground);
@@ -730,6 +740,9 @@ button svg {
 .pr-seg.required {
   color: var(--vscode-charts-yellow, #cca700);
   font-weight: 600;
+}
+.pr-seg.review-pending {
+  color: var(--vscode-descriptionForeground);
 }
 .pr-seg.comments {
   opacity: 0.8;
