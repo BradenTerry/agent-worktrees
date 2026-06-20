@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");
-const { applyScopeScm } = require("../out/scmScope.js");
+const { applyScopeScm, isScmActive } = require("../out/scmScope.js");
 
 const MAIN = "/repo";
 const WT = "/repo-feature";
@@ -69,4 +69,33 @@ test("re-scoping to the already-active sole repo is a no-op", async () => {
   const m = makeModel({ open: [WT] });
   await applyScopeScm(m, WT, opts);
   assert.deepStrictEqual(m.repos(), [WT]);
+});
+
+// --- isScmActive: single-selection highlight ---
+
+test("regression: only the scoped worktree highlights when both repos stay open", () => {
+  // The "both selected" bug: closing main did not stick, so main and the
+  // worktree were both open. Highlight must still single out the scoped one.
+  const open = [MAIN, WT];
+  assert.strictEqual(isScmActive(WT, open, WT), true);
+  assert.strictEqual(isScmActive(MAIN, open, WT), false);
+});
+
+test("a single open repo with no explicit scope highlights itself", () => {
+  assert.strictEqual(isScmActive(MAIN, [MAIN], null), true);
+});
+
+test("no explicit scope and several repos open: highlight nothing (ambiguous)", () => {
+  const open = [MAIN, WT];
+  assert.strictEqual(isScmActive(MAIN, open, null), false);
+  assert.strictEqual(isScmActive(WT, open, null), false);
+});
+
+test("a repo that is not open never highlights, even if it is the scope", () => {
+  assert.strictEqual(isScmActive(WT, [MAIN], WT), false);
+});
+
+test("a stale scope (its repo not open) falls back to the lone open repo", () => {
+  // Scoped to WT earlier, but this session only has main open.
+  assert.strictEqual(isScmActive(MAIN, [MAIN], WT), true);
 });

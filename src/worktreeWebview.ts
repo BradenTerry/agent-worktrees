@@ -18,7 +18,7 @@ import {
 } from "./git";
 import { hooksInstalled, installHooks, sessionsDir, HOOKS } from "./hooks";
 import { readSessionsByWorktree } from "./sessionStore";
-import { applyScopeScm, ScmModel } from "./scmScope";
+import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import {
   initGithub,
   connection,
@@ -29,6 +29,10 @@ import { PrService, PrTarget } from "./prs";
 
 /** globalState key for the opt-in Source Control scope button. */
 const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
+/** globalState key for the worktree the user last scoped Source Control to, so
+ *  the panel highlights a single active scope independently of which repos the
+ *  Git extension happens to keep open. */
+const SCM_SCOPED_PATH_KEY = "agentWorktrees.scmScopedPath";
 
 /** Messages sent from the webview to the extension. */
 interface ActionMessage {
@@ -366,15 +370,20 @@ export class WorktreeWebviewProvider
     }
   }
 
-  /** Mark each worktree whose repository is currently open in Source Control as
-   *  scmActive, so the panel can show whether the scope is already set. */
+  /** Mark the single worktree that is the current Source Control scope as
+   *  scmActive. Driven by the user's last explicit scope (not raw open-state),
+   *  so exactly one button highlights even when the Git extension keeps several
+   *  repositories open. */
   private async annotateScmActive(data: WorktreeData): Promise<void> {
     await this.ensureScmWatch();
     const api = await this.gitApi();
-    const open = new Set<string>();
-    if (api) for (const r of api.repositories) open.add(normalize(r.rootUri.fsPath));
+    const openPaths: string[] = [];
+    if (api)
+      for (const r of api.repositories) openPaths.push(normalize(r.rootUri.fsPath));
+    const scoped =
+      this.context.globalState.get<string>(SCM_SCOPED_PATH_KEY) ?? null;
     for (const wt of data.worktrees) {
-      wt.scmActive = open.has(normalize(wt.path));
+      wt.scmActive = isScmActive(normalize(wt.path), openPaths, scoped);
     }
   }
 
@@ -418,6 +427,10 @@ export class WorktreeWebviewProvider
       },
     };
     await applyScopeScm(model, target);
+
+    // Remember this as the active scope so the panel highlights exactly this
+    // worktree, regardless of which repos the Git extension leaves open.
+    await this.context.globalState.update(SCM_SCOPED_PATH_KEY, target);
 
     // Reflect the new scope on the buttons without switching to the view.
     await this.refresh();

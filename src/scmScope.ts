@@ -25,6 +25,34 @@ export interface ScmModel {
   close(path: string): Promise<void>;
 }
 
+/**
+ * Whether a worktree should render as the active Source Control scope.
+ *
+ * The highlight must be single-selection (radio), but we cannot infer that from
+ * open repositories alone: VS Code happily keeps a worktree AND its main repo
+ * open at once (closing the workspace-root repo often does not stick), which is
+ * what made two scope buttons light up at the same time. So we honor the scope
+ * the user explicitly picked, falling back to the open-state only when there is
+ * no usable explicit scope.
+ *
+ * @param wtPath      normalized worktree root
+ * @param openPaths   normalized roots of the currently-open repositories
+ * @param scopedPath  normalized root the user last scoped to, or null
+ */
+export function isScmActive(
+  wtPath: string,
+  openPaths: string[],
+  scopedPath: string | null
+): boolean {
+  const open = new Set(openPaths);
+  // Only ever highlight a worktree whose repo is actually open.
+  if (!open.has(wtPath)) return false;
+  // Honor an explicit scope, but only while that repo is still open.
+  if (scopedPath && open.has(scopedPath)) return wtPath === scopedPath;
+  // No usable scope: highlight only when a single repo is open (unambiguous).
+  return open.size === 1;
+}
+
 const SETTLE_TRIES = 24;
 const SETTLE_DELAY_MS = 25;
 
