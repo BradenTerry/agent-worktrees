@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.1.0
+
+- **Merge-readiness pills on the PR view** - the PR summary now flags two
+  states beside the header badge: **Out of date** when the branch is behind its
+  base branch (GitHub's "This branch is out-of-date with the base branch") and
+  **Auto-merge** when auto-merge is enabled, so a green-but-unmerged PR is no
+  longer ambiguous.
+
 ## 2.0.0
 
 - **Branches view** - a new full-screen editor tab, opened from the panel
