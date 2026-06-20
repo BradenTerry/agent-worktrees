@@ -64,11 +64,6 @@
     "menus": {
       "view/title": [
         {
-          "command": "worktreeView.newWorktree",
-          "when": "view == worktreeView.panel",
-          "group": "navigation@1"
-        },
-        {
           "command": "worktreeView.refresh",
           "when": "view == worktreeView.panel",
           "group": "navigation@2"

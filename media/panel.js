@@ -12,6 +12,8 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 4l4 4-4 4"/></svg>',
     sparkle:
       '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l1.3 3.7L13 6l-3.7 1.3L8 11 6.7 7.3 3 6l3.7-1.3z"/></svg>',
+    agentWorktree:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M16 14.5c2.4 0 3 1.4 3 3.5" stroke-width="1.5"/><circle cx="20" cy="20" r="1.7" stroke-width="1.4"/><path d="M12 4.4V2.6" stroke-width="1.5"/><circle cx="12" cy="2.4" r="0.9" fill="currentColor"/><path d="M7.5 6.8c0-2.6 9-2.6 9 0" stroke-width="1.5"/><path d="M5 7.2h14" stroke-width="1.5"/><rect x="7" y="8.2" width="10" height="10.4" rx="3" stroke-width="1.5"/><path d="M9 12.4h6" stroke-width="2.2"/></svg>',
     focus:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 3h4v4M13 3l-5 5M7 13H3V9M3 13l5-5"/></svg>',
     stop: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
@@ -24,7 +26,6 @@
     edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-7 7-3.5.5.5-3.5z"/></svg>',
     window:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
-    info: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5h.01"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
     gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>',
@@ -111,15 +112,6 @@
               ? a.name + " — " + a.summary
               : a.summary
             : a.label;
-          const infoBtn = a.summary
-            ? '<span class="agent-info" title="' +
-              esc(fullInfo) +
-              '" aria-label="Full summary: ' +
-              esc(fullInfo) +
-              '">' +
-              icons.info +
-              "</span>"
-            : "";
           const skills = a.skills || [];
           const skillChip = skills.length
             ? '<button class="skill-chip" data-action="showSkills" data-session="' +
@@ -142,10 +134,11 @@
             '<span class="status-dot ' +
             s +
             '"></span>' +
-            '<span class="agent-label">' +
+            '<span class="agent-label" title="' +
+            esc(fullInfo) +
+            '">' +
             esc(a.label) +
             "</span>" +
-            infoBtn +
             '<span class="agent-meta">' +
             esc(agentMeta(a)) +
             "</span>" +
@@ -211,24 +204,33 @@
     );
   }
 
-  /** Git working-tree summary line: dirty/clean and ahead/behind. */
+  /** Git working-tree summary line: diff totals and ahead/behind. */
   function gitLine(g) {
     if (!g) return "";
     const segs = [];
+    if (g.dirty)
+      segs.push(
+        '<span class="seg dirty"><span class="gdot"></span>' +
+          g.dirty +
+          (g.dirty === 1 ? " change" : " changes") +
+          "</span>"
+      );
+    if (g.insertions || g.deletions) {
+      segs.push('<span class="seg ins">+' + (g.insertions || 0) + "</span>");
+      segs.push('<span class="seg del">−' + (g.deletions || 0) + "</span>");
+    } else {
+      segs.push('<span class="seg none">+/- 0</span>');
+    }
     segs.push(
-      g.dirty
-        ? '<span class="seg dirty"><span class="gdot"></span>' +
-            g.dirty +
-            (g.dirty === 1 ? " change" : " changes") +
-            "</span>"
-        : '<span class="seg clean">✓ clean</span>'
+      '<span class="seg ahead" title="Commits to push">↑' +
+        (g.ahead || 0) +
+        "</span>"
     );
-    if (g.insertions)
-      segs.push('<span class="seg ins">+' + g.insertions + "</span>");
-    if (g.deletions)
-      segs.push('<span class="seg del">−' + g.deletions + "</span>");
-    if (g.ahead) segs.push('<span class="seg">↑' + g.ahead + "</span>");
-    if (g.behind) segs.push('<span class="seg">↓' + g.behind + "</span>");
+    segs.push(
+      '<span class="seg behind" title="Commits to pull">↓' +
+        (g.behind || 0) +
+        "</span>"
+    );
     return '<div class="gitline">' + segs.join("") + "</div>";
   }
 
@@ -403,14 +405,11 @@
       esc(data.repoName || "Repository") +
       "</span>" +
       '<span class="tools">' +
-      '<button class="tbtn" data-action="agentWorktree" title="Create a worktree with Claude (claude -w) and start an agent in it">' +
-      icons.sparkle +
-      "Agent &amp; Worktree</button>" +
+      '<button class="tbtn icon" data-action="agentWorktree" title="New Agent &amp; Worktree: create a worktree with Claude (claude -w) and start an agent in it">' +
+      icons.agentWorktree +
+      "</button>" +
       '<button class="tbtn ghost" data-tool="collapseAll" title="Collapse all">' +
       icons.collapse +
-      "</button>" +
-      '<button class="tbtn ghost" data-action="refresh" title="Refresh">' +
-      icons.refresh +
       "</button>" +
       "</span>" +
       "</div>"
@@ -448,6 +447,12 @@
 
   function render(data) {
     lastData = data;
+    if (settingsOpen) {
+      // Settings owns the whole window; routine data pushes must not wipe the
+      // token field mid-type, so only re-render when GitHub state changed.
+      maybeRefreshSettings(data);
+      return;
+    }
     if (data && data.hooksInstalled === false) {
       renderConsent(data);
       return;
@@ -555,7 +560,7 @@
   // lives on document.body so a data re-render never wipes it; it only re-renders
   // itself when the GitHub connection (not the worktree data) changes, so typing
   // a token is never interrupted by a routine refresh.
-  let settingsEl = null;
+  let settingsOpen = false;
   let lastGhSig = "";
 
   function ghSig(data) {
@@ -635,20 +640,30 @@
       "The token is kept in VS Code Secret Storage and is only ever sent to the GitHub API.</p>";
 
     const toggle =
-      '<label class="gh-toggle"><input type="checkbox" id="gh-enable"' +
+      '<label class="gh-toggle">' +
+      '<span class="gh-toggle-label">Show PR status on worktrees</span>' +
+      '<input type="checkbox" id="gh-enable" class="switch-input"' +
       (prEnabled ? " checked" : "") +
-      " /> <span>Show PR status on worktrees</span></label>";
+      ' role="switch" aria-label="Show PR status on worktrees" />' +
+      '<span class="switch" aria-hidden="true"></span>' +
+      "</label>";
 
     return (
-      '<div class="modal settings-modal" role="dialog" aria-modal="true">' +
-      '<div class="modal-head">' +
-      '<span class="modal-title">' +
+      '<div class="settings-view">' +
+      '<div class="settings-head">' +
+      '<span class="settings-title">' +
       icons.gear +
       " Settings</span>" +
-      '<button class="iconbtn modal-close" title="Close">' +
-      icons.stop +
-      "</button>" +
+      '<button class="tbtn ghost settings-close" data-action="closeSettings" title="Close settings">' +
+      icons.cross +
+      " Close</button>" +
       "</div>" +
+      '<div class="settings-main">' +
+      '<nav class="settings-tabs" role="tablist">' +
+      '<button class="settings-tab active" role="tab" aria-selected="true">' +
+      icons.pr +
+      "<span>GitHub</span></button>" +
+      "</nav>" +
       '<div class="settings-body">' +
       '<section class="gh-section">' +
       '<h3 class="gh-h">' +
@@ -663,15 +678,16 @@
       disconnect +
       "</section>" +
       "</div>" +
+      "</div>" +
       "</div>"
     );
   }
 
   function renderSettings() {
-    if (!settingsEl) return;
-    settingsEl.innerHTML = settingsContent(lastData);
+    if (!settingsOpen) return;
+    root.innerHTML = settingsContent(lastData);
     lastGhSig = ghSig(lastData);
-    const input = settingsEl.querySelector("#gh-token");
+    const input = root.querySelector("#gh-token");
     if (input) {
       input.onkeydown = (e) => {
         if (e.key === "Enter") saveToken();
@@ -680,13 +696,12 @@
   }
 
   function saveToken() {
-    if (!settingsEl) return;
-    const input = settingsEl.querySelector("#gh-token");
+    const input = root.querySelector("#gh-token");
     const token = input && input.value.trim();
     if (!token) return;
     send("setGithubToken", { token });
     input.value = "";
-    const btn = settingsEl.querySelector('[data-gh="save"]');
+    const btn = root.querySelector('[data-gh="save"]');
     if (btn) {
       btn.textContent = "Saving…";
       btn.disabled = true;
@@ -694,44 +709,31 @@
   }
 
   function closeSettings() {
-    if (settingsEl) {
-      settingsEl.remove();
-      settingsEl = null;
-    }
+    if (!settingsOpen) return;
+    settingsOpen = false;
+    render(lastData);
   }
 
   function openSettings() {
-    closeModal(); // never stack the two modals
-    if (!settingsEl) {
-      settingsEl = document.createElement("div");
-      settingsEl.className = "modal-backdrop";
-      settingsEl.addEventListener("click", (ev) => {
-        if (ev.target === settingsEl || ev.target.closest(".modal-close")) {
-          closeSettings();
-          return;
-        }
-        const act = ev.target.closest("[data-gh]");
-        if (!act) return;
-        const kind = act.getAttribute("data-gh");
-        if (kind === "save") saveToken();
-        else if (kind === "disconnect") send("clearGithubToken");
-      });
-      settingsEl.addEventListener("change", (ev) => {
-        if (ev.target && ev.target.id === "gh-enable") {
-          send("togglePr", { value: !!ev.target.checked });
-        }
-      });
-      document.body.appendChild(settingsEl);
-    }
+    closeModal(); // never stack a modal over the settings page
+    settingsOpen = true;
     renderSettings();
   }
 
-  /** Re-render the open settings modal only when GitHub state changed. */
+  /** Re-render the open settings page only when GitHub state changed. */
   function maybeRefreshSettings(data) {
-    if (settingsEl && ghSig(data) !== lastGhSig) renderSettings();
+    if (settingsOpen && ghSig(data) !== lastGhSig) renderSettings();
   }
 
   root.addEventListener("click", (e) => {
+    // GitHub settings controls (save token / disconnect).
+    const gh = e.target.closest("[data-gh]");
+    if (gh) {
+      const kind = gh.getAttribute("data-gh");
+      if (kind === "save") saveToken();
+      else if (kind === "disconnect") send("clearGithubToken");
+      return;
+    }
     const tool = e.target.closest("[data-tool='collapseAll']");
     if (tool) {
       collapseAll();
@@ -747,9 +749,13 @@
         openSkills(btn.getAttribute("data-session"));
         return;
       }
-      // Settings is a webview-only modal — no round trip to the extension.
+      // Settings is a webview-only page — no round trip to the extension.
       if (action === "openSettings") {
         openSettings();
+        return;
+      }
+      if (action === "closeSettings") {
+        closeSettings();
         return;
       }
       send(action, {
@@ -762,9 +768,15 @@
     if (bar) toggle(bar.getAttribute("data-toggle"));
   });
 
+  root.addEventListener("change", (e) => {
+    if (e.target && e.target.id === "gh-enable") {
+      send("togglePr", { value: !!e.target.checked });
+    }
+  });
+
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if (settingsEl) {
+    if (settingsOpen) {
       closeSettings();
       return;
     }

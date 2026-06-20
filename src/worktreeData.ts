@@ -1,6 +1,12 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { findRepoRoot, listWorktrees, getStatus, GitStatus } from "./git";
+import {
+  findRepoRoot,
+  listWorktrees,
+  getStatus,
+  fetchRemotes,
+  GitStatus,
+} from "./git";
 import { normalizePath } from "./worktreeUtils";
 import { GithubConnection, PrInfo } from "./github";
 
@@ -101,11 +107,16 @@ function attentionRank(wt: WorktreeVM): number {
 /** Gather worktrees of the repo containing the first workspace folder. */
 export async function gatherWorktrees(
   agentsByPath?: Map<string, AgentVM[]>,
-  hooksInstalled = false
+  hooksInstalled = false,
+  fetch = false
 ): Promise<WorktreeData> {
   const repo = await findRepo();
   if (!repo) return { worktrees: [], hooksInstalled };
   const { repoRoot } = repo;
+
+  // One fetch updates remote-tracking refs for every linked worktree, so the
+  // behind ("commits to pull") count is current. Only on an explicit refresh.
+  if (fetch) await fetchRemotes(repoRoot);
 
   let worktrees;
   try {
