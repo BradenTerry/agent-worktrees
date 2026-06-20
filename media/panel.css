@@ -141,12 +141,12 @@ body {
   align-self: flex-start;
 }
 .hook-why {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--vscode-descriptionForeground);
 }
 .consent-note {
   margin: 0 0 14px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--vscode-descriptionForeground);
 }
 button.accept {
@@ -208,14 +208,13 @@ button.accept {
   flex: 0 0 auto;
 }
 .badge {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: 1px 5px;
+  padding: 2px 6px;
   border-radius: 999px;
   background: var(--vscode-badge-background);
   color: var(--vscode-badge-foreground);
-  opacity: 0.9;
 }
 .badge.warn {
   background: var(--vscode-inputValidation-warningBackground, #6b5300);
@@ -256,8 +255,8 @@ button.accept {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 6px;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  color: var(--vscode-foreground);
 }
 .gitline .seg {
   display: inline-flex;
@@ -336,10 +335,10 @@ button.accept {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
-  padding: 5px 8px;
+  padding: 6px 8px;
   border-radius: 4px;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  color: var(--vscode-foreground);
   background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.14));
   cursor: pointer;
   user-select: none;
@@ -359,7 +358,7 @@ button.accept {
   color: var(--vscode-foreground);
 }
 .agents-bar-count {
-  opacity: 0.7;
+  opacity: 0.85;
 }
 .agents-bar-stats {
   margin-left: auto;
@@ -410,8 +409,8 @@ button.accept {
   text-overflow: ellipsis;
 }
 .agent-meta {
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 11px;
+  opacity: 0.85;
   white-space: nowrap;
 }
 .agent-row.attention .agent-meta {
@@ -530,7 +529,7 @@ button svg {
   align-items: center;
   gap: 3px;
   padding: 1px 6px 1px 5px;
-  font-size: 10px;
+  font-size: 11px;
   border-radius: 999px;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
   color: var(--vscode-descriptionForeground);
@@ -621,11 +620,11 @@ button svg {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
-  padding: 5px 8px;
+  padding: 6px 8px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   text-decoration: none;
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-foreground);
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
 }
@@ -644,10 +643,10 @@ button svg {
 }
 .pr-state {
   font-weight: 600;
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 999px;
   /* Fixed, saturated fills (GitHub's state colors) chosen for legible white
      text — VS Code chart vars are too light/pastel under white. */
@@ -800,7 +799,7 @@ button svg {
 }
 .gh-lead {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--vscode-descriptionForeground);
 }
@@ -865,7 +864,7 @@ button svg {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   padding: 7px 9px;
   border-radius: 5px;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
@@ -878,7 +877,7 @@ button svg {
   background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.15));
 }
 .gh-type {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   padding: 1px 5px;
@@ -907,7 +906,7 @@ button svg {
 }
 .gh-help {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--vscode-descriptionForeground);
 }
@@ -919,13 +918,13 @@ button svg {
 }
 .gh-help code {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
+  font-size: 11px;
   padding: 1px 4px;
   border-radius: 3px;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.18));
 }
 .gh-perms {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   padding: 8px 10px;
   border-radius: 5px;
@@ -952,7 +951,7 @@ button svg {
 }
 .gh-perms code {
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
+  font-size: 11px;
   padding: 1px 4px;
   border-radius: 3px;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.22));

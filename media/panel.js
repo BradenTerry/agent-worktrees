@@ -262,30 +262,53 @@
         "</span>"
     );
 
-    // CI rollup: a colored glyph plus the failing/pending count when relevant.
+    // CI checks: one colored, counted segment per non-zero state (passing,
+    // failing, running) so the whole rollup is visible at a glance.
     if (pr.checks && pr.checks !== "none") {
-      var ci = "";
-      if (pr.checks === "pass")
-        ci =
-          '<span class="pr-seg pass" title="Checks passing">' +
-          icons.check +
-          "</span>";
-      else if (pr.checks === "fail")
-        ci =
+      const pass = pr.checksPass || 0;
+      const fail = pr.checksFail || 0;
+      const pending = pr.checksPending || 0;
+      const total = pass + fail + pending;
+      const plural = (n) => (n === 1 ? "" : "s");
+      if (pass)
+        segs.push(
+          '<span class="pr-seg pass" title="' +
+            pass +
+            " of " +
+            total +
+            " check" +
+            plural(total) +
+            ' passing">' +
+            icons.check +
+            pass +
+            "</span>"
+        );
+      if (fail)
+        segs.push(
           '<span class="pr-seg fail" title="' +
-          (pr.checksFail || 0) +
-          ' check(s) failing">' +
-          icons.cross +
-          (pr.checksFail ? pr.checksFail : "") +
-          "</span>";
-      else
-        ci =
+            fail +
+            " of " +
+            total +
+            " check" +
+            plural(total) +
+            ' failing">' +
+            icons.cross +
+            fail +
+            "</span>"
+        );
+      if (pending)
+        segs.push(
           '<span class="pr-seg pending" title="' +
-          (pr.checksPending || 0) +
-          ' check(s) running">' +
-          icons.dot +
-          "</span>";
-      segs.push(ci);
+            pending +
+            " of " +
+            total +
+            " check" +
+            plural(total) +
+            ' running">' +
+            icons.dot +
+            pending +
+            "</span>"
+        );
     }
 
     // Review decision.
