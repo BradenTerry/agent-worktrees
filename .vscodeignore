@@ -10,3 +10,5 @@ tsconfig.json
 .vscodeignore
 package-lock.json
 node_modules/**
+README.md
+media/icon.svg
