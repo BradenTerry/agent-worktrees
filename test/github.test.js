@@ -347,6 +347,29 @@ test("fetchPrsByBranch: prefers an open PR over a merged one on the same branch"
   );
 });
 
+test("fetchPrsByBranch: pages through until hasNextPage is false", async () => {
+  const page = (hasNext, endCursor, nodes) => ({
+    data: {
+      viewer: { login: "you" },
+      repository: { pullRequests: { pageInfo: { hasNextPage: hasNext, endCursor }, nodes } },
+    },
+  });
+  await withFetch(
+    (_url, init) => {
+      const vars = JSON.parse(init.body).variables;
+      return vars.after
+        ? gqlResponse(200, page(false, null, [prNode({ number: 2, headRefName: "feat-2" })]))
+        : gqlResponse(200, page(true, "CUR1", [prNode({ number: 1, headRefName: "feat-1" })]));
+    },
+    async (calls) => {
+      const { prs } = await fetchPrsByBranch("tok", REPO);
+      assert.strictEqual(calls.length, 2, "fetched a second page");
+      assert.ok(prs.get("feat-1"));
+      assert.ok(prs.get("feat-2"));
+    }
+  );
+});
+
 test("fetchPrsByBranch: a GraphQL errors body resolves to an empty map", async () => {
   await withFetch(
     () => gqlResponse(200, { errors: [{ message: "Bad credentials" }] }),

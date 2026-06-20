@@ -133,13 +133,14 @@ panel as a `{ type: "branches" }` payload:
   row can tag itself "local only" / "local + remote" / "remote only"), and the
   ahead/behind distance from `%(upstream:track)` for the ↑/↓ indicator.
 - When the PR integration is enabled and a token is connected,
-  `github.fetchPrsByBranch` issues **one** `POST /graphql` request that returns
-  every PR in the repo (open, merged and closed) with its rollups (state, check rollup, comment
-  count) and the fields the filters need — author, created/updated timestamps,
-  assignee logins, review author/state, requested-reviewer logins, and
-  `viewer.login`. The result is mapped to branches by head ref client-side. A
-  transport or GraphQL failure degrades the whole view to "no PR data"; rows
-  still render.
+  `github.fetchPrsByBranch` issues a batched `POST /graphql` request (paged from
+  most-recently-updated, so one call for small repos and a bounded few for large
+  ones) that returns the repo's PRs (open, merged and closed) with their rollups
+  (state, check rollup, comment count) and the fields the filters need — author,
+  created/updated timestamps, assignee logins, review author/state,
+  requested-reviewer logins, and `viewer.login`. The result is mapped to branches
+  by head ref client-side. A transport or GraphQL failure degrades the whole view
+  to "no PR data"; rows still render.
 
 This GraphQL path is used **only** by the branches view. The per-worktree PR
 badges on the cards keep the existing per-branch REST `fetchPr` path unchanged,

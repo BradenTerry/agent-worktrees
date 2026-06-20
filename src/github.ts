@@ -359,14 +359,16 @@ export interface BranchPrInfo {
   reviewRequestedFromViewer: boolean;
 }
 
-/** The single GraphQL query: the repo's PRs (open, merged and closed) with their
- *  rollups + filter fields. We include merged/closed so a branch whose PR has
- *  landed still shows its status, matching the per-worktree REST path which
- *  queries state=all. */
-const PRS_BY_BRANCH_QUERY = `query($owner:String!,$name:String!){
+/** The GraphQL query: a page of the repo's PRs (open, merged and closed) with
+ *  their rollups + filter fields, ordered most-recently-updated first and paged
+ *  via `$after`. We include merged/closed so a branch whose PR has landed still
+ *  shows its status, matching the per-worktree REST path which queries
+ *  state=all. */
+const PRS_BY_BRANCH_QUERY = `query($owner:String!,$name:String!,$after:String){
   viewer { login }
   repository(owner:$owner, name:$name){
-    pullRequests(states:[OPEN,MERGED,CLOSED], first:100, orderBy:{field:UPDATED_AT, direction:DESC}){
+    pullRequests(states:[OPEN,MERGED,CLOSED], first:100, after:$after, orderBy:{field:UPDATED_AT, direction:DESC}){
+      pageInfo { hasNextPage endCursor }
       nodes{
         number title url isDraft state createdAt updatedAt headRefName
         author { login }
@@ -431,7 +433,12 @@ interface GqlPr {
 interface GqlResponse {
   data?: {
     viewer?: GqlLogin;
-    repository?: { pullRequests?: { nodes?: GqlPr[] } };
+    repository?: {
+      pullRequests?: {
+        pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+        nodes?: GqlPr[];
+      };
+    };
   };
   errors?: unknown[];
 }
@@ -474,37 +481,56 @@ function checksFromRollup(
   return rollupChecks(runs);
 }
 
+/** Page cap for the PR fetch: up to ~1000 PRs (100/page, UPDATED_AT desc). The
+ *  loop stops early once GitHub reports no further pages, so small repos cost a
+ *  single request; the cap only bounds pathologically large repos. */
+const MAX_PR_PAGES = 10;
+
 /**
- * Fetch the repo's OPEN PRs with rollups + filter fields in one
- * POST /graphql, mapped by head ref name. Any failure (transport, non-2xx,
- * GraphQL errors) resolves to an empty map — never throws. Separate code path
- * from the REST `fetchPr` the worktree cards use.
+ * Fetch the repo's PRs (open, merged, closed) with rollups + filter fields via
+ * paged POST /graphql, mapped by head ref name. Paging from most-recently-
+ * updated means a freshly merged PR is always covered; the cap bounds cost on
+ * huge repos. Any failure (transport, non-2xx, GraphQL errors) on the first page
+ * resolves to an empty map; a failure on a later page keeps the pages already
+ * collected. Never throws. Separate code path from the REST `fetchPr` the
+ * worktree cards use.
  */
 export async function fetchPrsByBranch(
   token: string,
   repo: RemoteInfo
 ): Promise<{ prs: Map<string, BranchPrInfo>; viewerLogin?: string }> {
   const prs = new Map<string, BranchPrInfo>();
-  let body: GqlResponse | undefined;
-  try {
-    const res = await fetch(`${API}/graphql`, {
-      method: "POST",
-      headers: { ...authHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: PRS_BY_BRANCH_QUERY,
-        variables: { owner: repo.owner, name: repo.repo },
-      }),
-    });
-    if (!res.ok) return { prs };
-    body = (await res.json()) as GqlResponse;
-  } catch {
-    return { prs };
-  }
-  // A GraphQL error body still comes back 200; treat it as failure.
-  if (!body || (body.errors && body.errors.length)) return { prs };
+  const nodes: GqlPr[] = [];
+  let viewerLogin: string | undefined;
+  let after: string | null = null;
 
-  const viewerLogin = body.data?.viewer?.login;
-  const nodes = body.data?.repository?.pullRequests?.nodes ?? [];
+  for (let page = 0; page < MAX_PR_PAGES; page++) {
+    let body: GqlResponse | undefined;
+    try {
+      const res = await fetch(`${API}/graphql`, {
+        method: "POST",
+        headers: { ...authHeaders(token), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: PRS_BY_BRANCH_QUERY,
+          variables: { owner: repo.owner, name: repo.repo, after },
+        }),
+      });
+      if (!res.ok) break;
+      body = (await res.json()) as GqlResponse;
+    } catch {
+      break;
+    }
+    // A GraphQL error body still comes back 200; treat it as failure.
+    if (!body || (body.errors && body.errors.length)) break;
+
+    if (viewerLogin === undefined) viewerLogin = body.data?.viewer?.login;
+    const conn = body.data?.repository?.pullRequests;
+    nodes.push(...(conn?.nodes ?? []));
+
+    const pageInfo = conn?.pageInfo;
+    if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+    after = pageInfo.endCursor;
+  }
 
   for (const pr of nodes) {
     if (!pr || !pr.headRefName) continue;
