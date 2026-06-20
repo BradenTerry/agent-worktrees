@@ -1,9 +1,10 @@
 {
-  "name": "worktree-view",
-  "displayName": "Worktree View",
-  "description": "Browse and switch between git worktrees from a side panel, without reloading the window.",
+  "name": "agent-worktrees",
+  "displayName": "Agent Worktrees",
+  "description": "Run and monitor multiple Claude Code agents across your git worktrees from a single side panel.",
   "version": "0.0.1",
   "publisher": "bradenterry",
+  "icon": "media/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/BradenTerry/agent-worktrees.git"
@@ -72,7 +73,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node --test"
+    "test": "npm run compile && node --test",
+    "package": "npx --yes @vscode/vsce package --readme-path MARKETPLACE.md"
   },
   "devDependencies": {
     "@types/node": "^20.x",

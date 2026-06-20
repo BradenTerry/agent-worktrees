@@ -1,53 +1,75 @@
-# Worktree View
+# Agent Worktrees
 
-A VS Code extension for working across the git worktrees of a repository — mount
-them **without reloading the window**, and run and monitor multiple Claude agent
-sessions per worktree from a single panel.
+A VS Code side panel for running and monitoring multiple Claude Code agents
+across the git worktrees of a repository. Spin up a Claude session in any
+worktree, watch each one go **active**, **waiting**, or **idle** at a glance, and
+manage the worktrees themselves without leaving the panel.
 
 ## Why
 
-`Open Folder` / `vscode.openFolder` swaps the single window root and triggers a
-full window + extension-host reload. That makes it painful to hop between the
-worktrees where you have agents running.
-
-This extension uses **multi-root workspaces** instead: each worktree is added as
-an extra workspace folder via `workspace.updateWorkspaceFolders`. As long as the
-first folder (index 0) is left untouched, VS Code does **not** reload the window,
-so switching is instant.
+Worktrees are the natural unit for running several agents in parallel: each gets
+an isolated checkout, so they never step on each other's files. But coordinating
+them means juggling terminals and `git worktree` commands by hand, with no single
+place to see which agent needs you. This panel puts every worktree, its git
+state, and its running agents in one view, and floats the ones that need
+attention to the top.
 
 ## Features
 
 - **Worktrees panel** (webview) listing every worktree (primary + linked), with
-  branch name and badges for `primary` / `detached` / `locked`. Worktrees with a
+  branch name and badges for `Primary` / `detached` / `locked`. Worktrees with a
   waiting or active agent float to the top so attention is routed automatically.
-- **Per-worktree git status** — a clean/changed count plus ahead/behind distance
-  from the upstream branch.
-- **New Worktree** — `git worktree add` for a new branch, mounted on creation.
-- **Delete Worktree** — `git worktree remove` (offers `--force` when dirty).
-- **Open / Unmount** — add or remove a worktree as a workspace root, no reload
-  (the primary root is protected).
-- **Agents** — start one or more Claude CLI sessions per worktree, each in its
-  own terminal. Sessions can be revealed (focus) or stopped from the panel, and
-  closing a terminal removes its row.
+- **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
+  the ahead/behind distance from the upstream branch, refreshed as files change.
+- **Agent** — start one or more Claude CLI sessions in a worktree, each in its
+  own terminal. Sessions can be revealed (focus), renamed, or stopped from the
+  panel, and closing a terminal removes its row.
+- **Agent & Worktree** — create a new worktree with Claude (`claude -w`) and
+  start an agent in it in a single step.
+- **New Worktree** — `git worktree add` for a new (or existing) branch.
+- **Delete Worktree** — `git worktree remove` (offers `--force` when dirty, and
+  stops any agents running in the worktree first).
+- **Skills used** — each agent row shows a chip with the count of Claude skills
+  it has invoked; click it for the full list.
+- **Collapsible agent lists** with per-status counts, so a card reads at a glance
+  and expands to the individual sessions on demand.
 
 ## Agent status from hooks
 
-Each agent is launched with a generated settings file
-(`claude --settings …`) whose [hooks](https://docs.claude.com/en/docs/claude-code/hooks)
-report lifecycle events back to the extension over a loopback HTTP listener. The
-events map to a status shown in the panel:
+The panel cannot tell on its own whether a Claude session is working, waiting on
+you, or idle. Claude Code's [hooks](https://docs.claude.com/en/docs/claude-code/hooks)
+fire exactly on those transitions, so the extension installs one small emitter
+script wired to a handful of events. The events map to a status shown in the
+panel:
 
-| Hook                                       | Status    |
-| ------------------------------------------ | --------- |
-| `SessionStart`, `Stop`                     | idle      |
-| `UserPromptSubmit`, `PreToolUse`, `PostToolUse` | active |
-| `Notification` (permission / question)     | waiting   |
+| Hook                                              | Status            |
+| ------------------------------------------------- | ----------------- |
+| `SessionStart`, `Stop`                            | idle              |
+| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`   | active            |
+| `Notification` (permission / question)            | waiting           |
+| `SessionEnd`                                       | removed from panel |
 
-The extension passes each agent its identity and the listener's port/token via
-the terminal environment (`WT_AGENT_*`); the bundled `media/agent-hook.js`
-reporter reads these and POSTs the status. The listener binds to `127.0.0.1`
-only and rejects reports without the per-session token. Status reporting needs
-`node` on `PATH` and an unsandboxed network loopback.
+Installing the hooks edits your global `~/.claude/settings.json`, so it is always
+gated behind **explicit consent** in the panel — nothing is written until you
+accept. On accept, the bundled `hooks/agent-worktrees-emit.mjs` is copied to a
+stable location (`~/.claude/agent-worktrees/hooks/`) and wired into settings.
+
+Each hook event runs the emitter, which derives the session's worktree from git
+and writes one small state file per session to
+`~/.claude/agent-worktrees/sessions/`. The extension watches that directory and
+groups the sessions by worktree. **Nothing is sent over the network** — status
+flows entirely through local files. Status reporting needs `node` on `PATH`.
+
+You can also rename an agent from inside its session by typing
+`/rename-agent <name>`; the emitter applies the name and blocks the prompt so
+Claude never processes it.
+
+## Requirements
+
+- The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`)
+  on your `PATH`.
+- `git` and `node` on your `PATH`.
+- A workspace whose first folder is inside a git repository.
 
 ## Develop
 
@@ -65,17 +87,22 @@ that is a git repository (with worktrees) to populate the panel.
 flowchart LR
     G["git worktree list / status<br/>--porcelain"] --> P[WorktreeWebviewProvider]
     P --> V[Worktrees panel webview]
-    V -->|Open / Unmount| U["updateWorkspaceFolders()<br/>(no reload at index >= 1)"]
+    V -->|Agent| T["createTerminal({ cwd })<br/>claude --session-id"]
+    V -->|Agent & Worktree| TW["createTerminal<br/>claude --session-id -w"]
     V -->|New / Delete| WT["git worktree add / remove"]
-    V -->|New Agent| T["createTerminal({ cwd, env })<br/>claude --settings hooks.json"]
-    T -->|hook POST| L["localhost status listener"]
-    L --> P
-    U --> W[Multi-root workspace]
+    H["Claude Code hooks<br/>(~/.claude/settings.json)"] --> E["agent-worktrees-emit.mjs"]
+    E -->|per-session state file| S["~/.claude/agent-worktrees/sessions"]
+    S -->|FileSystemWatcher| P
+    T --> H
+    TW --> H
 ```
 
 ## Caveats
 
-- Adding/removing **folder index 0** restarts the extension host; this extension
-  only ever appends/removes at index >= 1 to avoid that.
 - The repository is located from the first workspace folder.
-- Agent sessions are tracked in memory and are not restored across a reload.
+- Agent terminals are tracked in memory; after an extension-host reload the panel
+  can still show and stop agents (by session id / working directory) but loses
+  the terminal handle used to reveal them.
+- A terminal closed without `/exit` never fires `SessionEnd`; its state file is
+  pruned automatically once it is older than 24 hours.
+</content>

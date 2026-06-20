@@ -85,7 +85,7 @@ jobs:
         run: npm test
 
       - name: Package extension
-        run: npx --yes @vscode/vsce package ${{ steps.channel.outputs.pre_release_flag }} --out worktree-view.vsix
+        run: npx --yes @vscode/vsce package ${{ steps.channel.outputs.pre_release_flag }} --readme-path MARKETPLACE.md --out agent-worktrees.vsix
 
       # On a tag push the tag already exists; on a manual run gh creates it at this commit
       # (a tag created with GITHUB_TOKEN does not re-trigger the push-tag run above).
@@ -95,7 +95,7 @@ jobs:
           PRERELEASE_FLAG: ${{ steps.channel.outputs.pre_release_flag }}
           TAG: ${{ steps.channel.outputs.tag }}
         run: |
-          gh release create "$TAG" worktree-view.vsix \
+          gh release create "$TAG" agent-worktrees.vsix \
             --title "$TAG" \
             --target "$GITHUB_SHA" \
             --generate-notes \
@@ -103,4 +103,4 @@ jobs:
 
       - name: Publish to VS Code Marketplace
         if: ${{ env.VSCE_PAT != '' }}
-        run: npx --yes @vscode/vsce publish ${{ steps.channel.outputs.pre_release_flag }} --packagePath worktree-view.vsix -p "$VSCE_PAT"
+        run: npx --yes @vscode/vsce publish ${{ steps.channel.outputs.pre_release_flag }} --packagePath agent-worktrees.vsix -p "$VSCE_PAT"
