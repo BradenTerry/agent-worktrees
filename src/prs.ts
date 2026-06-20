@@ -225,5 +225,7 @@ function sigOf(p: PrInfo | null | undefined): string {
     p.changesRequested,
     p.reviewsPending,
     p.comments,
+    p.mergeState ?? "",
+    p.autoMerge ? 1 : 0,
   ].join(":");
 }

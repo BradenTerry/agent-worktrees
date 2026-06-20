@@ -54,6 +54,23 @@ export interface PrInfo {
   reviewsPending: number;
   /** Issue + review-thread comments. */
   comments: number;
+  /** GitHub's mergeable_state, lowercased. The one users care about here is
+   *  "behind": the branch is out of date with its base and must be updated
+   *  before it can merge (GitHub's "This branch is out-of-date with the base
+   *  branch"), even when every check is green. Others are
+   *  blocked/clean/dirty/draft/has_hooks/unstable/unknown. */
+  mergeState?:
+    | "behind"
+    | "blocked"
+    | "clean"
+    | "dirty"
+    | "draft"
+    | "has_hooks"
+    | "unstable"
+    | "unknown";
+  /** Auto-merge is enabled: GitHub will merge this PR automatically once its
+   *  required checks/reviews pass. */
+  autoMerge?: boolean;
   updatedAt?: string;
   /** Head commit SHA. Used to detect a new push so polling can speed up while
    *  the fresh checks register; not displayed. */
@@ -246,6 +263,10 @@ interface RawPrDetail {
   comments?: number;
   review_comments?: number;
   requested_reviewers?: unknown[];
+  /** Present only on the single-PR detail endpoint, not the list. */
+  mergeable_state?: string;
+  /** null when off; an object describing the enabled merge when on. */
+  auto_merge?: unknown;
 }
 
 /**
@@ -321,6 +342,8 @@ export async function fetchPr(
     changesRequested: rev.changesRequested,
     reviewsPending: requested,
     comments,
+    mergeState: mapMergeState(detail?.mergeable_state),
+    autoMerge: !!detail?.auto_merge,
     updatedAt: raw.updated_at,
     headSha: sha,
   };
@@ -594,6 +617,32 @@ export async function fetchPrsByBranch(
   }
 
   return { prs, viewerLogin };
+}
+
+/**
+ * Map GitHub's mergeable_state string onto our union. Anything unrecognised
+ * (including the transient "unknown" GitHub returns while it recomputes
+ * mergeability) becomes "unknown" so the panel shows no flag for it.
+ */
+export function mapMergeState(s: string | undefined): PrInfo["mergeState"] {
+  switch ((s ?? "").toLowerCase()) {
+    case "behind":
+      return "behind";
+    case "blocked":
+      return "blocked";
+    case "clean":
+      return "clean";
+    case "dirty":
+      return "dirty";
+    case "draft":
+      return "draft";
+    case "has_hooks":
+      return "has_hooks";
+    case "unstable":
+      return "unstable";
+    default:
+      return "unknown";
+  }
 }
 
 // --- pure mapping helpers (unit-tested) -------------------------------------

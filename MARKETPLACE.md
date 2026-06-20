@@ -25,6 +25,10 @@ The **Branches view** opens as a full editor tab listing every branch with its P
   names and `Primary` / `detached` / `locked` badges.
 - **Live git status per worktree** — changed-file count, `+`/`−` line totals, and
   ahead/behind from upstream, updated as you work.
+- **PR status at a glance** — when a worktree's branch has a pull request, the
+  card shows its state, CI checks, reviews and comments, plus an **Out of date**
+  pill when the branch is behind its base branch and an **Auto-merge** pill when
+  auto-merge is enabled.
 - **Start agents in a click** — launch a Claude CLI session in any worktree, each
   in its own terminal. Reveal or stop it from the panel.
 - **Agent & Worktree in one step** — create a fresh worktree with `claude -w` and
