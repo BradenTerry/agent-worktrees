@@ -99,13 +99,6 @@ export function folderIndex(fsPath: string): number {
   return folders.findIndex((f) => normalize(f.uri.fsPath) === target);
 }
 
-/** Highest-priority agent status on a worktree, for attention sorting. */
-function attentionRank(wt: WorktreeVM): number {
-  if (wt.agents.some((a) => a.status === "waiting")) return 0;
-  if (wt.agents.some((a) => a.status === "active")) return 1;
-  return 2;
-}
-
 /** Gather worktrees of the repo containing the first workspace folder. */
 export async function gatherWorktrees(
   agentsByPath?: Map<string, AgentVM[]>,
@@ -153,12 +146,9 @@ export async function gatherWorktrees(
     agents: agentsByPath?.get(normalize(wt.path)) ?? [],
   }));
 
-  // Primary stays pinned to the top; the rest float by attention so worktrees
-  // with a waiting/active agent surface first.
-  vms.sort((a, b) => {
-    if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
-    return attentionRank(a) - attentionRank(b);
-  });
+  // Keep the primary worktree pinned to the top; everything else stays in the
+  // natural `git worktree list` order.
+  vms.sort((a, b) => (a.isPrimary === b.isPrimary ? 0 : a.isPrimary ? -1 : 1));
 
   // Name the repo after its primary worktree so the header is stable even when
   // the open folder is a linked worktree.

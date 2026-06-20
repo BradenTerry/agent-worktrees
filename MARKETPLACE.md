@@ -5,7 +5,7 @@
 Worktrees are the natural unit for running agents in parallel: each gets an
 isolated checkout, so sessions never step on each other's files. Agent Worktrees
 puts every worktree, its git state, and its running Claude agents in a single
-view, and floats the ones that need you to the top.
+view.
 
 ## Screenshots
 
@@ -28,8 +28,6 @@ view, and floats the ones that need you to the top.
 - **Open in a new window** — open any worktree in its own VS Code window in a
   click; if one is already open for that worktree, it is focused instead of
   duplicated.
-- **Attention routing** — worktrees with an agent that is *waiting* on you or
-  *active* automatically rise to the top of the list.
 - **Live agent status** — each agent shows as **active**, **waiting**, or
   **idle**, driven by Claude Code hook events.
 - **Skills used** — see which Claude skills each agent has invoked.

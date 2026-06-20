@@ -11,8 +11,7 @@ Worktrees are the natural unit for running several agents in parallel: each gets
 an isolated checkout, so they never step on each other's files. But coordinating
 them means juggling terminals and `git worktree` commands by hand, with no single
 place to see which agent needs you. This panel puts every worktree, its git
-state, and its running agents in one view, and floats the ones that need
-attention to the top.
+state, and its running agents in one view.
 
 ## Screenshots
 
@@ -25,8 +24,7 @@ attention to the top.
 ## Features
 
 - **Worktrees panel** (webview) listing every worktree (primary + linked), with
-  branch name and badges for `Primary` / `detached` / `locked`. Worktrees with a
-  waiting or active agent float to the top so attention is routed automatically.
+  branch name and badges for `Primary` / `detached` / `locked`.
 - **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
   the ahead/behind distance from the upstream branch, refreshed as files change.
 - **Agent** — start one or more Claude CLI sessions in a worktree, each in its
