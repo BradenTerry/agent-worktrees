@@ -5,7 +5,7 @@ import * as cp from "child_process";
 import { randomUUID } from "crypto";
 import { gatherWorktrees, normalize, AgentVM } from "./worktreeData";
 import { addWorktree, removeWorktree, listWorktrees } from "./git";
-import { hooksInstalled, installHooks, SESSIONS_DIR, HOOKS } from "./hooks";
+import { hooksInstalled, installHooks, sessionsDir, HOOKS } from "./hooks";
 import { readSessionsByWorktree } from "./sessionStore";
 
 /** Messages sent from the webview to the extension. */
@@ -47,17 +47,21 @@ export class WorktreeWebviewProvider
   /** Last name we applied to each session's terminal, so we only rename on a
    *  real change (renaming reveals the terminal, so doing it every event churns). */
   private appliedTerminalNames = new Map<string, string>();
+  /** Where the emitter writes per-session state, under the extension's global
+   *  storage (so nothing of ours lives in ~/.claude). Derived from the context. */
+  private readonly sessionsDir: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.sessionsDir = sessionsDir(context);
     // Ensure the sessions dir exists so the watcher attaches even before the
     // first hook fires.
     try {
-      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      fs.mkdirSync(this.sessionsDir, { recursive: true });
     } catch {
       /* best effort */
     }
     this.watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(SESSIONS_DIR), "*.json")
+      new vscode.RelativePattern(vscode.Uri.file(this.sessionsDir), "*.json")
     );
     const onChange = () => void this.refresh();
     this.watcher.onDidCreate(onChange);
@@ -126,7 +130,7 @@ export class WorktreeWebviewProvider
     if (!this.view) return;
     const installed = await hooksInstalled();
     const agents = installed
-      ? await readSessionsByWorktree(SESSIONS_DIR)
+      ? await readSessionsByWorktree(this.sessionsDir)
       : undefined;
     if (agents) {
       await this.syncTerminalNames(agents);
@@ -268,7 +272,9 @@ export class WorktreeWebviewProvider
       });
     }
     try {
-      fs.rmSync(path.join(SESSIONS_DIR, sessionId + ".json"), { force: true });
+      fs.rmSync(path.join(this.sessionsDir, sessionId + ".json"), {
+        force: true,
+      });
     } catch {
       /* best effort */
     }
@@ -406,7 +412,7 @@ export class WorktreeWebviewProvider
   /** Path of the state file backing a session, or undefined for an unsafe id. */
   private sessionFile(sessionId: string): string | undefined {
     return /^[A-Za-z0-9._-]+$/.test(sessionId)
-      ? path.join(SESSIONS_DIR, sessionId + ".json")
+      ? path.join(this.sessionsDir, sessionId + ".json")
       : undefined;
   }
 
@@ -509,7 +515,7 @@ export class WorktreeWebviewProvider
 
     // Every agent whose worktree is this path (or nested under it).
     const target = normalize(fsPath);
-    const byPath = await readSessionsByWorktree(SESSIONS_DIR);
+    const byPath = await readSessionsByWorktree(this.sessionsDir);
     const agents: AgentVM[] = [];
     for (const [key, list] of byPath) {
       if (key === target || key.startsWith(target + path.sep)) {

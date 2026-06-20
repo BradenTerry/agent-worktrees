@@ -24,6 +24,7 @@
     edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-7 7-3.5.5.5-3.5z"/></svg>',
     window:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
+    info: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5h.01"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
   };
@@ -92,6 +93,23 @@
       agents
         .map((a) => {
           const s = statusOf(a);
+          // Full, untruncated text for the hover tooltip: the work summary, with
+          // the user-given name as a prefix when one is set. The label in the row
+          // is clipped with an ellipsis, so this is how you read the whole thing.
+          const fullInfo = a.summary
+            ? a.name
+              ? a.name + " — " + a.summary
+              : a.summary
+            : a.label;
+          const infoBtn = a.summary
+            ? '<span class="agent-info" title="' +
+              esc(fullInfo) +
+              '" aria-label="Full summary: ' +
+              esc(fullInfo) +
+              '">' +
+              icons.info +
+              "</span>"
+            : "";
           const skills = a.skills || [];
           const skillChip = skills.length
             ? '<button class="skill-chip" data-action="showSkills" data-session="' +
@@ -117,6 +135,7 @@
             '<span class="agent-label">' +
             esc(a.label) +
             "</span>" +
+            infoBtn +
             '<span class="agent-meta">' +
             esc(agentMeta(a)) +
             "</span>" +

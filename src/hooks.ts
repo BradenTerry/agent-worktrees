@@ -18,19 +18,36 @@ import * as vscode from "vscode";
  */
 
 const HOME = os.homedir();
-/** Where the emitter writes per-session state files. */
-export const SESSIONS_DIR = path.join(
-  HOME,
-  ".claude",
-  "agent-worktrees",
-  "sessions"
-);
-/** Stable home for the emitter script. The command we write into settings.json
- *  points HERE, not at the extension's versioned install dir, which VS Code
- *  deletes on every update — a running session keeps invoking the cached path. */
-export const HOOKS_DIR = path.join(HOME, ".claude", "agent-worktrees", "hooks");
 const SETTINGS_PATH = path.join(HOME, ".claude", "settings.json");
 const EMITTER = "agent-worktrees-emit.mjs";
+/** Where session data + the emitter lived before they moved into the extension's
+ *  global storage. Cleaned up on activation so nothing of ours lingers in the
+ *  user's ~/.claude tree. */
+const LEGACY_DIR = path.join(HOME, ".claude", "agent-worktrees");
+
+/** Where the emitter writes per-session state files: under the extension's
+ *  global storage, so nothing of ours lives in the user's ~/.claude tree. */
+export function sessionsDir(context: vscode.ExtensionContext): string {
+  return path.join(context.globalStorageUri.fsPath, "sessions");
+}
+/** Stable home for the emitter script. Global storage persists across extension
+ *  updates (the versioned install dir does not), so the command we write into
+ *  settings.json keeps resolving after an update — a running session can invoke
+ *  the cached path. */
+export function hooksDir(context: vscode.ExtensionContext): string {
+  return path.join(context.globalStorageUri.fsPath, "hooks");
+}
+
+/** Best-effort removal of the pre-global-storage data/emitter directory. Safe to
+ *  call repeatedly: the emitter is a fresh process per hook event reading the
+ *  (repaired) command from settings.json, so the old copy is never in use. */
+async function cleanupLegacy(): Promise<void> {
+  try {
+    await fs.promises.rm(LEGACY_DIR, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
+}
 
 /** A Claude Code hook this extension manages. Every hook runs the same emitter;
  *  they differ only by the event (and an optional tool matcher). */
@@ -83,9 +100,12 @@ export const HOOKS: HookSpec[] = [
   },
 ];
 
-/** The `node "<HOOKS_DIR>/<emitter>"` command every managed hook runs. */
-function hookCommand(): string {
-  return `node "${path.join(HOOKS_DIR, EMITTER)}"`;
+/** The command every managed hook runs: the emitter, told where to write state.
+ *  The `--dir` arg is how the (separate, Claude-spawned) emitter process learns
+ *  the global-storage path; it cannot read the extension's context. */
+function hookCommand(context: vscode.ExtensionContext): string {
+  const emitter = path.join(hooksDir(context), EMITTER);
+  return `node "${emitter}" --dir "${sessionsDir(context)}"`;
 }
 
 // --- settings.json plumbing -------------------------------------------------
@@ -145,12 +165,13 @@ export async function hooksInstalled(): Promise<boolean> {
   return HOOKS.every((spec) => !!findHook(settings, spec));
 }
 
-/** Copy the bundled emitter into the stable HOOKS_DIR, overwriting in place so
+/** Copy the bundled emitter into the stable hooks dir, overwriting in place so
  *  updates ship a new body to the path the command already points at. */
 async function ensureEmitter(context: vscode.ExtensionContext): Promise<void> {
-  await fs.promises.mkdir(HOOKS_DIR, { recursive: true });
+  const dir = hooksDir(context);
+  await fs.promises.mkdir(dir, { recursive: true });
   const src = path.join(context.extensionUri.fsPath, "hooks", EMITTER);
-  await fs.promises.copyFile(src, path.join(HOOKS_DIR, EMITTER));
+  await fs.promises.copyFile(src, path.join(dir, EMITTER));
 }
 
 /**
@@ -163,7 +184,7 @@ export async function installHooks(
 ): Promise<void> {
   await ensureEmitter(context);
   const settings = await readSettings();
-  const command = hookCommand();
+  const command = hookCommand(context);
   let changed = false;
   for (const spec of HOOKS) {
     const existing = findHook(settings, spec);
@@ -176,7 +197,8 @@ export async function installHooks(
     }
   }
   if (changed) await writeSettings(settings);
-  await fs.promises.mkdir(SESSIONS_DIR, { recursive: true });
+  await fs.promises.mkdir(sessionsDir(context), { recursive: true });
+  await cleanupLegacy();
 }
 
 /**
@@ -192,7 +214,7 @@ export async function syncHooks(
     const anyInstalled = HOOKS.some((spec) => !!findHook(settings, spec));
     if (!anyInstalled) return;
     await ensureEmitter(context);
-    const command = hookCommand();
+    const command = hookCommand(context);
     let changed = false;
     for (const spec of HOOKS) {
       const existing = findHook(settings, spec);
@@ -202,6 +224,7 @@ export async function syncHooks(
       }
     }
     if (changed) await writeSettings(settings);
+    await cleanupLegacy();
   } catch {
     /* best effort: a repair failure shouldn't block activation */
   }

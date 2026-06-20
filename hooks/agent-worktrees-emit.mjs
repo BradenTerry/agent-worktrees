@@ -8,8 +8,10 @@
  *
  * One script handles every event — it switches on `hook_event_name`.
  *
- * State dir resolution:
- *   $AGENT_WORKTREES_DIR (absolute), else  ~/.claude/agent-worktrees/sessions
+ * State dir resolution (first that is set wins):
+ *   --dir <path> arg  (how the VS Code extension points us at its global storage)
+ *   $AGENT_WORKTREES_DIR
+ *   ~/.claude/agent-worktrees/sessions  (legacy fallback)
  *
  * Per-session file: <dir>/<session_id>.json
  *   = { sessionId, worktree, branch, state, task, model, startedAt, ts }
@@ -20,7 +22,14 @@ import { writeFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 
+/** `--dir <path>` from the hook command, when present. */
+function argDir() {
+  const i = process.argv.indexOf("--dir");
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : null;
+}
+
 const SESSIONS_DIR =
+  argDir() ||
   process.env.AGENT_WORKTREES_DIR ||
   join(homedir(), ".claude", "agent-worktrees", "sessions");
 
@@ -84,7 +93,10 @@ function main() {
     }
   }
 
-  const event = payload.hook_event_name || process.argv[2] || "Notification";
+  // argv may carry `--dir <path>`; only treat a non-flag positional as an event.
+  const argEvent =
+    process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : null;
+  const event = payload.hook_event_name || argEvent || "Notification";
   const cwd = payload.cwd || process.cwd();
 
   const top = git(cwd, ["rev-parse", "--show-toplevel"]) || cwd;

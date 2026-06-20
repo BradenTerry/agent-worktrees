@@ -2,6 +2,15 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 0.0.3
+
+- **Full summary on hover** — agent rows now show an info icon after the name;
+  hover it to read the complete work summary when the row text is truncated.
+- **Session data moved out of `~/.claude`** — the emitter and its per-session
+  state files now live in the extension's global storage instead of
+  `~/.claude/agent-worktrees/`. Installed hooks migrate automatically on the
+  next launch, and the old directory is cleaned up.
+
 ## 0.0.2
 
 - **Open in new window** — each worktree card has a button to open that worktree

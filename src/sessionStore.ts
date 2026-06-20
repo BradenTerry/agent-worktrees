@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import { SESSIONS_DIR } from "./hooks";
 import { AgentVM, AgentStatus, normalize } from "./worktreeData";
 
 /** Raw per-session state written by the emitter hook. */
@@ -33,7 +32,7 @@ const VALID: AgentStatus[] = ["active", "waiting", "idle"];
  * stable sequential labels. Stale files are pruned as they are encountered.
  */
 export async function readSessionsByWorktree(
-  dir = SESSIONS_DIR
+  dir: string
 ): Promise<Map<string, AgentVM[]>> {
   const files = await fs.promises.readdir(dir).catch(() => [] as string[]);
   const now = Date.now();

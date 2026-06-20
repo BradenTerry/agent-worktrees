@@ -55,14 +55,20 @@ panel:
 
 Installing the hooks edits your global `~/.claude/settings.json`, so it is always
 gated behind **explicit consent** in the panel — nothing is written until you
-accept. On accept, the bundled `hooks/agent-worktrees-emit.mjs` is copied to a
-stable location (`~/.claude/agent-worktrees/hooks/`) and wired into settings.
+accept. On accept, the bundled `hooks/agent-worktrees-emit.mjs` is copied into
+the extension's global storage and wired into settings (the command passes the
+state directory to the emitter via `--dir`, since that separate process can't
+read the extension's context).
 
 Each hook event runs the emitter, which derives the session's worktree from git
-and writes one small state file per session to
-`~/.claude/agent-worktrees/sessions/`. The extension watches that directory and
-groups the sessions by worktree. **Nothing is sent over the network** — status
-flows entirely through local files. Status reporting needs `node` on `PATH`.
+and writes one small state file per session into the extension's **global
+storage** (`<globalStorage>/sessions/`, e.g.
+`~/Library/Application Support/Code/User/globalStorage/bradenterry.agent-worktrees/`
+on macOS). The extension watches that directory and groups the sessions by
+worktree. **Nothing is sent over the network** — status flows entirely through
+local files, and nothing of the extension's lives in your `~/.claude` tree apart
+from the hook entries in `settings.json`. Status reporting needs `node` on
+`PATH`.
 
 You can also rename an agent from inside its session by typing
 `/rename-agent <name>`; the emitter applies the name and blocks the prompt so
@@ -94,8 +100,8 @@ flowchart LR
     V -->|Agent| T["createTerminal({ cwd })<br/>claude --session-id"]
     V -->|Agent & Worktree| TW["createTerminal<br/>claude --session-id -w"]
     V -->|New / Delete| WT["git worktree add / remove"]
-    H["Claude Code hooks<br/>(~/.claude/settings.json)"] --> E["agent-worktrees-emit.mjs"]
-    E -->|per-session state file| S["~/.claude/agent-worktrees/sessions"]
+    H["Claude Code hooks<br/>(~/.claude/settings.json)"] --> E["agent-worktrees-emit.mjs<br/>--dir &lt;globalStorage&gt;/sessions"]
+    E -->|per-session state file| S["extension global storage<br/>&lt;globalStorage&gt;/sessions"]
     S -->|FileSystemWatcher| P
     T --> H
     TW --> H
