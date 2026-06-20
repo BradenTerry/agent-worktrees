@@ -146,9 +146,14 @@ export async function gatherWorktrees(
     agents: agentsByPath?.get(normalize(wt.path)) ?? [],
   }));
 
-  // Keep the primary worktree pinned to the top; everything else stays in the
-  // natural `git worktree list` order.
-  vms.sort((a, b) => (a.isPrimary === b.isPrimary ? 0 : a.isPrimary ? -1 : 1));
+  // Primary worktree pinned to the top; the rest sorted by name.
+  vms.sort((a, b) => {
+    if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
 
   // Name the repo after its primary worktree so the header is stable even when
   // the open folder is a linked worktree.
