@@ -28,15 +28,14 @@ state, and its running agents in one view.
 - **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
   the ahead/behind distance from the upstream branch, refreshed as files change.
 - **Agent** — start one or more Claude CLI sessions in a worktree, each in its
-  own terminal. Sessions can be revealed (focus), renamed, or stopped from the
-  panel, and closing a terminal removes its row.
+  own terminal. Sessions can be revealed (focus) or stopped from the panel, and
+  closing a terminal removes its row.
 - **Agent & Worktree** — create a new worktree with Claude (`claude -w`) and
   start an agent in it in a single step.
 - **Open in new window** — open any worktree in its own VS Code window from the
   card header. If a window for that worktree is already open, VS Code focuses it
   instead of duplicating (the focus behavior uses the `code` CLI when it is on
   `PATH`; otherwise a fresh window is always opened).
-- **New Worktree** — `git worktree add` for a new (or existing) branch.
 - **Delete Worktree** — `git worktree remove` (offers `--force` when dirty, and
   stops any agents running in the worktree first).
 - **Skills used** — each agent row shows a chip with the count of Claude skills
