@@ -30,3 +30,14 @@ test("settings - GitHub PR integration", async ({ page }) => {
   await mountPanel(page, { data, message: { type: "openSettings" } });
   await page.locator("#root").screenshot({ path: shot("settings.png") });
 });
+
+test("skills - per-agent skills modal", async ({ page }) => {
+  const data = overviewData();
+  // Shorter viewport so the modal frames over the panel without acres of dim.
+  await mountPanel(page, { data, height: 600 });
+  // Open the skills list for the checkout agent (task-spec, source-generator).
+  await page.locator('.skill-chip[data-session="s-co-1"]').click();
+  await page.waitForSelector(".modal-backdrop .skill-list");
+  // Full viewport: the dimmed panel stays visible behind the centered modal.
+  await page.screenshot({ path: shot("skills.png") });
+});

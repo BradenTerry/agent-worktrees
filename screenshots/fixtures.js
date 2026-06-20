@@ -184,8 +184,8 @@ function expandedPaths(data) {
  * Mount the real panel UI in `page` with the given data, then optionally send a
  * follow-up message (e.g. to open the settings view). Returns when rendered.
  */
-async function mountPanel(page, { data, theme = THEME_DARK, width = 460, message }) {
-  await page.setViewportSize({ width, height: 900 });
+async function mountPanel(page, { data, theme = THEME_DARK, width = 460, height = 900, message }) {
+  await page.setViewportSize({ width, height });
   await page.setContent(
     `<!doctype html><html><head><meta charset="utf-8">` +
       `<style>:root{${theme}} html,body{height:auto;} body{margin:0;background:var(--vscode-editor-background);} ` +
