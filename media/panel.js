@@ -37,6 +37,8 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
+    robot:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.4V2"/><circle cx="8" cy="1.6" r="0.6" fill="currentColor"/><rect x="3" y="4" width="10" height="8" rx="2"/><path d="M3 8H1.6M14.4 8H13"/><circle cx="6" cy="8" r="0.9" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="0.9" fill="currentColor" stroke="none"/></svg>',
     gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>',
     pr: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8M12 11V7a2.5 2.5 0 0 0-2.5-2.5H7M9 2.5L7 4.5l2 2"/></svg>',
     branch:
@@ -135,6 +137,17 @@
               skills.length +
               "</button>"
             : "";
+          const subs = a.subagents || 0;
+          const subChip = subs
+            ? '<span class="subagent-chip" title="' +
+              subs +
+              " subagent" +
+              (subs === 1 ? "" : "s") +
+              ' used">' +
+              icons.robot +
+              subs +
+              "</span>"
+            : "";
           return (
             '<div class="agent-row' +
             (s === "waiting" ? " attention" : "") +
@@ -149,6 +162,7 @@
             '">' +
             esc(a.label) +
             "</span>" +
+            subChip +
             skillChip +
             '<span class="row-actions">' +
             '<button class="iconbtn" data-action="stopAgent" data-session="' +
@@ -172,7 +186,22 @@
    */
   function agentsBar(agents, path) {
     const counts = { active: 0, waiting: 0, idle: 0 };
-    for (const a of agents) counts[statusOf(a)]++;
+    let subTotal = 0;
+    for (const a of agents) {
+      counts[statusOf(a)]++;
+      subTotal += a.subagents || 0;
+    }
+
+    const subStat = subTotal
+      ? '<span class="agents-bar-subagents" title="' +
+        subTotal +
+        " subagent" +
+        (subTotal === 1 ? "" : "s") +
+        ' used in this worktree">' +
+        icons.robot +
+        subTotal +
+        "</span>"
+      : "";
 
     const stat = (key) =>
       '<span class="stat ' +
@@ -197,6 +226,7 @@
       '<span class="agents-bar-count">' +
       agents.length +
       "</span>" +
+      subStat +
       '<span class="agents-bar-stats">' +
       stat("active") +
       stat("waiting") +

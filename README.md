@@ -40,6 +40,9 @@ state, and its running agents in one view.
   stops any agents running in the worktree first).
 - **Skills used** — each agent row shows a chip with the count of Claude skills
   it has invoked; click it for the full list.
+- **Subagents used** — a robot glyph with a count tracks how many subagents each
+  agent has spawned (every `Task` tool call is one subagent). The Agents bar sums
+  it across the worktree; each agent row shows its own.
 - **Collapsible agent lists** with per-status counts, so a card reads at a glance
   and expands to the individual sessions on demand.
 - **Branches view** — a toolbar button opens a dedicated editor tab listing every
