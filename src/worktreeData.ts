@@ -57,6 +57,10 @@ export interface WorktreeVM {
   /** GitHub PR status for this worktree's branch (when the integration is on
    *  and a PR exists). null = looked up, no PR; undefined = not looked up. */
   pr?: PrInfo | null;
+  /** True when this worktree's repository is currently open in the Source
+   *  Control view (i.e. the scope is "set"). Only set when the SCM integration
+   *  is enabled. */
+  scmActive?: boolean;
 }
 
 export interface WorktreeData {
@@ -71,6 +75,8 @@ export interface WorktreeData {
   github?: GithubConnection;
   /** Whether the PR integration is toggled on. */
   prEnabled?: boolean;
+  /** Whether the Source Control scope button is enabled on worktrees. */
+  scmEnabled?: boolean;
 }
 
 export function normalize(p: string): string {
@@ -95,13 +101,6 @@ export function folderIndex(fsPath: string): number {
   const target = normalize(fsPath);
   const folders = vscode.workspace.workspaceFolders ?? [];
   return folders.findIndex((f) => normalize(f.uri.fsPath) === target);
-}
-
-/** Highest-priority agent status on a worktree, for attention sorting. */
-function attentionRank(wt: WorktreeVM): number {
-  if (wt.agents.some((a) => a.status === "waiting")) return 0;
-  if (wt.agents.some((a) => a.status === "active")) return 1;
-  return 2;
 }
 
 /** Gather worktrees of the repo containing the first workspace folder. */
@@ -151,11 +150,13 @@ export async function gatherWorktrees(
     agents: agentsByPath?.get(normalize(wt.path)) ?? [],
   }));
 
-  // Primary stays pinned to the top; the rest float by attention so worktrees
-  // with a waiting/active agent surface first.
+  // Primary worktree pinned to the top; the rest sorted by name.
   vms.sort((a, b) => {
     if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
-    return attentionRank(a) - attentionRank(b);
+    return a.name.localeCompare(b.name, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
   });
 
   // Name the repo after its primary worktree so the header is stable even when

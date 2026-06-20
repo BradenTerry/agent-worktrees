@@ -263,6 +263,26 @@ button.accept {
   align-items: center;
   gap: 4px;
 }
+/* Source-control scope button: leftmost in the gitline, tucked toward the
+   card edge so the diff totals keep their start position. */
+.gitline .scm-scope {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-left: -2px;
+  margin-right: -2px;
+}
+/* Scope is set: this worktree's repo is the one shown in Source Control. */
+.gitline .scm-scope.active {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+.gitline .scm-scope.active:hover {
+  background: var(
+    --vscode-button-hoverBackground,
+    var(--vscode-button-background, #0e639c)
+  );
+}
 .gitline .clean {
   color: var(--vscode-charts-green, #89d185);
 }
@@ -448,6 +468,24 @@ button.accept {
 .iconbtn svg {
   width: 13px;
   height: 13px;
+}
+/* Custom hover tooltip (see panel.js) — themed like VS Code's hover widget. */
+.tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 280px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  background: var(--vscode-editorHoverWidget-background, #252526);
+  border: 1px solid
+    var(--vscode-editorHoverWidget-border, rgba(128, 128, 128, 0.35));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .agents-empty {
   margin: 8px 0 0;
@@ -779,6 +817,19 @@ button svg {
   padding: 12px;
   overflow-y: auto;
 }
+/* Narrow panels: a vertical tab rail would swallow half the width, so stack the
+   tabs on top as a horizontal row and give the body the full width. */
+@media (max-width: 360px) {
+  .settings-main {
+    flex-direction: column;
+  }
+  .settings-tabs {
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+    padding: 6px 8px;
+  }
+}
 .gh-section {
   display: flex;
   flex-direction: column;
@@ -863,11 +914,16 @@ button svg {
 .gh-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   font-size: 12px;
   padding: 7px 9px;
   border-radius: 5px;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  overflow-wrap: anywhere;
+}
+.gh-status b {
+  overflow-wrap: anywhere;
 }
 .gh-status.ok {
   color: var(--vscode-foreground);

@@ -11,14 +11,20 @@ Worktrees are the natural unit for running several agents in parallel: each gets
 an isolated checkout, so they never step on each other's files. But coordinating
 them means juggling terminals and `git worktree` commands by hand, with no single
 place to see which agent needs you. This panel puts every worktree, its git
-state, and its running agents in one view, and floats the ones that need
-attention to the top.
+state, and its running agents in one view.
+
+## Screenshots
+
+<sub>Click any thumbnail to view it full size.</sub>
+
+| Worktrees, git status & agents | PR checks, review & comments | Settings & integrations |
+| :---: | :---: | :---: |
+| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) |
 
 ## Features
 
 - **Worktrees panel** (webview) listing every worktree (primary + linked), with
-  branch name and badges for `Primary` / `detached` / `locked`. Worktrees with a
-  waiting or active agent float to the top so attention is routed automatically.
+  branch name and badges for `Primary` / `detached` / `locked`.
 - **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
   the ahead/behind distance from the upstream branch, refreshed as files change.
 - **Agent** — start one or more Claude CLI sessions in a worktree, each in its

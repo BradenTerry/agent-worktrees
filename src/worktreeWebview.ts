@@ -26,6 +26,9 @@ import {
 } from "./github";
 import { PrService, PrTarget } from "./prs";
 
+/** globalState key for the opt-in Source Control scope button. */
+const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
+
 /** Messages sent from the webview to the extension. */
 interface ActionMessage {
   type: "action";
@@ -43,7 +46,9 @@ interface ActionMessage {
     | "openSettings"
     | "setGithubToken"
     | "clearGithubToken"
-    | "togglePr";
+    | "togglePr"
+    | "toggleScm"
+    | "scopeScm";
   path?: string;
   sessionId?: string;
   /** GitHub PAT, for setGithubToken. */
@@ -80,6 +85,9 @@ export class WorktreeWebviewProvider
   private readonly prService: PrService;
   /** Resolved GitHub origin per worktree path (null = no github remote). */
   private readonly remotes = new Map<string, RemoteInfo | null>();
+  /** True once we've subscribed to the Git extension's repo open/close events,
+   *  so the panel re-renders when the Source Control scope changes. */
+  private scmWatchSet = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     initGithub(context);
@@ -145,6 +153,12 @@ export class WorktreeWebviewProvider
     return this.context.extensionUri;
   }
 
+  /** The extension's own worktree glyph, used as each agent terminal's tab icon
+   *  so it matches the Activity Bar icon instead of the generic sparkle. */
+  private get terminalIcon(): vscode.Uri {
+    return vscode.Uri.joinPath(this.extensionUri, "media", "worktree.svg");
+  }
+
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.webview.options = {
@@ -183,6 +197,8 @@ export class WorktreeWebviewProvider
       await this.syncTerminalNames(agents);
     }
     const data = await gatherWorktrees(agents, installed, force);
+    data.scmEnabled = this.isScmEnabled();
+    if (data.scmEnabled) await this.annotateScmActive(data);
     if (!installed) {
       data.hooks = HOOKS.map((h) => ({
         label: h.label,
@@ -280,6 +296,127 @@ export class WorktreeWebviewProvider
         return this.clearGithubToken();
       case "togglePr":
         return this.togglePr(msg.value);
+      case "toggleScm":
+        return this.toggleScm(msg.value);
+      case "scopeScm":
+        return this.scopeScm(msg.path);
+    }
+  }
+
+  // --- Source Control --------------------------------------------------------
+
+  /** Whether the opt-in Source Control scope button is enabled (default off). */
+  private isScmEnabled(): boolean {
+    return this.context.globalState.get<boolean>(SCM_SCOPE_KEY, false);
+  }
+
+  /** Turn the Source Control scope button on/off and re-render. */
+  private async toggleScm(value?: boolean): Promise<void> {
+    await this.context.globalState.update(SCM_SCOPE_KEY, !!value);
+    this.lastPosted = "";
+    await this.refresh();
+  }
+
+  /** The built-in Git extension's API, activating it first if needed. */
+  private async gitApi(): Promise<GitApi | undefined> {
+    const ext = vscode.extensions.getExtension<GitExtensionExports>("vscode.git");
+    if (!ext) return undefined;
+    try {
+      const exports = ext.isActive ? ext.exports : await ext.activate();
+      return exports.getAPI(1);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Subscribe (once) to repo open/close so the panel re-renders when the
+   *  Source Control scope changes underneath us. */
+  private async ensureScmWatch(): Promise<void> {
+    if (this.scmWatchSet) return;
+    const api = await this.gitApi();
+    if (!api) return;
+    this.scmWatchSet = true;
+    const onScm = () => this.scheduleRefresh();
+    this.context.subscriptions.push(
+      api.onDidOpenRepository(onScm),
+      api.onDidCloseRepository(onScm)
+    );
+  }
+
+  /** Mark each worktree whose repository is currently open in Source Control as
+   *  scmActive, so the panel can show whether the scope is already set. */
+  private async annotateScmActive(data: WorktreeData): Promise<void> {
+    await this.ensureScmWatch();
+    const api = await this.gitApi();
+    const open = new Set<string>();
+    if (api) for (const r of api.repositories) open.add(normalize(r.rootUri.fsPath));
+    for (const wt of data.worktrees) {
+      wt.scmActive = open.has(normalize(wt.path));
+    }
+  }
+
+  /**
+   * Scope the Source Control view to the selected worktree by opening its
+   * repository if needed, then: when more than one repo is currently listed,
+   * leave the others (non-destructive); when a single repo is listed, swap it
+   * out (close the previous one) so only this worktree's diffs remain. Does not
+   * switch the user to the Source Control view.
+   */
+  private async scopeScm(fsPath?: string): Promise<void> {
+    if (!fsPath || !this.isScmEnabled()) return;
+    const api = await this.gitApi();
+    if (!api) {
+      vscode.window.showErrorMessage(
+        "The built-in Git extension is not available."
+      );
+      return;
+    }
+
+    const target = normalize(fsPath);
+    // Repos shown before we add the selected worktree, to decide swap vs. keep.
+    const wasMultiple = api.repositories.length > 1;
+
+    const uri = vscode.Uri.file(fsPath);
+    const repo =
+      api.getRepository(uri) ?? (await api.openRepository(uri).catch(() => null));
+    if (!repo) {
+      vscode.window.showErrorMessage(`No git repository at ${fsPath}.`);
+      return;
+    }
+
+    // Only one repo was listed -> swap it for this worktree by closing the
+    // previously-open repositories that aren't the selected one.
+    if (!wasMultiple) {
+      for (const r of api.repositories) {
+        if (normalize(r.rootUri.fsPath) === target) continue;
+        await vscode.commands.executeCommand("git.close", r.rootUri);
+      }
+    }
+
+    // Wait for the Git model to reflect the change before re-rendering:
+    // openRepository can resolve a tick before `repositories` lists the repo,
+    // which would leave the just-scoped worktree un-highlighted until the next
+    // click. Reflect the new scope on the buttons without switching to the view.
+    await this.waitForScmRepo(api, target, !wasMultiple);
+    await this.refresh();
+  }
+
+  /**
+   * Poll the Git model (briefly, bounded) until it reflects the just-applied
+   * scope: the target repo is present and, when we swapped a single repo, it is
+   * the only one. Returns early once settled, or after the timeout regardless.
+   */
+  private async waitForScmRepo(
+    api: GitApi,
+    target: string,
+    sole: boolean
+  ): Promise<void> {
+    for (let i = 0; i < 24; i++) {
+      const paths = api.repositories.map((r) => normalize(r.rootUri.fsPath));
+      const present = paths.includes(target);
+      const settled = present && (!sole || paths.every((p) => p === target));
+      if (settled) return;
+      await new Promise((r) => setTimeout(r, 25));
     }
   }
 
@@ -358,7 +495,7 @@ export class WorktreeWebviewProvider
     const terminal = vscode.window.createTerminal({
       name: `Claude · ${nameOf(fsPath)}`,
       cwd: fsPath,
-      iconPath: new vscode.ThemeIcon("sparkle"),
+      iconPath: this.terminalIcon,
     });
     this.terminals.set(sessionId, terminal);
     terminal.show();
@@ -383,7 +520,7 @@ export class WorktreeWebviewProvider
     const terminal = vscode.window.createTerminal({
       name: "Claude · new worktree",
       cwd,
-      iconPath: new vscode.ThemeIcon("sparkle"),
+      iconPath: this.terminalIcon,
     });
     this.terminals.set(sessionId, terminal);
     terminal.show();
@@ -744,6 +881,21 @@ export class WorktreeWebviewProvider
 </body>
 </html>`;
   }
+}
+
+/** Minimal slice of the built-in Git extension API we depend on. */
+interface GitApiRepository {
+  readonly rootUri: vscode.Uri;
+}
+interface GitApi {
+  readonly repositories: GitApiRepository[];
+  getRepository(uri: vscode.Uri): GitApiRepository | null;
+  openRepository(uri: vscode.Uri): Promise<GitApiRepository | null>;
+  readonly onDidOpenRepository: vscode.Event<GitApiRepository>;
+  readonly onDidCloseRepository: vscode.Event<GitApiRepository>;
+}
+interface GitExtensionExports {
+  getAPI(version: 1): GitApi;
 }
 
 function nameOf(fsPath: string): string {

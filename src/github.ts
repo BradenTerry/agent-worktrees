@@ -137,10 +137,21 @@ function authHeaders(token: string): Record<string, string> {
 const condCache = new Map<string, { etag: string; value: unknown }>();
 const COND_CACHE_MAX = 200;
 
-/** Drop the conditional-request cache (on token change, so we never reuse an
- *  ETag across credentials). */
+/**
+ * Capabilities (token + PAT-permission tag) we have seen denied with a 403 that
+ * was not rate limiting. A fine-grained PAT can be missing a permission an
+ * optional endpoint needs (e.g. "Commit statuses"); once we know it is denied
+ * we skip that endpoint for the rest of the token's life instead of re-issuing
+ * a call that can only keep failing. Keyed by token so a new credential never
+ * inherits another's denials; also cleared wholesale on any token change.
+ */
+const deniedCaps = new Set<string>();
+
+/** Drop the conditional-request and denied-capability caches (on token change,
+ *  so we never reuse an ETag or a stale permission verdict across credentials). */
 export function resetGithubCache(): void {
   condCache.clear();
+  deniedCaps.clear();
 }
 
 /**
@@ -152,8 +163,12 @@ export function resetGithubCache(): void {
  */
 export async function getJson<T>(
   path: string,
-  token: string
+  token: string,
+  capability?: string
 ): Promise<T | undefined> {
+  // If this token already failed a permission check for this capability, skip
+  // the request entirely — it can only 403 again for the token's whole life.
+  if (capability && deniedCaps.has(`${token}\n${capability}`)) return undefined;
   const url = `${API}${path}`;
   const key = `${token}\n${url}`;
   const cached = condCache.get(key);
@@ -163,7 +178,19 @@ export async function getJson<T>(
     const res = await fetch(url, { headers });
     // Unchanged since last fetch: reuse the cached body (free of rate limit).
     if (res.status === 304 && cached) return cached.value as T;
-    if (!res.ok) return undefined;
+    if (!res.ok) {
+      // A 403 that is not rate limiting (the limit still has room) means the
+      // token lacks the permission this endpoint needs. Remember it so we stop
+      // re-issuing a call that cannot succeed until the token is replaced.
+      if (
+        capability &&
+        res.status === 403 &&
+        res.headers.get("x-ratelimit-remaining") !== "0"
+      ) {
+        deniedCaps.add(`${token}\n${capability}`);
+      }
+      return undefined;
+    }
     const value = (await res.json()) as T;
     const etag = res.headers.get("etag");
     if (etag) {
@@ -252,18 +279,24 @@ export async function fetchPr(
     sha
       ? getJson<RawCheckRuns>(
           `/repos/${owner}/${name}/commits/${sha}/check-runs?per_page=100`,
-          token
+          token,
+          "checks"
         )
       : Promise.resolve(undefined),
     sha
       ? getJson<RawCombined>(
           `/repos/${owner}/${name}/commits/${sha}/status`,
-          token
+          token,
+          "statuses"
         )
       : Promise.resolve(undefined),
   ]);
 
-  const checks = rollupChecks(checkRuns?.check_runs, combined?.state);
+  const checks = rollupChecks(
+    checkRuns?.check_runs,
+    combined?.state,
+    combined?.total_count
+  );
   const requested =
     (detail?.requested_reviewers ?? raw.requested_reviewers ?? []).length;
   const rev = reviewSummary(reviews ?? [], requested);
@@ -304,10 +337,16 @@ export function prState(raw: {
  * Roll up CI across GitHub Actions check-runs and legacy commit statuses.
  * Any failure → fail; else anything still queued/in-progress/pending → pending;
  * else if there was any signal → pass; else none.
+ *
+ * `combinedTotal` is the commit-status endpoint's `total_count`: when it is 0
+ * the commit has no legacy statuses and GitHub still reports the combined state
+ * as "pending" by default, so we must skip folding it in or it shows a phantom
+ * pending check on Actions-only PRs.
  */
 export function rollupChecks(
   runs?: { status?: string; conclusion?: string | null }[],
-  combinedState?: string
+  combinedState?: string,
+  combinedTotal?: number
 ): { state: PrInfo["checks"]; pass: number; fail: number; pending: number } {
   let pass = 0;
   let fail = 0;
@@ -330,10 +369,14 @@ export function rollupChecks(
     else if (c === "success" || c === "neutral" || c === "skipped") pass++;
     else pending++;
   }
-  // Fold in the legacy combined commit-status state as one extra signal.
-  if (combinedState === "failure") fail++;
-  else if (combinedState === "pending") pending++;
-  else if (combinedState === "success") pass++;
+  // Fold in the legacy combined commit-status state as one extra signal, but
+  // only when there are actually legacy statuses. With none, GitHub reports the
+  // combined state as "pending", which would otherwise add a phantom check.
+  if ((combinedTotal ?? 0) > 0) {
+    if (combinedState === "failure") fail++;
+    else if (combinedState === "pending") pending++;
+    else if (combinedState === "success") pass++;
+  }
 
   let state: PrInfo["checks"];
   if (fail > 0) state = "fail";
