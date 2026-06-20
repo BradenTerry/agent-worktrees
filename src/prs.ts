@@ -205,6 +205,7 @@ function sigOf(p: PrInfo | null | undefined): string {
     p.review,
     p.approvals,
     p.changesRequested,
+    p.reviewsPending,
     p.comments,
   ].join(":");
 }

@@ -741,6 +741,9 @@ button svg {
   color: var(--vscode-charts-yellow, #cca700);
   font-weight: 600;
 }
+.pr-seg.review-pending {
+  color: var(--vscode-descriptionForeground);
+}
 .pr-seg.comments {
   opacity: 0.8;
 }

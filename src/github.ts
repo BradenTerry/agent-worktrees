@@ -50,6 +50,8 @@ export interface PrInfo {
   review: "approved" | "changes" | "required" | "none";
   approvals: number;
   changesRequested: number;
+  /** Reviewers requested but who haven't submitted a review yet. */
+  reviewsPending: number;
   /** Issue + review-thread comments. */
   comments: number;
   updatedAt?: string;
@@ -314,6 +316,7 @@ export async function fetchPr(
     review: rev.review,
     approvals: rev.approvals,
     changesRequested: rev.changesRequested,
+    reviewsPending: requested,
     comments,
     updatedAt: raw.updated_at,
   };

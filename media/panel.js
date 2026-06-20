@@ -273,6 +273,7 @@
   function prLine(pr) {
     if (!pr) return "";
     const st = PR_STATE[pr.state] || PR_STATE.open;
+    const plural = (n) => (n === 1 ? "" : "s");
 
     // CI checks: one colored, counted segment per non-zero state (passing,
     // failing, running) so the whole rollup is visible at a glance.
@@ -282,7 +283,6 @@
       const fail = pr.checksFail || 0;
       const pending = pr.checksPending || 0;
       const total = pass + fail + pending;
-      const plural = (n) => (n === 1 ? "" : "s");
       if (pass)
         checkSegs.push(
           '<span class="pr-seg pass" title="' +
@@ -324,31 +324,48 @@
         );
     }
 
-    // Review decision + comments.
+    // Review decision + comments. Counted segments are additive so a mixed
+    // state (e.g. some approvals with reviewers still pending) shows all of it.
     const reviewSegs = [];
-    if (pr.review === "approved")
+    if (pr.approvals)
       reviewSegs.push(
-        '<span class="pr-seg approved" title="Approved">' +
+        '<span class="pr-seg approved" title="' +
+          pr.approvals +
+          " approval" +
+          plural(pr.approvals) +
+          '">' +
           icons.check +
-          (pr.approvals ? pr.approvals : "") +
+          pr.approvals +
           "</span>"
       );
-    else if (pr.review === "changes")
+    if (pr.changesRequested)
       reviewSegs.push(
-        '<span class="pr-seg changes" title="Changes requested">' +
+        '<span class="pr-seg changes" title="' +
+          pr.changesRequested +
+          " change request" +
+          plural(pr.changesRequested) +
+          '">' +
           icons.cross +
-          (pr.changesRequested ? pr.changesRequested : "") +
+          pr.changesRequested +
           "</span>"
       );
-    else if (pr.review === "required")
+    if (pr.reviewsPending)
       reviewSegs.push(
-        '<span class="pr-seg required" title="Review requested">@</span>'
+        '<span class="pr-seg review-pending" title="' +
+          pr.reviewsPending +
+          " review" +
+          plural(pr.reviewsPending) +
+          ' pending">@' +
+          pr.reviewsPending +
+          "</span>"
       );
     if (pr.comments)
       reviewSegs.push(
         '<span class="pr-seg comments" title="' +
           pr.comments +
-          ' comment(s)">' +
+          " comment" +
+          plural(pr.comments) +
+          '">' +
           icons.comment +
           pr.comments +
           "</span>"
@@ -371,16 +388,16 @@
         "</span>" +
         "</div>",
     ];
-    if (checkSegs.length)
-      rows.push(
-        '<div class="pr-row"><span class="pr-row-label">Checks</span>' +
-          checkSegs.join("") +
-          "</div>"
-      );
     if (reviewSegs.length)
       rows.push(
         '<div class="pr-row"><span class="pr-row-label">Reviews</span>' +
           reviewSegs.join("") +
+          "</div>"
+      );
+    if (checkSegs.length)
+      rows.push(
+        '<div class="pr-row"><span class="pr-row-label">Checks</span>' +
+          checkSegs.join("") +
           "</div>"
       );
 
