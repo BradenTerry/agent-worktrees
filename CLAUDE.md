@@ -10,6 +10,22 @@ agents running in each. The panel UI is a webview:
 - `src/` - the extension host (TypeScript): git, GitHub PR polling, the webview
   provider. `npm run compile` typechecks/builds.
 
+## Documentation
+
+There are two user-facing docs and a feature/UX change usually needs **both**
+updated:
+
+- `README.md` - development-focused. The repo landing page: architecture, how the
+  hook/emitter pipeline works, how to build and contribute. Describe features in
+  terms of how they work.
+- `MARKETPLACE.md` - usage-focused. The VS Code Marketplace listing the user
+  reads before installing. Describe features in terms of what the user gets,
+  with no build/internals detail.
+
+When a feature is added, removed, or changed, check both: README for the
+mechanism, MARKETPLACE for the user-facing capability. Don't update one and
+leave the other stale.
+
 ## Marketplace screenshots (Playwright)
 
 `screenshots/` holds a Playwright suite that renders the **real** webview UI
