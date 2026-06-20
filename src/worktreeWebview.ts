@@ -393,8 +393,31 @@ export class WorktreeWebviewProvider
       }
     }
 
-    // Reflect the new scope on the buttons without switching to the SCM view.
+    // Wait for the Git model to reflect the change before re-rendering:
+    // openRepository can resolve a tick before `repositories` lists the repo,
+    // which would leave the just-scoped worktree un-highlighted until the next
+    // click. Reflect the new scope on the buttons without switching to the view.
+    await this.waitForScmRepo(api, target, !wasMultiple);
     await this.refresh();
+  }
+
+  /**
+   * Poll the Git model (briefly, bounded) until it reflects the just-applied
+   * scope: the target repo is present and, when we swapped a single repo, it is
+   * the only one. Returns early once settled, or after the timeout regardless.
+   */
+  private async waitForScmRepo(
+    api: GitApi,
+    target: string,
+    sole: boolean
+  ): Promise<void> {
+    for (let i = 0; i < 24; i++) {
+      const paths = api.repositories.map((r) => normalize(r.rootUri.fsPath));
+      const present = paths.includes(target);
+      const settled = present && (!sole || paths.every((p) => p === target));
+      if (settled) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
   }
 
   // --- GitHub settings -------------------------------------------------------
