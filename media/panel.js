@@ -412,9 +412,6 @@
       '<button class="tbtn ghost" data-action="refresh" title="Refresh">' +
       icons.refresh +
       "</button>" +
-      '<button class="tbtn ghost" data-action="openSettings" title="Settings">' +
-      icons.gear +
-      "</button>" +
       "</span>" +
       "</div>"
     );
