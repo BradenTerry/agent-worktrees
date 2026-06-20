@@ -181,6 +181,8 @@ button.accept {
 }
 .branch {
   font-weight: 600;
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

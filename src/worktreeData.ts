@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { findRepoRoot, listWorktrees, getStatus, GitStatus } from "./git";
+import { normalizePath } from "./worktreeUtils";
 
 /**
  * Lifecycle status of an agent session, derived from Claude Code hooks.
@@ -57,12 +58,20 @@ export interface WorktreeData {
 }
 
 export function normalize(p: string): string {
-  return path.resolve(p).replace(/[\\/]+$/, "");
+  return normalizePath(p);
 }
 
-/** fsPath of the first workspace folder, used to locate the repository. */
-function primaryFolder(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+/**
+ * First workspace folder that lives in a git repository, with its repo root.
+ */
+async function findRepo(): Promise<
+  { cwd: string; repoRoot: string } | undefined
+> {
+  for (const f of vscode.workspace.workspaceFolders ?? []) {
+    const root = await findRepoRoot(f.uri.fsPath);
+    if (root) return { cwd: f.uri.fsPath, repoRoot: root };
+  }
+  return undefined;
 }
 
 /** Index of a path within the current workspace folders, or -1. */
@@ -84,11 +93,9 @@ export async function gatherWorktrees(
   agentsByPath?: Map<string, AgentVM[]>,
   hooksInstalled = false
 ): Promise<WorktreeData> {
-  const cwd = primaryFolder();
-  if (!cwd) return { worktrees: [], hooksInstalled };
-
-  const repoRoot = await findRepoRoot(cwd);
-  if (!repoRoot) return { worktrees: [], hooksInstalled };
+  const repo = await findRepo();
+  if (!repo) return { worktrees: [], hooksInstalled };
+  const { repoRoot } = repo;
 
   let worktrees;
   try {
@@ -130,9 +137,12 @@ export async function gatherWorktrees(
     return attentionRank(a) - attentionRank(b);
   });
 
+  // Name the repo after its primary worktree so the header is stable even when
+  // the open folder is a linked worktree.
+  const primary = worktrees.find((wt) => wt.isPrimary);
   return {
     repoRoot,
-    repoName: path.basename(repoRoot),
+    repoName: path.basename(primary?.path ?? repoRoot),
     worktrees: vms,
     hooksInstalled,
   };

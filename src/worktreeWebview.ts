@@ -3,8 +3,8 @@ import * as path from "path";
 import * as fs from "fs";
 import * as cp from "child_process";
 import { randomUUID } from "crypto";
-import { gatherWorktrees, folderIndex, normalize, AgentVM } from "./worktreeData";
-import { findRepoRoot, addWorktree, removeWorktree } from "./git";
+import { gatherWorktrees, normalize, AgentVM } from "./worktreeData";
+import { addWorktree, removeWorktree, listWorktrees } from "./git";
 import { hooksInstalled, installHooks, SESSIONS_DIR, HOOKS } from "./hooks";
 import { readSessionsByWorktree } from "./sessionStore";
 
@@ -12,8 +12,6 @@ import { readSessionsByWorktree } from "./sessionStore";
 interface ActionMessage {
   type: "action";
   action:
-    | "open"
-    | "unmount"
     | "refresh"
     | "agent"
     | "agentWorktree"
@@ -48,10 +46,6 @@ export class WorktreeWebviewProvider
   /** Last name we applied to each session's terminal, so we only rename on a
    *  real change (renaming reveals the terminal, so doing it every event churns). */
   private appliedTerminalNames = new Map<string, string>();
-  /** Sessions started via `claude -w`, mapped to the dir we launched them from,
-   *  so a later refresh can auto-mount the worktree Claude creates once its
-   *  state file reveals the new path. */
-  private pendingMount = new Map<string, string>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     // Ensure the sessions dir exists so the watcher attaches even before the
@@ -135,7 +129,6 @@ export class WorktreeWebviewProvider
       : undefined;
     if (agents) {
       await this.syncTerminalNames(agents);
-      if (this.pendingMount.size) this.autoMountPending(agents);
     }
     const data = await gatherWorktrees(agents, installed);
     if (!installed) {
@@ -157,10 +150,6 @@ export class WorktreeWebviewProvider
     switch (msg.action) {
       case "refresh":
         return void this.refresh();
-      case "open":
-        return this.open(msg.path);
-      case "unmount":
-        return this.unmount(msg.path);
       case "agent":
         return this.agent(msg.path);
       case "agentWorktree":
@@ -180,39 +169,21 @@ export class WorktreeWebviewProvider
     }
   }
 
-  /**
-   * Mount a worktree as an extra workspace folder. Appending at index >= 1
-   * keeps folder 0 stable, so VS Code does not reload the window.
-   */
-  private async open(fsPath?: string): Promise<void> {
-    if (!fsPath) return;
-    if (folderIndex(fsPath) !== -1) {
-      vscode.window.showInformationMessage("Already open in the workspace.");
-      return;
-    }
-    const uri = vscode.Uri.file(fsPath);
-    const start = vscode.workspace.workspaceFolders?.length ?? 0;
-    const ok = vscode.workspace.updateWorkspaceFolders(start, 0, {
-      uri,
-      name: nameOf(fsPath),
-    });
-    if (!ok) {
-      vscode.window.showErrorMessage("Could not add worktree to workspace.");
-    }
-    await this.refresh();
+  /** The folder the panel operates on (the opened repo/worktree). */
+  private repoCwd(): string | undefined {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   }
 
-  private async unmount(fsPath?: string): Promise<void> {
-    if (!fsPath) return;
-    const idx = folderIndex(fsPath);
-    if (idx <= 0) {
-      vscode.window.showWarningMessage(
-        "Cannot remove the primary folder without reloading."
-      );
-      return;
+  /** Path of the repository's primary (main) worktree, listed from any folder. */
+  private async primaryWorktree(): Promise<string | undefined> {
+    const cwd = this.repoCwd();
+    if (!cwd) return undefined;
+    try {
+      const wts = await listWorktrees(cwd);
+      return wts.find((w) => w.isPrimary)?.path;
+    } catch {
+      return undefined;
     }
-    vscode.workspace.updateWorkspaceFolders(idx, 1);
-    await this.refresh();
   }
 
   // --- Agents ----------------------------------------------------------------
@@ -245,7 +216,7 @@ export class WorktreeWebviewProvider
    * (no window reload) once its state file reveals the new path.
    */
   private async agentWorktree(): Promise<void> {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const cwd = this.repoCwd() ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!cwd) {
       vscode.window.showErrorMessage("No git repository in this window.");
       return;
@@ -257,26 +228,9 @@ export class WorktreeWebviewProvider
       iconPath: new vscode.ThemeIcon("sparkle"),
     });
     this.terminals.set(sessionId, terminal);
-    this.pendingMount.set(sessionId, normalize(cwd));
     terminal.show();
     terminal.sendText(`claude --session-id ${sessionId} -w`);
     await this.refresh();
-  }
-
-  /**
-   * Mount the worktrees that `claude -w` sessions have created. A pending
-   * session is mounted once its state file reports a worktree path different
-   * from where we launched it (i.e. Claude has actually created the worktree).
-   */
-  private autoMountPending(byPath: Map<string, AgentVM[]>): void {
-    for (const [key, list] of byPath) {
-      for (const a of list) {
-        const launchDir = this.pendingMount.get(a.sessionId);
-        if (launchDir === undefined || key === launchDir) continue;
-        this.pendingMount.delete(a.sessionId);
-        if (folderIndex(key) === -1) void this.open(key);
-      }
-    }
   }
 
   /** Reveal the terminal backing an agent (if we launched it). */
@@ -363,7 +317,6 @@ export class WorktreeWebviewProvider
       if (term === terminal) {
         this.terminals.delete(id);
         this.appliedTerminalNames.delete(id);
-        this.pendingMount.delete(id);
       }
     }
   }
@@ -460,10 +413,10 @@ export class WorktreeWebviewProvider
 
   // --- Worktree git operations -----------------------------------------------
 
-  /** Prompt for a branch name and create a worktree for it, then mount it. */
+  /** Prompt for a branch name and create a worktree for it. */
   async newWorktree(): Promise<void> {
-    const repoRoot = await this.repoRoot();
-    if (!repoRoot) {
+    const primary = await this.primaryWorktree();
+    if (!primary) {
       vscode.window.showErrorMessage("No git repository in this window.");
       return;
     }
@@ -477,26 +430,26 @@ export class WorktreeWebviewProvider
     if (!branch) return;
 
     const dir = path.join(
-      path.dirname(repoRoot),
+      path.dirname(primary),
       branch.trim().replace(/[^\w.-]+/g, "-")
     );
 
     try {
-      await addWorktree(repoRoot, dir, branch.trim());
+      await addWorktree(primary, dir, branch.trim());
     } catch (err) {
       vscode.window.showErrorMessage(
         `Could not create worktree: ${(err as Error).message}`
       );
       return;
     }
-    await this.open(dir);
+    await this.refresh();
   }
 
   /** Confirm and remove a worktree from disk (offering --force when dirty). */
   private async removeWorktreeAction(fsPath?: string): Promise<void> {
     if (!fsPath) return;
-    const repoRoot = await this.repoRoot();
-    if (!repoRoot) return;
+    const primary = await this.primaryWorktree();
+    if (!primary) return;
 
     // Every agent whose worktree is this path (or nested under it).
     const target = normalize(fsPath);
@@ -526,10 +479,8 @@ export class WorktreeWebviewProvider
     for (const a of agents) this.stopSession(a.sessionId);
     this.killClaudeInDir(fsPath);
 
-    if (folderIndex(fsPath) > 0) await this.unmount(fsPath);
-
     try {
-      await removeWorktree(repoRoot, fsPath);
+      await removeWorktree(primary, fsPath);
     } catch {
       const force = await vscode.window.showWarningMessage(
         "Worktree has changes or is locked. Force remove?",
@@ -538,7 +489,7 @@ export class WorktreeWebviewProvider
       );
       if (force !== "Force Remove") return;
       try {
-        await removeWorktree(repoRoot, fsPath, true);
+        await removeWorktree(primary, fsPath, true);
       } catch (err) {
         vscode.window.showErrorMessage(
           `Could not remove worktree: ${(err as Error).message}`
@@ -547,11 +498,6 @@ export class WorktreeWebviewProvider
       }
     }
     await this.refresh();
-  }
-
-  private async repoRoot(): Promise<string | undefined> {
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    return cwd ? findRepoRoot(cwd) : undefined;
   }
 
   // --- HTML ------------------------------------------------------------------

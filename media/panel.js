@@ -184,27 +184,10 @@
   function card(wt) {
     const isCollapsed = !expanded.has(wt.path);
     const badges = [];
-    if (wt.isPrimary) badges.push('<span class="badge">primary</span>');
     if (wt.detached) badges.push('<span class="badge warn">detached</span>');
     if (wt.locked) badges.push('<span class="badge warn">locked</span>');
 
     const agents = wt.agents || [];
-
-    // Mount / unmount control. Primary folder 0 cannot be unmounted.
-    let mountBtn = "";
-    if (!wt.isPrimary) {
-      mountBtn = wt.inWorkspace
-        ? '<button class="act" data-action="unmount" data-path="' +
-          esc(wt.path) +
-          '" title="Remove from workspace">' +
-          icons.remove +
-          "Unmount</button>"
-        : '<button class="act primary" data-action="open" data-path="' +
-          esc(wt.path) +
-          '" title="Add to workspace (no reload)">' +
-          icons.add +
-          "Open</button>";
-    }
 
     const agentBtn =
       '<button class="act agent" data-action="agent" data-path="' +
@@ -235,19 +218,13 @@
       '<span class="badges">' +
       badges.join("") +
       "</span>" +
+      deleteBtn +
       "</div>" +
       '<div class="meta-row">' +
       gitLine(wt.git) +
       '<span class="actions-spacer"></span>' +
       agentBtn +
       "</div>" +
-      (mountBtn || deleteBtn
-        ? '<div class="actions">' +
-          mountBtn +
-          '<span class="actions-spacer"></span>' +
-          deleteBtn +
-          "</div>"
-        : "") +
       agentsBar(agents, wt.path) +
       '<div class="card-body">' +
       agentRows(agents) +
