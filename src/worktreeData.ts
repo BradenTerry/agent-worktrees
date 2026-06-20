@@ -28,6 +28,8 @@ export interface AgentVM {
   summary?: string;
   /** Bare names of skills this session has invoked (deduped, in first-use order). */
   skills?: string[];
+  /** Count of subagents this session has spawned via the Task tool. */
+  subagents?: number;
   status: AgentStatus;
   /** Epoch ms when the session was first seen. */
   startedAt: number;

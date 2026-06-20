@@ -31,6 +31,8 @@ view.
 - **Live agent status** — each agent shows as **active**, **waiting**, or
   **idle**, driven by Claude Code hook events.
 - **Skills used** — see which Claude skills each agent has invoked.
+- **Subagents used** — a robot count shows how many subagents each agent has
+  spawned, plus the total across the worktree.
 - **Delete worktrees** — remove a worktree (`git worktree remove`, with a force
   option) without leaving the panel.
 
