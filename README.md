@@ -14,6 +14,14 @@ place to see which agent needs you. This panel puts every worktree, its git
 state, and its running agents in one view, and floats the ones that need
 attention to the top.
 
+## Screenshots
+
+<sub>Click any thumbnail to view it full size.</sub>
+
+| Worktrees, git status & agents | PR checks, review & comments | Settings & integrations |
+| :---: | :---: | :---: |
+| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) |
+
 ## Features
 
 - **Worktrees panel** (webview) listing every worktree (primary + linked), with

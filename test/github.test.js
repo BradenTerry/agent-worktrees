@@ -97,3 +97,80 @@ test("getJson: non-2xx (and no cache) returns undefined", async () => {
     }
   );
 });
+
+// A 403 carrying rate-limit headers with room left = the token lacks the
+// permission, not throttling.
+function forbidden(remaining) {
+  return {
+    ok: false,
+    status: 403,
+    headers: {
+      get: (h) =>
+        h.toLowerCase() === "x-ratelimit-remaining" ? remaining : null,
+    },
+    json: async () => ({}),
+  };
+}
+
+test("getJson: a permission 403 is cached so the capability is not retried", async () => {
+  resetGithubCache();
+  await withFetch(
+    () => forbidden("4999"),
+    async (calls) => {
+      assert.strictEqual(await getJson("/a/status", "tok", "statuses"), undefined);
+      assert.strictEqual(await getJson("/b/status", "tok", "statuses"), undefined);
+      // The second call is short-circuited: no network for a denied capability.
+      assert.strictEqual(calls.length, 1);
+    }
+  );
+});
+
+test("getJson: a rate-limit 403 is NOT cached (retried later)", async () => {
+  resetGithubCache();
+  await withFetch(
+    () => forbidden("0"),
+    async (calls) => {
+      await getJson("/a/status", "tok", "statuses");
+      await getJson("/b/status", "tok", "statuses");
+      // Exhausted rate limit is transient, so both calls go out.
+      assert.strictEqual(calls.length, 2);
+    }
+  );
+});
+
+test("getJson: a denied capability does not block a different token", async () => {
+  resetGithubCache();
+  await withFetch(
+    () => forbidden("4999"),
+    async (calls) => {
+      await getJson("/x/status", "tokA", "statuses");
+      await getJson("/x/status", "tokB", "statuses");
+      assert.strictEqual(calls.length, 2);
+    }
+  );
+});
+
+test("getJson: resetGithubCache forgets denied capabilities", async () => {
+  resetGithubCache();
+  await withFetch(
+    () => forbidden("4999"),
+    async (calls) => {
+      await getJson("/x/status", "tok", "statuses");
+      resetGithubCache();
+      await getJson("/x/status", "tok", "statuses");
+      assert.strictEqual(calls.length, 2);
+    }
+  );
+});
+
+test("getJson: an untagged 403 is not cached", async () => {
+  resetGithubCache();
+  await withFetch(
+    () => forbidden("4999"),
+    async (calls) => {
+      await getJson("/x", "tok");
+      await getJson("/x", "tok");
+      assert.strictEqual(calls.length, 2);
+    }
+  );
+});

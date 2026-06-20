@@ -680,8 +680,8 @@
       '<div class="gh-perms-h">Fine-grained — Repository permissions (Read):</div>' +
       "<ul>" +
       "<li>Pull requests</li>" +
-      "<li>Commit statuses</li>" +
       "<li>Checks</li>" +
+      '<li>Commit statuses <span class="dim">— optional, for legacy CI status</span></li>' +
       "<li>Contents</li>" +
       '<li>Metadata <span class="dim">— required, added automatically</span></li>' +
       "</ul>" +
