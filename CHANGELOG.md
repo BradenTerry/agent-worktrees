@@ -2,6 +2,26 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.0.0
+
+- **Branches view** - a new full-screen editor tab, opened from the panel
+  toolbar, lists every branch in the repository: your local branches plus
+  branches that exist only on `origin`. Each row is tagged by where it lives -
+  **local only**, **local + remote**, or **remote only** - and, when it tracks a
+  remote, shows how far ahead or behind upstream it is (up to push, down to
+  pull).
+- **Per-branch PR status, filtered and sorted** - when GitHub is connected, each
+  branch row shows its PR (open, merged or closed) with the same state, checks,
+  reviews and comments rollup as the worktree cards, fetched in one batched
+  GraphQL query. A filter and sort bar slices the list client-side: filter by
+  author or review state, sort by recency or comment count, and one-click preset
+  chips for **Your PRs**, **Awaiting your review**, and **Assigned to you**.
+- **Create a worktree or start an agent from any branch** - a branch with no
+  worktree gets a **Create worktree & start agent** action (remote-only branches
+  are checked out as a new local tracking branch); a branch that already has a
+  worktree shows a **Worktree exists** marker plus a **Start agent** action that
+  launches a Claude agent in that worktree.
+
 ## 1.2.0
 
 - **Terminal tab icon is legible on dark themes** - agent terminal tabs now use
