@@ -42,7 +42,6 @@ interface ActionMessage {
     | "removeWorktree"
     | "openWindow"
     | "acceptHooks"
-    | "rename"
     | "openSettings"
     | "setGithubToken"
     | "clearGithubToken"
@@ -75,6 +74,11 @@ export class WorktreeWebviewProvider
   private refreshTimer?: ReturnType<typeof setTimeout>;
   /** Terminals we launched, keyed by the session id we started Claude with. */
   private terminals = new Map<string, vscode.Terminal>();
+  /** Env var stamped on each agent terminal carrying its session id. VS Code
+   *  preserves a terminal's creationOptions (env included) across an
+   *  extension-host reload, so this is what lets us re-link a restored terminal
+   *  to its session after our in-memory handle is gone. */
+  private static readonly SID_ENV = "AGENT_WORKTREES_SID";
   /** Last name we applied to each session's terminal, so we only rename on a
    *  real change (renaming reveals the terminal, so doing it every event churns). */
   private appliedTerminalNames = new Map<string, string>();
@@ -124,10 +128,17 @@ export class WorktreeWebviewProvider
     this.fileWatcher.onDidChange(onFile);
     this.fileWatcher.onDidDelete(onFile);
 
+    // Re-link any agent terminals VS Code restored from before this host
+    // started (e.g. an extension update or window reload), and keep claiming
+    // ones that surface afterward, so focus/stop reach them again.
+    vscode.window.terminals.forEach((t) => this.reclaimTerminal(t));
+
     context.subscriptions.push(
       this.prService,
       // Re-render whenever fresh PR status lands.
       this.prService.onChange(() => void this.refresh()),
+      // Re-link a terminal restored after activation to its session.
+      vscode.window.onDidOpenTerminal((t) => this.reclaimTerminal(t)),
       // Clean up our terminal handle when its terminal is closed by any means.
       vscode.window.onDidCloseTerminal((t) => this.forgetTerminal(t)),
       // Catch external/agent edits and commits when the window regains focus.
@@ -154,9 +165,16 @@ export class WorktreeWebviewProvider
   }
 
   /** The extension's own worktree glyph, used as each agent terminal's tab icon
-   *  so it matches the Activity Bar icon instead of the generic sparkle. */
-  private get terminalIcon(): vscode.Uri {
-    return vscode.Uri.joinPath(this.extensionUri, "media", "worktree.svg");
+   *  so it matches the Activity Bar icon instead of the generic sparkle. A
+   *  terminal `iconPath` SVG is rendered as-is (VS Code does not recolor it the
+   *  way it masks Activity Bar icons), so `currentColor` would fall back to
+   *  black and vanish on dark themes. Supply theme-specific glyphs instead: the
+   *  `dark` variant is light-colored, the `light` variant is dark-colored. */
+  private get terminalIcon(): { light: vscode.Uri; dark: vscode.Uri } {
+    return {
+      light: vscode.Uri.joinPath(this.extensionUri, "media", "worktree-light.svg"),
+      dark: vscode.Uri.joinPath(this.extensionUri, "media", "worktree-dark.svg"),
+    };
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -288,8 +306,6 @@ export class WorktreeWebviewProvider
         return this.openWindow(msg.path);
       case "acceptHooks":
         return this.acceptHooks();
-      case "rename":
-        return this.rename(msg.sessionId);
       case "setGithubToken":
         return this.setGithubToken(msg.token);
       case "clearGithubToken":
@@ -305,9 +321,9 @@ export class WorktreeWebviewProvider
 
   // --- Source Control --------------------------------------------------------
 
-  /** Whether the opt-in Source Control scope button is enabled (default off). */
+  /** Whether the Source Control scope button is enabled (default on). */
   private isScmEnabled(): boolean {
-    return this.context.globalState.get<boolean>(SCM_SCOPE_KEY, false);
+    return this.context.globalState.get<boolean>(SCM_SCOPE_KEY, true);
   }
 
   /** Turn the Source Control scope button on/off and re-render. */
@@ -492,8 +508,9 @@ export class WorktreeWebviewProvider
   /**
    * Spin up a Claude CLI session in the given worktree. We launch Claude with a
    * session id we generate so the panel row, its state file, and its terminal
-   * all share one id — that link is what lets a rename reach the terminal. Each
-   * click gets its own terminal so agents can run side by side across worktrees.
+   * all share one id — that link is what lets the work summary reach the
+   * terminal name. Each click gets its own terminal so agents can run side by
+   * side across worktrees.
    */
   private async agent(fsPath?: string): Promise<void> {
     if (!fsPath) return;
@@ -502,6 +519,7 @@ export class WorktreeWebviewProvider
       name: `Claude · ${nameOf(fsPath)}`,
       cwd: fsPath,
       iconPath: this.terminalIcon,
+      env: { [WorktreeWebviewProvider.SID_ENV]: sessionId },
     });
     this.terminals.set(sessionId, terminal);
     terminal.show();
@@ -527,6 +545,7 @@ export class WorktreeWebviewProvider
       name: "Claude · new worktree",
       cwd,
       iconPath: this.terminalIcon,
+      env: { [WorktreeWebviewProvider.SID_ENV]: sessionId },
     });
     this.terminals.set(sessionId, terminal);
     terminal.show();
@@ -667,6 +686,22 @@ export class WorktreeWebviewProvider
     });
   }
 
+  /**
+   * Re-link a terminal to its session by the session id we stamped in its
+   * creation env. VS Code restores agent terminals across an extension-host
+   * reload but our in-memory handle map is rebuilt empty, leaving focus/stop
+   * unable to find them; reading the marker back rebuilds the link.
+   * Seeds the applied-name cache from the live tab name so the next refresh
+   * doesn't needlessly rename (and reveal) an already correctly named terminal.
+   */
+  private reclaimTerminal(terminal: vscode.Terminal): void {
+    const opts = terminal.creationOptions as vscode.TerminalOptions;
+    const sessionId = opts?.env?.[WorktreeWebviewProvider.SID_ENV];
+    if (!sessionId || this.terminals.get(sessionId) === terminal) return;
+    this.terminals.set(sessionId, terminal);
+    this.appliedTerminalNames.set(sessionId, terminal.name);
+  }
+
   /** Drop our handle to a terminal that has closed. */
   private forgetTerminal(terminal: vscode.Terminal): void {
     for (const [id, term] of this.terminals) {
@@ -678,10 +713,12 @@ export class WorktreeWebviewProvider
   }
 
   /**
-   * Keep each agent's terminal named like its panel row: user-given name, else
-   * the work summary. Only renames on a real change (renaming reveals the
-   * terminal, so doing it every event would churn), and reveals with focus
-   * preserved so a background refresh never steals the cursor.
+   * Keep each agent's terminal named like its panel row: the work summary
+   * (Claude's generated title). Until that exists the terminal keeps its launch
+   * name ("Claude · <worktree>"); we never name it after the raw prompt. Only
+   * renames on a real change (renaming reveals the terminal, so doing it every
+   * event would churn), and reveals with focus preserved so a background refresh
+   * never steals the cursor.
    */
   private async syncTerminalNames(
     byPath: Map<string, AgentVM[]>
@@ -690,7 +727,7 @@ export class WorktreeWebviewProvider
       for (const a of list) {
         const terminal = this.terminals.get(a.sessionId);
         if (!terminal) continue;
-        const desired = a.name || a.summary;
+        const desired = a.summary;
         if (!desired) continue; // nothing meaningful yet; keep the launch name
         if (this.appliedTerminalNames.get(a.sessionId) === desired) continue;
         this.appliedTerminalNames.set(a.sessionId, desired);
@@ -701,54 +738,6 @@ export class WorktreeWebviewProvider
         );
       }
     }
-  }
-
-  /** Path of the state file backing a session, or undefined for an unsafe id. */
-  private sessionFile(sessionId: string): string | undefined {
-    return /^[A-Za-z0-9._-]+$/.test(sessionId)
-      ? path.join(this.sessionsDir, sessionId + ".json")
-      : undefined;
-  }
-
-  /**
-   * Rename a session via the panel's edit button. The name is written into the
-   * session's state file — the same field `/rename` writes — so both paths share
-   * one source of truth; the watcher then re-renders the row and terminal.
-   */
-  private async rename(sessionId?: string): Promise<void> {
-    if (!sessionId) return;
-    const file = this.sessionFile(sessionId);
-    if (!file) return;
-    let state: Record<string, unknown>;
-    try {
-      state = JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-      vscode.window.showWarningMessage(
-        "This agent has no active session to rename."
-      );
-      return;
-    }
-    const current = typeof state.name === "string" ? state.name : "";
-    const value = await vscode.window.showInputBox({
-      title: "Rename agent",
-      prompt: "Name for this agent session (used in the panel and its terminal)",
-      value: current,
-      placeHolder: "e.g. Refactor auth",
-    });
-    if (value === undefined) return; // cancelled
-    const name = value.trim();
-    if (name) state.name = name;
-    else delete state.name; // cleared -> fall back to the work summary
-    try {
-      fs.writeFileSync(file, JSON.stringify(state) + "\n");
-    } catch (e) {
-      vscode.window.showErrorMessage(
-        `Could not rename: ${e instanceof Error ? e.message : String(e)}`
-      );
-      return;
-    }
-    this.lastPosted = "";
-    await this.refresh();
   }
 
   /** Install the agent-status hooks after the user accepts them in the panel. */

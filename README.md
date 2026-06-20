@@ -76,10 +76,6 @@ local files, and nothing of the extension's lives in your `~/.claude` tree apart
 from the hook entries in `settings.json`. Status reporting needs `node` on
 `PATH`.
 
-You can also rename an agent from inside its session by typing
-`/rename-agent <name>`; the emitter applies the name and blocks the prompt so
-Claude never processes it.
-
 ## Requirements
 
 - The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`)

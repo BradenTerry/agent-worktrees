@@ -12,6 +12,10 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 4l4 4-4 4"/></svg>',
     sparkle:
       '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l1.3 3.7L13 6l-3.7 1.3L8 11 6.7 7.3 3 6l3.7-1.3z"/></svg>',
+    // The extension's field-agent character (fedora + visor head), no worktree
+    // backdrop — monochrome so it inherits currentColor in both themes.
+    agentMark:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.2V2.1"/><path d="M4.7 5.3c0-2.3 6.6-2.3 6.6 0"/><path d="M3 5.5h10"/><rect x="4.7" y="6.1" width="6.6" height="7.2" rx="2.1"/><path d="M6.1 9.4h3.8"/></svg>',
     agentWorktree:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M16 14.5c2.4 0 3 1.4 3 3.5" stroke-width="1.5"/><circle cx="20" cy="20" r="1.7" stroke-width="1.4"/><path d="M12 4.4V2.6" stroke-width="1.5"/><circle cx="12" cy="2.4" r="0.9" fill="currentColor"/><path d="M7.5 6.8c0-2.6 9-2.6 9 0" stroke-width="1.5"/><path d="M5 7.2h14" stroke-width="1.5"/><rect x="7" y="8.2" width="10" height="10.4" rx="3" stroke-width="1.5"/><path d="M9 12.4h6" stroke-width="2.2"/></svg>',
     focus:
@@ -23,7 +27,6 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/></svg>',
     collapse:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>',
-    edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-7 7-3.5.5.5-3.5z"/></svg>',
     window:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
     skill:
@@ -85,14 +88,10 @@
       agents
         .map((a) => {
           const s = statusOf(a);
-          // Full, untruncated text for the hover tooltip: the work summary, with
-          // the user-given name as a prefix when one is set. The label in the row
-          // is clipped with an ellipsis, so this is how you read the whole thing.
-          const fullInfo = a.summary
-            ? a.name
-              ? a.name + " — " + a.summary
-              : a.summary
-            : a.label;
+          // Full, untruncated text for the hover tooltip: the work summary. The
+          // label in the row is clipped with an ellipsis, so this is how you read
+          // the whole thing.
+          const fullInfo = a.summary || a.label;
           const skills = a.skills || [];
           const skillChip = skills.length
             ? '<button class="skill-chip" data-action="showSkills" data-session="' +
@@ -122,11 +121,6 @@
             "</span>" +
             skillChip +
             '<span class="row-actions">' +
-            '<button class="iconbtn" data-action="rename" data-session="' +
-            esc(a.sessionId) +
-            '" title="Rename agent">' +
-            icons.edit +
-            "</button>" +
             '<button class="iconbtn" data-action="stopAgent" data-session="' +
             esc(a.sessionId) +
             '" title="Stop agent">' +
@@ -400,8 +394,9 @@
       '<button class="act agent" data-action="agent" data-path="' +
       esc(wt.path) +
       '" title="Start a Claude session in this worktree">' +
-      icons.sparkle +
-      "Agent</button>";
+      '<span class="agent-plus">+</span>' +
+      icons.agentMark +
+      "</button>";
 
     // Open this worktree in its own VS Code window (focuses an existing one if
     // already open). Available for every worktree, including the primary.
@@ -439,7 +434,8 @@
       '<hr class="card-sep" />' +
       '<div class="meta-row">' +
       gitLine(wt.git, wt.path, wt.scmActive) +
-      '<span class="actions-spacer"></span>' +
+      "</div>" +
+      '<div class="agent-action-row">' +
       agentBtn +
       "</div>" +
       prLine(wt.pr) +
@@ -633,7 +629,7 @@
     {
       id: "integrations",
       icon: "branch",
-      label: "Integrations",
+      label: "Source Control",
       section: integrationsSection,
     },
   ];

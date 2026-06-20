@@ -9,8 +9,6 @@ interface SessionState {
   branch?: string;
   state: AgentStatus;
   task?: string;
-  /** User-given name (pencil button or /rename). */
-  name?: string;
   /** Bare names of skills this session has invoked (deduped, in first-use order). */
   skills?: string[];
   /** Epoch ms when the session was first seen. */
@@ -69,16 +67,13 @@ export async function readSessionsByWorktree(
       key,
       sessions.map((s, i) => {
         const summary = s.task && s.task.trim() ? s.task.trim() : undefined;
-        const name = s.name && s.name.trim() ? s.name.trim() : undefined;
         const skills = Array.isArray(s.skills)
           ? s.skills.filter((x) => typeof x === "string")
           : [];
         return {
           sessionId: s.sessionId,
-          // User-given name wins, then the work summary, then an ordinal before
-          // the first prompt.
-          label: name || summary || `Claude ${i + 1}`,
-          name,
+          // The work summary, then an ordinal until Claude generates a title.
+          label: summary || `Claude ${i + 1}`,
           summary,
           skills,
           status: s.state,

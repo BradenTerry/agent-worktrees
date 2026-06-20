@@ -179,9 +179,8 @@ function main() {
   }
 
   // Carry fields forward across events: the work summary (Claude's generated
-  // title, else the last prompt), the user-given name, and the first-seen
-  // timestamp, so the panel keeps showing what the agent is working on rather
-  // than resetting on every event.
+  // title) and the first-seen timestamp, so the panel keeps showing what the
+  // agent is working on rather than resetting on every event.
   let prior = {};
   try {
     prior = JSON.parse(readFileSync(target, "utf8"));
@@ -189,7 +188,6 @@ function main() {
     /* first event for this session, or unreadable */
   }
   const now = Date.now();
-  let name = typeof prior.name === "string" ? prior.name : undefined;
 
   // Accumulate the skills this session has invoked. PreToolUse fires the moment
   // a Skill tool starts, so this captures skills the agent has "started to use".
@@ -202,47 +200,17 @@ function main() {
     if (skill && !skills.includes(skill)) skills.push(skill);
   }
 
-  // Pseudo-command: `/rename-agent <name>` typed in the session (optional
-  // leading whitespace, nothing else before the slash). `/rename` is a Claude
-  // built-in handled client-side that never reaches a hook, so we use our own
-  // name. Handled entirely here — set the agent's name and block the prompt
-  // with exit 2 so Claude never processes it as a message.
-  if (event === "UserPromptSubmit" && typeof payload.prompt === "string") {
-    const m = payload.prompt.match(/^\s*\/rename-agent\s+(\S.*)$/);
-    if (m) {
-      name = m[1].replace(/\s+/g, " ").trim().slice(0, 80);
-      writeFileSync(
-        target,
-        JSON.stringify({
-          sessionId: id,
-          worktree: top,
-          branch,
-          state: typeof prior.state === "string" ? prior.state : "idle",
-          model: prior.model || payload.model || "claude",
-          startedAt:
-            typeof prior.startedAt === "number" ? prior.startedAt : now,
-          ts: now,
-          ...(prior.task ? { task: prior.task } : {}),
-          ...(name ? { name } : {}),
-          ...(skills.length ? { skills } : {}),
-        }) + "\n"
-      );
-      process.stderr.write(`Agent Worktrees: renamed agent to "${name}"\n`);
-      process.exit(2);
-    }
-  }
-
   const state = EVENT_STATE[event] || "active";
 
-  // The summary: prefer Claude's own generated title from the transcript, which
-  // tracks what the agent is actually working on. Only when it hasn't produced
-  // one yet do we fall back to the user's latest prompt.
+  // The summary: Claude's own generated title from the transcript, which tracks
+  // what the agent is actually working on. We deliberately do NOT fall back to
+  // the user's raw prompt: the title lands shortly after the first prompt, so
+  // until then the panel row and terminal keep their default "Claude N" /
+  // "Claude · <worktree>" label rather than echoing the prompt text.
   let task = typeof prior.task === "string" ? prior.task : "";
   const aiTitle = readAiTitle(payload.transcript_path);
   if (aiTitle) {
     task = aiTitle;
-  } else if (event === "UserPromptSubmit" && payload.prompt) {
-    task = String(payload.prompt).replace(/\s+/g, " ").trim().slice(0, 120);
   }
 
   let startedAt = typeof prior.startedAt === "number" ? prior.startedAt : now;
@@ -262,7 +230,6 @@ function main() {
     startedAt,
     ts: now,
     ...(task ? { task } : {}),
-    ...(name ? { name } : {}),
     ...(skills.length ? { skills } : {}),
   };
 
