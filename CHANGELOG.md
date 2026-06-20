@@ -2,6 +2,29 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 0.2.0
+
+- **Settings is now a full page** - the gear opens a full-window settings view
+  with a vertical tab rail (GitHub for now) and a Close button, instead of a
+  modal overlay. "Show PR status on worktrees" is a sliding toggle.
+- **CI checks on the PR row** - the PR line shows a counted segment per check
+  state (passing, failing, running) with "N of M" tooltips, instead of a single
+  countless glyph. The open-on-GitHub affordance uses an external-link icon.
+- **Refresh is now a full sync** - the refresh action runs a `git fetch` so the
+  behind ("commits to pull") count is accurate, and forces a fresh GitHub PR/CI
+  fetch instead of reading the cache. Background refreshes stay lightweight.
+- **Clearer git status line** - always shows the diff totals (a gray `+/- 0`
+  when clean, `+N` / `-N` when changed) and up/down arrows for commits to push
+  and pull.
+- **Readability pass** - bumped the smallest text up a step and raised contrast
+  on the git line, PR line, agent meta, Agents bar, and badges. PR state badges
+  use saturated fills so their text stays legible.
+- **Tidier toolbar** - the Agent & Worktree button uses the extension's icon;
+  the redundant in-panel refresh and the "New Worktree" title-bar button were
+  removed (the New Worktree command is still in the Command Palette).
+- The full agent summary now shows on hover of the agent label itself (the
+  separate info icon was removed).
+
 ## 0.1.0
 
 - **GitHub PR status per worktree** — an optional integration shows each
