@@ -2,6 +2,21 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 0.1.0
+
+- **GitHub PR status per worktree** — an optional integration shows each
+  worktree branch's open PR right on its card: state and number, CI check
+  rollup, review decision, and comment count, with the row linking out to the
+  PR. It is fully opt-in and gated on a personal access token you provide (no
+  token means no GitHub calls at all), and any GitHub error degrades quietly
+  without affecting the worktree or agent display.
+- **Settings modal** — a new gear in the panel title bar opens a settings modal
+  that manages the GitHub connection: paste a token (kept in VS Code Secret
+  Storage), toggle PR status on or off, and use the pre-filled links to create a
+  fine-grained or classic token with exactly the read-only permissions needed.
+- PR status refreshes on an adaptive timer and is nudged by Claude Code hook
+  activity, so a PR an agent opens with `gh pr create` surfaces quickly.
+
 ## 0.0.3
 
 - **Full summary on hover** — agent rows now show an info icon after the name;
