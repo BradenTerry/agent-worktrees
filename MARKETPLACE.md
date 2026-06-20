@@ -7,6 +7,22 @@ isolated checkout, so sessions never step on each other's files. Agent Worktrees
 puts every worktree, its git state, and its running Claude agents in a single
 view, and floats the ones that need you to the top.
 
+## Screenshots
+
+Every worktree with its git status, open PR, and running agents in one panel:
+
+![Worktrees, git status, PRs and agents in the panel](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png)
+
+Open PRs show their CI check counts, review status, and comments, and link out to
+GitHub:
+
+![CI checks and review status on a worktree's PR](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png)
+
+Optional GitHub integration, configured from the settings page (your token stays
+in VS Code Secret Storage):
+
+![GitHub PR status settings](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png)
+
 ## Highlights
 
 - **Every worktree at a glance** — primary and linked worktrees with branch

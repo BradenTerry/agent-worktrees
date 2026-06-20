@@ -3,6 +3,12 @@
 .github/**
 src/**
 test/**
+screenshots/**
+images/**
+playwright.config.js
+playwright-report/**
+test-results/**
+CLAUDE.md
 **/*.ts
 **/*.map
 tsconfig.json

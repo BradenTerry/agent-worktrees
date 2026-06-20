@@ -81,9 +81,11 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "npm run compile && node --test",
+    "screenshots": "playwright test",
     "package": "npx --yes @vscode/vsce package --readme-path MARKETPLACE.md"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/node": "^20.x",
     "@types/vscode": "^1.90.0",
     "typescript": "^5.4.0"

@@ -10,13 +10,32 @@ agents running in each. The panel UI is a webview:
 - `src/` - the extension host (TypeScript): git, GitHub PR polling, the webview
   provider. `npm run compile` typechecks/builds.
 
+## Marketplace screenshots (Playwright)
+
+`screenshots/` holds a Playwright suite that renders the **real** webview UI
+(`media/panel.js` + `media/panel.css`) in a browser with fake data and writes
+the listing images to `images/`, referenced from `MARKETPLACE.md`.
+
+```
+npm run screenshots      # regenerate images/*.png
+```
+
+Important: this does **not** launch the VS Code extension host. It stubs
+`acquireVsCodeApi`, mounts `#root`, loads the actual panel JS/CSS, and drives it
+through the same `postMessage` "update" path the extension uses (see
+`screenshots/fixtures.js`). That keeps the images faithful to the current UI
+while staying fast and host-free. Re-run after any `panel.js` / `panel.css`
+change so the marketplace listing stays current. `images/` and `screenshots/`
+are excluded from the packaged `.vsix`; the listing loads the PNGs from raw
+GitHub URLs.
+
 ## Validating accessibility / contrast
 
 The webview styling can't be eyeballed from the source alone, and we do **not**
-spin up the real VS Code extension (no Playwright / extension-host runs) just to
-check visuals. Instead, render `media/panel.css` against the VS Code theme
-tokens in a throwaway static HTML harness and screenshot it with headless
-Chrome.
+spin up the real VS Code extension (no extension-host runs) just to check
+visuals. Two host-free options, both rendering `panel.css` against VS Code theme
+tokens: reuse the Playwright harness above, or a throwaway static HTML harness
+screenshotted with headless Chrome.
 
 ```mermaid
 flowchart LR
