@@ -26,6 +26,9 @@ import {
 } from "./github";
 import { PrService, PrTarget } from "./prs";
 
+/** globalState key for the opt-in Source Control scope button. */
+const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
+
 /** Messages sent from the webview to the extension. */
 interface ActionMessage {
   type: "action";
@@ -43,7 +46,9 @@ interface ActionMessage {
     | "openSettings"
     | "setGithubToken"
     | "clearGithubToken"
-    | "togglePr";
+    | "togglePr"
+    | "toggleScm"
+    | "scopeScm";
   path?: string;
   sessionId?: string;
   /** GitHub PAT, for setGithubToken. */
@@ -183,6 +188,7 @@ export class WorktreeWebviewProvider
       await this.syncTerminalNames(agents);
     }
     const data = await gatherWorktrees(agents, installed, force);
+    data.scmEnabled = this.isScmEnabled();
     if (!installed) {
       data.hooks = HOOKS.map((h) => ({
         label: h.label,
@@ -280,7 +286,78 @@ export class WorktreeWebviewProvider
         return this.clearGithubToken();
       case "togglePr":
         return this.togglePr(msg.value);
+      case "toggleScm":
+        return this.toggleScm(msg.value);
+      case "scopeScm":
+        return this.scopeScm(msg.path);
     }
+  }
+
+  // --- Source Control --------------------------------------------------------
+
+  /** Whether the opt-in Source Control scope button is enabled (default off). */
+  private isScmEnabled(): boolean {
+    return this.context.globalState.get<boolean>(SCM_SCOPE_KEY, false);
+  }
+
+  /** Turn the Source Control scope button on/off and re-render. */
+  private async toggleScm(value?: boolean): Promise<void> {
+    await this.context.globalState.update(SCM_SCOPE_KEY, !!value);
+    this.lastPosted = "";
+    await this.refresh();
+  }
+
+  /** The built-in Git extension's API, activating it first if needed. */
+  private async gitApi(): Promise<GitApi | undefined> {
+    const ext = vscode.extensions.getExtension<GitExtensionExports>("vscode.git");
+    if (!ext) return undefined;
+    try {
+      const exports = ext.isActive ? ext.exports : await ext.activate();
+      return exports.getAPI(1);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Scope the Source Control view to the selected worktree. Open its repository
+   * if it isn't already shown, then: when more than one repo is currently listed
+   * just reveal Source Control (non-destructive focus); when a single repo is
+   * listed, swap it out (close the previous one) so only this worktree's diffs
+   * remain.
+   */
+  private async scopeScm(fsPath?: string): Promise<void> {
+    if (!fsPath || !this.isScmEnabled()) return;
+    const api = await this.gitApi();
+    if (!api) {
+      vscode.window.showErrorMessage(
+        "The built-in Git extension is not available."
+      );
+      return;
+    }
+
+    const target = normalize(fsPath);
+    // Repos shown before we add the selected worktree, to decide swap vs. focus.
+    const wasMultiple = api.repositories.length > 1;
+
+    const uri = vscode.Uri.file(fsPath);
+    const repo =
+      api.getRepository(uri) ?? (await api.openRepository(uri).catch(() => null));
+    if (!repo) {
+      vscode.window.showErrorMessage(`No git repository at ${fsPath}.`);
+      return;
+    }
+
+    // Only one repo was listed -> swap it for this worktree by closing the
+    // previously-open repositories that aren't the selected one.
+    if (!wasMultiple) {
+      for (const r of api.repositories) {
+        if (normalize(r.rootUri.fsPath) === target) continue;
+        await vscode.commands.executeCommand("git.close", r.rootUri);
+      }
+    }
+
+    await vscode.commands.executeCommand("workbench.view.scm");
   }
 
   // --- GitHub settings -------------------------------------------------------
@@ -744,6 +821,19 @@ export class WorktreeWebviewProvider
 </body>
 </html>`;
   }
+}
+
+/** Minimal slice of the built-in Git extension API we depend on. */
+interface GitApiRepository {
+  readonly rootUri: vscode.Uri;
+}
+interface GitApi {
+  readonly repositories: GitApiRepository[];
+  getRepository(uri: vscode.Uri): GitApiRepository | null;
+  openRepository(uri: vscode.Uri): Promise<GitApiRepository | null>;
+}
+interface GitExtensionExports {
+  getAPI(version: 1): GitApi;
 }
 
 function nameOf(fsPath: string): string {

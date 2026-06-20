@@ -30,6 +30,8 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
     gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>',
     pr: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8M12 11V7a2.5 2.5 0 0 0-2.5-2.5H7M9 2.5L7 4.5l2 2"/></svg>',
+    branch:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="5" r="1.5"/><path d="M5 5v6"/><path d="M11 6.5c0 3-3 2.7-6 2.7"/></svg>',
     check:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3.5 8.5l3 3 6-6.5"/></svg>',
     cross:
@@ -206,8 +208,18 @@
   }
 
   /** Git working-tree summary line: diff totals and ahead/behind. */
-  function gitLine(g) {
-    if (!g) return "";
+  function gitLine(g, path) {
+    // Scope the Source Control view to this worktree. Opt-in (Settings →
+    // Integrations); sits to the left of the diff totals when enabled.
+    const scopeBtn =
+      lastData && lastData.scmEnabled
+        ? '<button class="iconbtn scm-scope" data-action="scopeScm" data-path="' +
+          esc(path) +
+          '" title="Show only this worktree in Source Control">' +
+          icons.branch +
+          "</button>"
+        : "";
+    if (!g) return scopeBtn ? '<div class="gitline">' + scopeBtn + "</div>" : "";
     const segs = [];
     if (g.dirty)
       segs.push(
@@ -232,7 +244,7 @@
         (g.behind || 0) +
         "</span>"
     );
-    return '<div class="gitline">' + segs.join("") + "</div>";
+    return '<div class="gitline">' + scopeBtn + segs.join("") + "</div>";
   }
 
   // PR-state badge labels and the CSS class that colors them.
@@ -409,7 +421,7 @@
       "</div>" +
       '<hr class="card-sep" />' +
       '<div class="meta-row">' +
-      gitLine(wt.git) +
+      gitLine(wt.git, wt.path) +
       '<span class="actions-spacer"></span>' +
       agentBtn +
       "</div>" +
@@ -585,16 +597,30 @@
   // itself when the GitHub connection (not the worktree data) changes, so typing
   // a token is never interrupted by a routine refresh.
   let settingsOpen = false;
+  let settingsTab = "github";
   let lastGhSig = "";
 
   function ghSig(data) {
     return JSON.stringify([
       (data && data.github) || null,
       (data && data.prEnabled) !== false,
+      (data && data.scmEnabled) === true,
     ]);
   }
 
-  function settingsContent(data) {
+  // The settings tabs. Each renders its own body section; `settingsTab` tracks
+  // which one is shown.
+  const SETTINGS_TABS = [
+    { id: "github", icon: "pr", label: "GitHub", section: githubSection },
+    {
+      id: "integrations",
+      icon: "branch",
+      label: "Integrations",
+      section: integrationsSection,
+    },
+  ];
+
+  function githubSection(data) {
     const gh = (data && data.github) || { hasToken: false, connected: false };
     const prEnabled = !data || data.prEnabled !== false;
 
@@ -673,22 +699,6 @@
       "</label>";
 
     return (
-      '<div class="settings-view">' +
-      '<div class="settings-head">' +
-      '<span class="settings-title">' +
-      icons.gear +
-      " Settings</span>" +
-      '<button class="tbtn ghost settings-close" data-action="closeSettings" title="Close settings">' +
-      icons.cross +
-      " Close</button>" +
-      "</div>" +
-      '<div class="settings-main">' +
-      '<nav class="settings-tabs" role="tablist">' +
-      '<button class="settings-tab active" role="tab" aria-selected="true">' +
-      icons.pr +
-      "<span>GitHub</span></button>" +
-      "</nav>" +
-      '<div class="settings-body">' +
       '<section class="gh-section">' +
       '<h3 class="gh-h">' +
       icons.pr +
@@ -700,7 +710,72 @@
       tokenField +
       links +
       disconnect +
-      "</section>" +
+      "</section>"
+    );
+  }
+
+  function integrationsSection(data) {
+    const scmEnabled = !!(data && data.scmEnabled);
+    const toggle =
+      '<label class="gh-toggle">' +
+      '<span class="gh-toggle-label">Source Control scope button</span>' +
+      '<input type="checkbox" id="scm-enable" class="switch-input"' +
+      (scmEnabled ? " checked" : "") +
+      ' role="switch" aria-label="Show the Source Control scope button on worktrees" />' +
+      '<span class="switch" aria-hidden="true"></span>' +
+      "</label>";
+
+    return (
+      '<section class="gh-section">' +
+      '<h3 class="gh-h">' +
+      icons.branch +
+      " Source Control</h3>" +
+      '<p class="gh-lead">Add a button to each worktree that scopes the built-in ' +
+      "Source Control view to that worktree, so you only see its diffs.</p>" +
+      toggle +
+      '<p class="gh-help dim">When a single repository is open, choosing a worktree ' +
+      "swaps it into Source Control — the previous repo is removed from the view, " +
+      "not from disk. When several are open, it reveals and focuses the selected one.</p>" +
+      "</section>"
+    );
+  }
+
+  function settingsContent(data) {
+    const active = SETTINGS_TABS.find((t) => t.id === settingsTab)
+      ? settingsTab
+      : "github";
+    const tabs = SETTINGS_TABS.map(
+      (t) =>
+        '<button class="settings-tab' +
+        (t.id === active ? " active" : "") +
+        '" role="tab" data-tab="' +
+        t.id +
+        '" aria-selected="' +
+        (t.id === active) +
+        '">' +
+        icons[t.icon] +
+        "<span>" +
+        t.label +
+        "</span></button>"
+    ).join("");
+    const body = (
+      SETTINGS_TABS.find((t) => t.id === active) || SETTINGS_TABS[0]
+    ).section(data);
+
+    return (
+      '<div class="settings-view">' +
+      '<div class="settings-head">' +
+      '<span class="settings-title">Settings</span>' +
+      '<button class="tbtn ghost settings-close" data-action="closeSettings" title="Close settings">' +
+      icons.cross +
+      " Close</button>" +
+      "</div>" +
+      '<div class="settings-main">' +
+      '<nav class="settings-tabs" role="tablist">' +
+      tabs +
+      "</nav>" +
+      '<div class="settings-body">' +
+      body +
       "</div>" +
       "</div>" +
       "</div>"
@@ -758,6 +833,13 @@
       else if (kind === "disconnect") send("clearGithubToken");
       return;
     }
+    // Settings tab switch (webview-only; no round trip).
+    const tab = e.target.closest("[data-tab]");
+    if (tab && settingsOpen) {
+      settingsTab = tab.getAttribute("data-tab") || "github";
+      renderSettings();
+      return;
+    }
     const tool = e.target.closest("[data-tool='collapseAll']");
     if (tool) {
       collapseAll();
@@ -795,6 +877,8 @@
   root.addEventListener("change", (e) => {
     if (e.target && e.target.id === "gh-enable") {
       send("togglePr", { value: !!e.target.checked });
+    } else if (e.target && e.target.id === "scm-enable") {
+      send("toggleScm", { value: !!e.target.checked });
     }
   });
 

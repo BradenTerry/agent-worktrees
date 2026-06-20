@@ -71,6 +71,8 @@ export interface WorktreeData {
   github?: GithubConnection;
   /** Whether the PR integration is toggled on. */
   prEnabled?: boolean;
+  /** Whether the Source Control scope button is enabled on worktrees. */
+  scmEnabled?: boolean;
 }
 
 export function normalize(p: string): string {

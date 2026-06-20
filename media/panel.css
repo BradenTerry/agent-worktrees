@@ -263,6 +263,15 @@ button.accept {
   align-items: center;
   gap: 4px;
 }
+/* Source-control scope button: leftmost in the gitline, tucked toward the
+   card edge so the diff totals keep their start position. */
+.gitline .scm-scope {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-left: -2px;
+  margin-right: -2px;
+}
 .gitline .clean {
   color: var(--vscode-charts-green, #89d185);
 }
@@ -779,6 +788,19 @@ button svg {
   padding: 12px;
   overflow-y: auto;
 }
+/* Narrow panels: a vertical tab rail would swallow half the width, so stack the
+   tabs on top as a horizontal row and give the body the full width. */
+@media (max-width: 360px) {
+  .settings-main {
+    flex-direction: column;
+  }
+  .settings-tabs {
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+    padding: 6px 8px;
+  }
+}
 .gh-section {
   display: flex;
   flex-direction: column;
@@ -863,11 +885,16 @@ button svg {
 .gh-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   font-size: 12px;
   padding: 7px 9px;
   border-radius: 5px;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  overflow-wrap: anywhere;
+}
+.gh-status b {
+  overflow-wrap: anywhere;
 }
 .gh-status.ok {
   color: var(--vscode-foreground);

@@ -9,19 +9,11 @@ view, and floats the ones that need you to the top.
 
 ## Screenshots
 
-Every worktree with its git status, open PR, and running agents in one panel:
+<sub>Click any thumbnail to view it full size.</sub>
 
-![Worktrees, git status, PRs and agents in the panel](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png)
-
-Open PRs show their CI check counts, review status, and comments, and link out to
-GitHub:
-
-![CI checks and review status on a worktree's PR](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png)
-
-Optional GitHub integration, configured from the settings page (your token stays
-in VS Code Secret Storage):
-
-![GitHub PR status settings](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png)
+| Worktrees, git status & agents | PR checks, review & comments | Settings & integrations |
+| :---: | :---: | :---: |
+| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) |
 
 ## Highlights
 
