@@ -4,6 +4,7 @@
   "description": "Run and monitor multiple Claude Code agents across your git worktrees from a single side panel.",
   "version": "0.0.1",
   "publisher": "bradenterry",
+  "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
