@@ -290,6 +290,63 @@ test("fetchPrsByBranch: maps a PR (state, checks, reviews, viewer, author, assig
   );
 });
 
+// A minimal PR node with sane defaults; override per test. Empty rollups so the
+// mapping has nothing to choke on.
+function prNode(over) {
+  return Object.assign(
+    {
+      number: 1,
+      title: "PR",
+      url: "https://github.com/acme/widgets/pull/1",
+      isDraft: false,
+      state: "OPEN",
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-06-01T00:00:00Z",
+      headRefName: "feat-a",
+      author: { login: "alice" },
+      assignees: { nodes: [] },
+      comments: { totalCount: 0 },
+      reviews: { nodes: [] },
+      reviewRequests: { nodes: [] },
+      commits: { nodes: [] },
+    },
+    over
+  );
+}
+
+function gqlNodes(nodes) {
+  return { data: { viewer: { login: "you" }, repository: { pullRequests: { nodes } } } };
+}
+
+test("fetchPrsByBranch: includes a merged PR (state=merged)", async () => {
+  await withFetch(
+    () => gqlResponse(200, gqlNodes([prNode({ number: 9, state: "MERGED", headRefName: "feat-done" })])),
+    async () => {
+      const { prs } = await fetchPrsByBranch("tok", REPO);
+      const pr = prs.get("feat-done");
+      assert.ok(pr, "merged PR is mapped");
+      assert.strictEqual(pr.state, "merged");
+      assert.strictEqual(pr.number, 9);
+    }
+  );
+});
+
+test("fetchPrsByBranch: prefers an open PR over a merged one on the same branch", async () => {
+  // Merged PR is newer (arrives first under UPDATED_AT desc); the open one is
+  // older. We should still surface the open PR for the branch.
+  const merged = prNode({ number: 2, state: "MERGED", updatedAt: "2026-06-10T00:00:00Z" });
+  const open = prNode({ number: 1, state: "OPEN", updatedAt: "2026-06-02T00:00:00Z" });
+  await withFetch(
+    () => gqlResponse(200, gqlNodes([merged, open])),
+    async () => {
+      const { prs } = await fetchPrsByBranch("tok", REPO);
+      const pr = prs.get("feat-a");
+      assert.strictEqual(pr.state, "open");
+      assert.strictEqual(pr.number, 1);
+    }
+  );
+});
+
 test("fetchPrsByBranch: a GraphQL errors body resolves to an empty map", async () => {
   await withFetch(
     () => gqlResponse(200, { errors: [{ message: "Bad credentials" }] }),

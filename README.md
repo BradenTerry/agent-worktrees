@@ -134,7 +134,7 @@ panel as a `{ type: "branches" }` payload:
   ahead/behind distance from `%(upstream:track)` for the ↑/↓ indicator.
 - When the PR integration is enabled and a token is connected,
   `github.fetchPrsByBranch` issues **one** `POST /graphql` request that returns
-  every open PR in the repo with its rollups (state, check rollup, comment
+  every PR in the repo (open, merged and closed) with its rollups (state, check rollup, comment
   count) and the fields the filters need — author, created/updated timestamps,
   assignee logins, review author/state, requested-reviewer logins, and
   `viewer.login`. The result is mapped to branches by head ref client-side. A

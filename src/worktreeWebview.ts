@@ -28,6 +28,7 @@ import {
   clearToken,
   fetchPrsByBranch,
   getToken,
+  BranchPrInfo,
 } from "./github";
 import { PrService, PrTarget } from "./prs";
 
@@ -77,6 +78,9 @@ export class WorktreeWebviewProvider
 
   /** The branches overlay editor tab, when open (singleton). */
   private branchesPanel?: vscode.WebviewPanel;
+  /** Last batched PR fetch for the branches panel, reused on cheap refreshes so
+   *  worktree add/remove re-renders the rows without re-hitting the GitHub API. */
+  private branchPrs?: { prs: Map<string, BranchPrInfo>; viewerLogin?: string };
 
   /** Last payload posted, to skip redundant re-renders. */
   private lastPosted = "";
@@ -240,6 +244,10 @@ export class WorktreeWebviewProvider
       }));
     }
     await this.attachPrStatus(data, force);
+    // Keep the branches editor tab (if open) in sync with the same signals that
+    // refresh the sidebar, so a worktree add/remove updates its rows. Reuse the
+    // cached PR data on routine refreshes; only a forced refresh refetches PRs.
+    if (this.branchesPanel) void this.postBranches(force);
     const json = JSON.stringify(data);
     if (json === this.lastPosted) return;
     this.lastPosted = json;
@@ -481,6 +489,7 @@ export class WorktreeWebviewProvider
       );
     }
     this.prService.reauth();
+    this.branchPrs = undefined; // credential changed: drop the cached branch PRs
     this.lastPosted = "";
     await this.refresh();
   }
@@ -493,6 +502,7 @@ export class WorktreeWebviewProvider
       /* best effort */
     }
     this.prService.reauth();
+    this.branchPrs = undefined; // credential changed: drop the cached branch PRs
     this.lastPosted = "";
     await this.refresh();
   }
@@ -500,6 +510,7 @@ export class WorktreeWebviewProvider
   /** Turn the PR integration on/off without discarding the stored token. */
   private async togglePr(value?: boolean): Promise<void> {
     await this.prService.setEnabled(!!value);
+    this.branchPrs = undefined; // integration toggled: refetch (or clear) branch PRs
     this.lastPosted = "";
     await this.refresh();
   }
@@ -986,10 +997,15 @@ export class WorktreeWebviewProvider
   /**
    * Compute the branch list (git-only) and attach GitHub connection + per-branch
    * PR rollups, then post it to the branches panel. The PR rollups come from one
-   * batched GraphQL call (separate from the worktree cards' REST path). Any PR
-   * failure leaves branches with `pr` null and still posts — it never throws.
+   * batched GraphQL call (separate from the worktree cards' REST path).
+   *
+   * `refetchPrs` controls cost: a forced/explicit refresh fetches fresh PR data;
+   * the frequent watcher-driven refreshes reuse the cached PR map so worktree
+   * add/remove still updates the branch rows (hasWorktree, ahead/behind) without
+   * hitting the GitHub API on every file change. Any PR failure leaves branches
+   * with `pr` null and still posts — it never throws.
    */
-  private async postBranches(): Promise<void> {
+  private async postBranches(refetchPrs = true): Promise<void> {
     if (!this.branchesPanel) return;
     const data = await gatherBranches();
     const github = await connection();
@@ -1002,7 +1018,10 @@ export class WorktreeWebviewProvider
         if (repo) {
           const token = await getToken();
           if (token) {
-            const { prs, viewerLogin } = await fetchPrsByBranch(token, repo);
+            if (refetchPrs || !this.branchPrs) {
+              this.branchPrs = await fetchPrsByBranch(token, repo);
+            }
+            const { prs, viewerLogin } = this.branchPrs;
             data.viewerLogin = viewerLogin ?? github.login;
             for (const b of data.branches) {
               b.pr = prs.get(b.name) ?? null;

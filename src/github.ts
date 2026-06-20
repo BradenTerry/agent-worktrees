@@ -359,11 +359,14 @@ export interface BranchPrInfo {
   reviewRequestedFromViewer: boolean;
 }
 
-/** The single GraphQL query: all open PRs with their rollups + filter fields. */
+/** The single GraphQL query: the repo's PRs (open, merged and closed) with their
+ *  rollups + filter fields. We include merged/closed so a branch whose PR has
+ *  landed still shows its status, matching the per-worktree REST path which
+ *  queries state=all. */
 const PRS_BY_BRANCH_QUERY = `query($owner:String!,$name:String!){
   viewer { login }
   repository(owner:$owner, name:$name){
-    pullRequests(states:[OPEN], first:100, orderBy:{field:UPDATED_AT, direction:DESC}){
+    pullRequests(states:[OPEN,MERGED,CLOSED], first:100, orderBy:{field:UPDATED_AT, direction:DESC}){
       nodes{
         number title url isDraft state createdAt updatedAt headRefName
         author { login }
@@ -553,10 +556,13 @@ export async function fetchPrsByBranch(
       reviewRequestedFromViewer,
     };
 
-    // Key by head ref; if two open PRs share one, keep the most recently
-    // updated. Nodes arrive UPDATED_AT desc, so the first seen wins.
+    // Key by head ref. Nodes arrive UPDATED_AT desc, so the first seen is the
+    // most recent. Prefer an open/draft PR over a merged/closed one for the same
+    // branch (mirrors the REST path's `find(open) ?? latest`); otherwise the
+    // newest already-stored one wins.
+    const active = (s: BranchPrInfo["state"]) => s === "open" || s === "draft";
     const existing = prs.get(pr.headRefName);
-    if (!existing || (info.updatedAt ?? "") > (existing.updatedAt ?? "")) {
+    if (!existing || (active(info.state) && !active(existing.state))) {
       prs.set(pr.headRefName, info);
     }
   }
