@@ -458,6 +458,24 @@ button.accept {
   width: 13px;
   height: 13px;
 }
+/* Custom hover tooltip (see panel.js) — themed like VS Code's hover widget. */
+.tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 280px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  background: var(--vscode-editorHoverWidget-background, #252526);
+  border: 1px solid
+    var(--vscode-editorHoverWidget-border, rgba(128, 128, 128, 0.35));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .agents-empty {
   margin: 8px 0 0;
   font-size: 11px;

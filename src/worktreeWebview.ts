@@ -150,6 +150,12 @@ export class WorktreeWebviewProvider
     return this.context.extensionUri;
   }
 
+  /** The extension's own worktree glyph, used as each agent terminal's tab icon
+   *  so it matches the Activity Bar icon instead of the generic sparkle. */
+  private get terminalIcon(): vscode.Uri {
+    return vscode.Uri.joinPath(this.extensionUri, "media", "worktree.svg");
+  }
+
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.webview.options = {
@@ -435,7 +441,7 @@ export class WorktreeWebviewProvider
     const terminal = vscode.window.createTerminal({
       name: `Claude · ${nameOf(fsPath)}`,
       cwd: fsPath,
-      iconPath: new vscode.ThemeIcon("sparkle"),
+      iconPath: this.terminalIcon,
     });
     this.terminals.set(sessionId, terminal);
     terminal.show();
@@ -460,7 +466,7 @@ export class WorktreeWebviewProvider
     const terminal = vscode.window.createTerminal({
       name: "Claude · new worktree",
       cwd,
-      iconPath: new vscode.ThemeIcon("sparkle"),
+      iconPath: this.terminalIcon,
     });
     this.terminals.set(sessionId, terminal);
     terminal.show();

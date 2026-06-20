@@ -18,7 +18,16 @@
  * SessionEnd removes the file so the agent disappears when its session exits.
  */
 import { execFileSync } from "node:child_process";
-import { writeFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  writeFileSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  openSync,
+  fstatSync,
+  readSync,
+  closeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 
@@ -82,6 +91,57 @@ function normalizeSkill(raw) {
   return n && /^[a-z0-9][a-z0-9._-]*$/i.test(n) ? n : null;
 }
 
+/**
+ * Claude's own generated session title, read from the transcript. Claude Code
+ * writes `{ "type": "ai-title", "aiTitle": "…" }` lines into the session JSONL
+ * as it summarizes the work, updating it as the conversation evolves. That title
+ * is a far better "what is this agent doing" summary than the raw last prompt,
+ * so we use it when present.
+ *
+ * Reads only the tail of the file (the latest title sits near the end) so the
+ * cost stays bounded no matter how large the transcript grows. Returns "" when
+ * there is no transcript or no title yet.
+ */
+function readAiTitle(transcriptPath) {
+  if (typeof transcriptPath !== "string" || !transcriptPath) return "";
+  let fd;
+  try {
+    fd = openSync(transcriptPath, "r");
+    const { size } = fstatSync(fd);
+    const want = Math.min(size, 65536);
+    if (want <= 0) return "";
+    const buf = Buffer.alloc(want);
+    readSync(fd, buf, 0, want, size - want);
+    const lines = buf.toString("utf8").split("\n");
+    // Scan from the end for the most recent ai-title. The first line may be a
+    // partial record (we started mid-file); JSON.parse just skips it.
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line || line.indexOf("ai-title") === -1) continue;
+      try {
+        const o = JSON.parse(line);
+        if (o && o.type === "ai-title" && typeof o.aiTitle === "string") {
+          const t = o.aiTitle.replace(/\s+/g, " ").trim();
+          if (t) return t.slice(0, 120);
+        }
+      } catch {
+        /* partial / non-JSON line — keep scanning */
+      }
+    }
+  } catch {
+    /* no transcript, unreadable, etc. */
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+    }
+  }
+  return "";
+}
+
 function main() {
   let payload = {};
   const raw = readStdin();
@@ -118,9 +178,10 @@ function main() {
     return;
   }
 
-  // Carry fields forward across events: the work summary (last prompt), the
-  // user-given name, and the first-seen timestamp, so the panel keeps showing
-  // what the agent is working on rather than resetting on every event.
+  // Carry fields forward across events: the work summary (Claude's generated
+  // title, else the last prompt), the user-given name, and the first-seen
+  // timestamp, so the panel keeps showing what the agent is working on rather
+  // than resetting on every event.
   let prior = {};
   try {
     prior = JSON.parse(readFileSync(target, "utf8"));
@@ -173,13 +234,20 @@ function main() {
 
   const state = EVENT_STATE[event] || "active";
 
+  // The summary: prefer Claude's own generated title from the transcript, which
+  // tracks what the agent is actually working on. Only when it hasn't produced
+  // one yet do we fall back to the user's latest prompt.
   let task = typeof prior.task === "string" ? prior.task : "";
-  if (event === "UserPromptSubmit" && payload.prompt)
+  const aiTitle = readAiTitle(payload.transcript_path);
+  if (aiTitle) {
+    task = aiTitle;
+  } else if (event === "UserPromptSubmit" && payload.prompt) {
     task = String(payload.prompt).replace(/\s+/g, " ").trim().slice(0, 120);
+  }
 
   let startedAt = typeof prior.startedAt === "number" ? prior.startedAt : now;
   // A genuinely new session (startup, not resume) clears any stale summary and
-  // restarts the clock.
+  // restarts the clock. (A fresh startup has no transcript title yet.)
   if (event === "SessionStart" && payload.source === "startup") {
     task = "";
     startedAt = now;

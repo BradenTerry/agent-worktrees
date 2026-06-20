@@ -64,6 +64,53 @@ test("UserPromptSubmit marks active and records the prompt as the task", () => {
   assert.strictEqual(s.task, "do the thing");
 });
 
+test("prefers Claude's ai-title from the transcript over the raw prompt", () => {
+  const sid = "session-title";
+  const transcript = path.join(dir, sid + ".jsonl");
+  fs.writeFileSync(
+    transcript,
+    [
+      JSON.stringify({ type: "user", sessionId: sid }),
+      JSON.stringify({ type: "ai-title", aiTitle: "Old title", sessionId: sid }),
+      JSON.stringify({ type: "assistant", sessionId: sid }),
+      JSON.stringify({
+        type: "ai-title",
+        aiTitle: "Refactor the auth flow",
+        sessionId: sid,
+      }),
+    ].join("\n") + "\n"
+  );
+  const r = run({
+    hook_event_name: "UserPromptSubmit",
+    session_id: sid,
+    cwd: repo,
+    prompt: "fix this please",
+    transcript_path: transcript,
+  });
+  assert.strictEqual(r.status, 0);
+  const s = stateOf(sid);
+  // The latest ai-title wins, not the prompt and not the earlier title.
+  assert.strictEqual(s.task, "Refactor the auth flow");
+});
+
+test("falls back to the prompt when the transcript has no ai-title", () => {
+  const sid = "session-notitle";
+  const transcript = path.join(dir, sid + ".jsonl");
+  fs.writeFileSync(
+    transcript,
+    JSON.stringify({ type: "assistant", sessionId: sid }) + "\n"
+  );
+  const r = run({
+    hook_event_name: "UserPromptSubmit",
+    session_id: sid,
+    cwd: repo,
+    prompt: "do the other thing",
+    transcript_path: transcript,
+  });
+  assert.strictEqual(r.status, 0);
+  assert.strictEqual(stateOf(sid).task, "do the other thing");
+});
+
 test("/rename-agent sets the name and blocks the prompt (exit 2)", () => {
   const r = run({
     hook_event_name: "UserPromptSubmit",

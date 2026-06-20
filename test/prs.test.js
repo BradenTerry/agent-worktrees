@@ -67,10 +67,27 @@ test("rollupChecks: running checks (no failure) are pending", () => {
   assert.strictEqual(r.pending, 1);
 });
 
-test("rollupChecks: folds in the legacy combined status", () => {
-  assert.strictEqual(rollupChecks([], "failure").state, "fail");
-  assert.strictEqual(rollupChecks([], "pending").state, "pending");
-  assert.strictEqual(rollupChecks([], "success").state, "pass");
+test("rollupChecks: folds in the legacy combined status when present", () => {
+  assert.strictEqual(rollupChecks([], "failure", 1).state, "fail");
+  assert.strictEqual(rollupChecks([], "pending", 2).state, "pending");
+  assert.strictEqual(rollupChecks([], "success", 3).state, "pass");
+});
+
+test("rollupChecks: ignores the combined status when there are no statuses", () => {
+  // GitHub reports the combined state as "pending" for a commit with zero
+  // legacy statuses; folding that in would show a phantom pending check on
+  // Actions-only PRs, so total_count 0 must be ignored.
+  const r = rollupChecks(
+    [
+      { status: "completed", conclusion: "success" },
+      { status: "completed", conclusion: "success" },
+      { status: "completed", conclusion: "success" },
+    ],
+    "pending",
+    0
+  );
+  assert.strictEqual(r.state, "pass");
+  assert.deepStrictEqual([r.pass, r.fail, r.pending], [3, 0, 0]);
 });
 
 test("reviewSummary: keeps each reviewer's latest decision", () => {

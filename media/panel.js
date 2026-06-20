@@ -137,7 +137,7 @@
             '<span class="status-dot ' +
             s +
             '"></span>' +
-            '<span class="agent-label" title="' +
+            '<span class="agent-label" data-tip="' +
             esc(fullInfo) +
             '">' +
             esc(a.label) +
@@ -483,6 +483,7 @@
 
   function render(data) {
     lastData = data;
+    hideTip(); // a re-render replaces the hovered node; drop any open tooltip
     if (settingsOpen) {
       // Settings owns the whole window; routine data pushes must not wipe the
       // token field mid-type, so only re-render when GitHub state changed.
@@ -922,6 +923,63 @@
       openSettings();
     }
   });
+
+  // --- Custom hover tooltip --------------------------------------------------
+  // Native `title` tooltips have a long, browser-fixed delay. For the agent
+  // summary we want a snappier one, so elements carry `data-tip` and we render
+  // our own tooltip on document.body (no clipping by card overflow) after 200ms.
+  const TIP_DELAY = 200;
+  let tipEl = null;
+  let tipTimer = null;
+
+  function hideTip() {
+    if (tipTimer) {
+      clearTimeout(tipTimer);
+      tipTimer = null;
+    }
+    if (tipEl) {
+      tipEl.remove();
+      tipEl = null;
+    }
+  }
+
+  function showTip(target) {
+    const text = target.getAttribute("data-tip");
+    if (!text) return;
+    if (tipEl) tipEl.remove();
+    const el = document.createElement("div");
+    el.className = "tip";
+    el.textContent = text;
+    document.body.appendChild(el);
+    // Position above the element, centered, clamped to the viewport; flip below
+    // when there isn't room above.
+    const r = target.getBoundingClientRect();
+    const tw = el.offsetWidth;
+    const th = el.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    left = Math.max(4, Math.min(left, window.innerWidth - tw - 4));
+    let top = r.top - th - 6;
+    if (top < 4) top = r.bottom + 6;
+    el.style.left = left + "px";
+    el.style.top = top + "px";
+    tipEl = el;
+  }
+
+  root.addEventListener("mouseover", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (!t) return;
+    if (tipTimer) clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => showTip(t), TIP_DELAY);
+  });
+  root.addEventListener("mouseout", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (!t) return;
+    // Ignore moves to a child of the same tipped element.
+    if (e.relatedTarget && t.contains(e.relatedTarget)) return;
+    hideTip();
+  });
+  // Scrolling moves the anchor out from under a fixed tooltip; just drop it.
+  root.addEventListener("scroll", hideTip, true);
 
   // Keep relative times fresh without round-tripping to the extension.
   setInterval(() => {

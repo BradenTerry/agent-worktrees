@@ -263,7 +263,11 @@ export async function fetchPr(
       : Promise.resolve(undefined),
   ]);
 
-  const checks = rollupChecks(checkRuns?.check_runs, combined?.state);
+  const checks = rollupChecks(
+    checkRuns?.check_runs,
+    combined?.state,
+    combined?.total_count
+  );
   const requested =
     (detail?.requested_reviewers ?? raw.requested_reviewers ?? []).length;
   const rev = reviewSummary(reviews ?? [], requested);
@@ -304,10 +308,16 @@ export function prState(raw: {
  * Roll up CI across GitHub Actions check-runs and legacy commit statuses.
  * Any failure → fail; else anything still queued/in-progress/pending → pending;
  * else if there was any signal → pass; else none.
+ *
+ * `combinedTotal` is the commit-status endpoint's `total_count`: when it is 0
+ * the commit has no legacy statuses and GitHub still reports the combined state
+ * as "pending" by default, so we must skip folding it in or it shows a phantom
+ * pending check on Actions-only PRs.
  */
 export function rollupChecks(
   runs?: { status?: string; conclusion?: string | null }[],
-  combinedState?: string
+  combinedState?: string,
+  combinedTotal?: number
 ): { state: PrInfo["checks"]; pass: number; fail: number; pending: number } {
   let pass = 0;
   let fail = 0;
@@ -330,10 +340,14 @@ export function rollupChecks(
     else if (c === "success" || c === "neutral" || c === "skipped") pass++;
     else pending++;
   }
-  // Fold in the legacy combined commit-status state as one extra signal.
-  if (combinedState === "failure") fail++;
-  else if (combinedState === "pending") pending++;
-  else if (combinedState === "success") pass++;
+  // Fold in the legacy combined commit-status state as one extra signal, but
+  // only when there are actually legacy statuses. With none, GitHub reports the
+  // combined state as "pending", which would otherwise add a phantom check.
+  if ((combinedTotal ?? 0) > 0) {
+    if (combinedState === "failure") fail++;
+    else if (combinedState === "pending") pending++;
+    else if (combinedState === "success") pass++;
+  }
 
   let state: PrInfo["checks"];
   if (fail > 0) state = "fail";
