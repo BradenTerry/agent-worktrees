@@ -2,6 +2,23 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 1.1.0
+
+- **PR status reads as two labeled rows** - the PR summary now shows a header
+  (state + link), a **Reviews** row, and a **Checks** row, so CI checks and
+  review decisions no longer read as one ambiguous run of checkmarks. Reviews
+  shows approvals (green), changes requested (red, with count), reviewers still
+  pending (gray), and comments; Checks shows passing / failing / running.
+- **Accurate, faster CI updates after a push** - a PR whose commit has no legacy
+  commit statuses no longer shows a phantom pending check, and when a push lands
+  the panel polls quickly for a short window so the fresh pending checks appear
+  in seconds instead of up to a minute.
+- **Source Control scope shows its state** - the per-worktree scope button
+  highlights the worktree whose repository is currently shown in Source Control,
+  and that state now populates on window load, not only after a manual refresh.
+- **Quieter agent rows** - dropped the elapsed-time / status text from each agent
+  row; the status dot color already conveys active / waiting / idle.
+
 ## 1.0.0
 
 - **Source Control scoping per worktree** - an opt-in button on each worktree
