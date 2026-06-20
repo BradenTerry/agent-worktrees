@@ -136,6 +136,7 @@ function overviewData() {
           approvals: 2,
           changesRequested: 0,
           comments: 3,
+          autoMerge: true,
         },
       },
       {
@@ -172,6 +173,7 @@ function overviewData() {
           approvals: 0,
           changesRequested: 1,
           comments: 1,
+          mergeState: "behind",
         },
       },
     ],

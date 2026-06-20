@@ -741,6 +741,29 @@ button svg {
 .pr-state.closed {
   background: #cf222e;
 }
+/* Merge-readiness flags. Filled pills with fixed, saturated backgrounds so the
+   white text stays legible in both themes (the chart vars are too light). */
+.pr-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #fff;
+}
+.pr-flag svg {
+  width: 11px;
+  height: 11px;
+}
+.pr-flag.behind {
+  /* GitHub's "attention" amber, darkened for white-text contrast. */
+  background: #9a6700;
+}
+.pr-flag.automerge {
+  background: #0969da;
+}
 .pr-seg {
   display: inline-flex;
   align-items: center;

@@ -52,6 +52,10 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
     external:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h4v4"/><path d="M13 3L7.5 8.5"/><path d="M11 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h3"/></svg>',
+    behind:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v7M5 6.5l3 3 3-3"/><path d="M3.5 13.5h9"/></svg>',
+    autoMerge:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6"/><path d="M11.7 7.4C11 10 7 9.5 4 9.5"/></svg>',
   };
 
   // Worktree paths whose agent list is expanded, persisted so re-renders keep
@@ -400,6 +404,23 @@
           "</span>"
       );
 
+    // Merge-readiness flags shown beside the state badge. "Out of date" is
+    // GitHub's "This branch is out-of-date with the base branch" (mergeState
+    // "behind"); "Auto-merge" means GitHub will merge once requirements pass.
+    const flagSegs = [];
+    if (pr.mergeState === "behind")
+      flagSegs.push(
+        '<span class="pr-flag behind" title="This branch is out-of-date with the base branch">' +
+          icons.behind +
+          "Out of date</span>"
+      );
+    if (pr.autoMerge)
+      flagSegs.push(
+        '<span class="pr-flag automerge" title="Auto-merge is enabled — GitHub will merge once requirements pass">' +
+          icons.autoMerge +
+          "Auto-merge</span>"
+      );
+
     const rows = [
       '<div class="pr-row pr-head">' +
         '<span class="pr-ico">' +
@@ -412,6 +433,7 @@
         " #" +
         pr.number +
         "</span>" +
+        flagSegs.join("") +
         '<span class="pr-open">' +
         icons.external +
         "</span>" +

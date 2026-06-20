@@ -5,6 +5,7 @@ const {
   prState,
   rollupChecks,
   reviewSummary,
+  mapMergeState,
 } = require("../out/github.js");
 const { parseGitHubRemote } = require("../out/git.js");
 
@@ -22,6 +23,23 @@ test("prState: closed without merge is closed", () => {
 test("prState: open draft is draft, else open", () => {
   assert.strictEqual(prState({ state: "open", draft: true }), "draft");
   assert.strictEqual(prState({ state: "open" }), "open");
+});
+
+test("mapMergeState: behind is the out-of-date flag", () => {
+  assert.strictEqual(mapMergeState("BEHIND"), "behind");
+  assert.strictEqual(mapMergeState("behind"), "behind");
+});
+
+test("mapMergeState: known states pass through lowercased", () => {
+  assert.strictEqual(mapMergeState("BLOCKED"), "blocked");
+  assert.strictEqual(mapMergeState("clean"), "clean");
+  assert.strictEqual(mapMergeState("DIRTY"), "dirty");
+});
+
+test("mapMergeState: unknown/missing falls back to unknown", () => {
+  assert.strictEqual(mapMergeState(undefined), "unknown");
+  assert.strictEqual(mapMergeState(""), "unknown");
+  assert.strictEqual(mapMergeState("something-new"), "unknown");
 });
 
 test("rollupChecks: empty is none", () => {

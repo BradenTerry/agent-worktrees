@@ -27,6 +27,12 @@ state, and its running agents in one view.
   branch name and badges for `Primary` / `detached` / `locked`.
 - **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
   the ahead/behind distance from the upstream branch, refreshed as files change.
+- **GitHub PR status** — when a stored token resolves a PR for the branch, the
+  card shows its lifecycle state, CI check rollup, review decision and comment
+  counts (polled from the REST API in `src/github.ts` / `src/prs.ts`). Two
+  merge-readiness pills sit beside the state badge: `Out of date` when GitHub's
+  `mergeable_state` is `behind` ("This branch is out-of-date with the base
+  branch"), and `Auto-merge` when auto-merge is enabled on the PR.
 - **Agent** — start one or more Claude CLI sessions in a worktree, each in its
   own terminal. Sessions can be revealed (focus) or stopped from the panel, and
   closing a terminal removes its row.
