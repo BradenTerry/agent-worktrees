@@ -2,6 +2,28 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 1.0.0
+
+- **Source Control scoping per worktree** - an opt-in button on each worktree
+  (Settings -> Integrations) scopes the built-in Source Control view to that
+  worktree. With one repository open it swaps the view to the selected worktree;
+  with several open it leaves the others. The button highlights the worktree
+  whose repository is currently shown, so you can tell at a glance which scope is
+  set. It no longer switches you to the Source Control view.
+- **Real agent summaries** - the agent row and its terminal now show Claude's
+  own generated session title (read from the transcript) instead of your last
+  prompt, falling back to the prompt only until a title exists.
+- **Snappier summary tooltip** - hovering an agent summary shows the full text
+  after 200ms via a themed tooltip, instead of the slow native one.
+- **Terminal icon matches the extension** - agent terminals use the Agent
+  Worktrees glyph instead of the generic sparkle.
+- **Accurate CI rollup** - a PR whose commit has no legacy commit statuses no
+  longer shows a phantom pending check. The "Commit statuses" PAT permission is
+  now optional, and a token missing an optional permission stops being retried
+  for the life of the token.
+- **Predictable ordering** - worktrees are sorted with the primary pinned to the
+  top and the rest by name (attention-based reordering was removed).
+
 ## 0.3.0
 
 - **Cheaper GitHub polling with conditional requests** - PR status fetches now
