@@ -326,6 +326,244 @@ export async function fetchPr(
   };
 }
 
+// --- branches overlay: all PRs in one GraphQL request -----------------------
+
+/**
+ * Rolled-up PR status for a branch, plus the fields the branches-overlay
+ * filters and sorts need. Produced from a single GraphQL query, keyed by head
+ * ref. A superset of `PrInfo` semantics with the extra filter fields.
+ */
+export interface BranchPrInfo {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "draft" | "merged" | "closed";
+  checks: "pass" | "fail" | "pending" | "none";
+  checksPass: number;
+  checksFail: number;
+  checksPending: number;
+  review: "approved" | "changes" | "required" | "none";
+  approvals: number;
+  changesRequested: number;
+  reviewsPending: number;
+  comments: number;
+  createdAt?: string;
+  updatedAt?: string;
+  /** PR author login. */
+  author?: string;
+  /** Assignee logins. */
+  assignees: string[];
+  /** Viewer submitted any review. */
+  reviewedByViewer: boolean;
+  /** Viewer is a requested reviewer. */
+  reviewRequestedFromViewer: boolean;
+}
+
+/** The single GraphQL query: all open PRs with their rollups + filter fields. */
+const PRS_BY_BRANCH_QUERY = `query($owner:String!,$name:String!){
+  viewer { login }
+  repository(owner:$owner, name:$name){
+    pullRequests(states:[OPEN], first:100, orderBy:{field:UPDATED_AT, direction:DESC}){
+      nodes{
+        number title url isDraft state createdAt updatedAt headRefName
+        author { login }
+        assignees(first:20){ nodes { login } }
+        comments { totalCount }
+        reviews(first:100){ nodes { author { login } state submittedAt } }
+        reviewRequests(first:50){ nodes { requestedReviewer { __typename ... on User { login } } } }
+        commits(last:1){ nodes { commit {
+          statusCheckRollup {
+            contexts(first:100){ nodes {
+              __typename
+              ... on CheckRun { status conclusion }
+              ... on StatusContext { state }
+            } }
+          }
+        } } }
+      }
+    }
+  }
+}`;
+
+/** GraphQL node shapes, narrowed to the fields the query selects. */
+interface GqlLogin {
+  login?: string;
+}
+interface GqlReview {
+  author?: GqlLogin;
+  state?: string;
+  submittedAt?: string;
+}
+interface GqlReviewRequest {
+  requestedReviewer?: { __typename?: string; login?: string };
+}
+interface GqlCheckContext {
+  __typename?: string;
+  status?: string;
+  conclusion?: string | null;
+  state?: string;
+}
+interface GqlPr {
+  number: number;
+  title: string;
+  url: string;
+  isDraft?: boolean;
+  state?: string; // OPEN | CLOSED | MERGED
+  createdAt?: string;
+  updatedAt?: string;
+  headRefName: string;
+  author?: GqlLogin;
+  assignees?: { nodes?: GqlLogin[] };
+  comments?: { totalCount?: number };
+  reviews?: { nodes?: GqlReview[] };
+  reviewRequests?: { nodes?: GqlReviewRequest[] };
+  commits?: {
+    nodes?: {
+      commit?: {
+        statusCheckRollup?: { contexts?: { nodes?: GqlCheckContext[] } } | null;
+      };
+    }[];
+  };
+}
+interface GqlResponse {
+  data?: {
+    viewer?: GqlLogin;
+    repository?: { pullRequests?: { nodes?: GqlPr[] } };
+  };
+  errors?: unknown[];
+}
+
+/** PR lifecycle from the GraphQL enums: merged wins, then closed, then draft. */
+function prStateFromGql(pr: GqlPr): BranchPrInfo["state"] {
+  if (pr.state === "MERGED") return "merged";
+  if (pr.state === "CLOSED") return "closed";
+  if (pr.isDraft) return "draft";
+  return "open";
+}
+
+/**
+ * Adapt the statusCheckRollup contexts to the `{status, conclusion}` shape
+ * `rollupChecks` consumes. CheckRun carries Actions status/conclusion (GraphQL
+ * enums are UPPERCASE, so normalize to the REST lowercase the helper expects);
+ * a legacy StatusContext carries a single `state` we map to a synthetic
+ * conclusion so it flows through the same pass/fail/pending logic.
+ */
+function checksFromRollup(
+  contexts?: GqlCheckContext[]
+): { state: BranchPrInfo["checks"]; pass: number; fail: number; pending: number } {
+  const runs: { status?: string; conclusion?: string | null }[] = [];
+  for (const c of contexts ?? []) {
+    if (c.__typename === "CheckRun") {
+      runs.push({
+        status: c.status ? c.status.toLowerCase() : undefined,
+        conclusion: c.conclusion ? c.conclusion.toLowerCase() : c.conclusion,
+      });
+    } else {
+      // StatusContext: SUCCESS / PENDING / FAILURE / ERROR / EXPECTED.
+      const s = (c.state ?? "").toUpperCase();
+      if (s === "SUCCESS") runs.push({ status: "completed", conclusion: "success" });
+      else if (s === "FAILURE" || s === "ERROR")
+        runs.push({ status: "completed", conclusion: "failure" });
+      else runs.push({ status: "queued" }); // PENDING / EXPECTED / unknown -> pending
+    }
+  }
+  // Reuse the REST rollup so branch and worktree-card semantics stay identical.
+  return rollupChecks(runs);
+}
+
+/**
+ * Fetch the repo's OPEN PRs with rollups + filter fields in one
+ * POST /graphql, mapped by head ref name. Any failure (transport, non-2xx,
+ * GraphQL errors) resolves to an empty map — never throws. Separate code path
+ * from the REST `fetchPr` the worktree cards use.
+ */
+export async function fetchPrsByBranch(
+  token: string,
+  repo: RemoteInfo
+): Promise<{ prs: Map<string, BranchPrInfo>; viewerLogin?: string }> {
+  const prs = new Map<string, BranchPrInfo>();
+  let body: GqlResponse | undefined;
+  try {
+    const res = await fetch(`${API}/graphql`, {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: PRS_BY_BRANCH_QUERY,
+        variables: { owner: repo.owner, name: repo.repo },
+      }),
+    });
+    if (!res.ok) return { prs };
+    body = (await res.json()) as GqlResponse;
+  } catch {
+    return { prs };
+  }
+  // A GraphQL error body still comes back 200; treat it as failure.
+  if (!body || (body.errors && body.errors.length)) return { prs };
+
+  const viewerLogin = body.data?.viewer?.login;
+  const nodes = body.data?.repository?.pullRequests?.nodes ?? [];
+
+  for (const pr of nodes) {
+    if (!pr || !pr.headRefName) continue;
+
+    const checks = checksFromRollup(
+      pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes
+    );
+
+    const reviewNodes = pr.reviews?.nodes ?? [];
+    const requestedReviewers = (pr.reviewRequests?.nodes ?? [])
+      .map((r) => r.requestedReviewer?.login)
+      .filter((l): l is string => !!l);
+    const requested = pr.reviewRequests?.nodes?.length ?? 0;
+    const rev = reviewSummary(
+      reviewNodes.map((r) => ({
+        user: { login: r.author?.login },
+        state: r.state,
+        submitted_at: r.submittedAt,
+      })),
+      requested
+    );
+
+    const reviewedByViewer =
+      !!viewerLogin && reviewNodes.some((r) => r.author?.login === viewerLogin);
+    const reviewRequestedFromViewer =
+      !!viewerLogin && requestedReviewers.includes(viewerLogin);
+
+    const info: BranchPrInfo = {
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      state: prStateFromGql(pr),
+      checks: checks.state,
+      checksPass: checks.pass,
+      checksFail: checks.fail,
+      checksPending: checks.pending,
+      review: rev.review,
+      approvals: rev.approvals,
+      changesRequested: rev.changesRequested,
+      reviewsPending: requested,
+      comments: pr.comments?.totalCount ?? 0,
+      createdAt: pr.createdAt,
+      updatedAt: pr.updatedAt,
+      author: pr.author?.login,
+      assignees: (pr.assignees?.nodes ?? [])
+        .map((a) => a.login)
+        .filter((l): l is string => !!l),
+      reviewedByViewer,
+      reviewRequestedFromViewer,
+    };
+
+    // Key by head ref; if two open PRs share one, keep the most recently
+    // updated. Nodes arrive UPDATED_AT desc, so the first seen wins.
+    const existing = prs.get(pr.headRefName);
+    if (!existing || (info.updatedAt ?? "") > (existing.updatedAt ?? "")) {
+      prs.set(pr.headRefName, info);
+    }
+  }
+
+  return { prs, viewerLogin };
+}
+
 // --- pure mapping helpers (unit-tested) -------------------------------------
 
 /** PR lifecycle from the raw fields: merged wins, then closed, then draft. */

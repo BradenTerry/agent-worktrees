@@ -3,6 +3,12 @@
   const vscode = acquireVsCodeApi();
   const root = document.getElementById("root");
 
+  // Which webview this is. The sidebar leaves it unset ("panel"); the dedicated
+  // branches editor tab sets `window.AWT_VIEW = "branches"` in its HTML before
+  // loading this script. The same panel.js + panel.css drive both surfaces; we
+  // branch on VIEW so each ignores the other's messages and render path.
+  const VIEW = window.AWT_VIEW || "panel";
+
   /** Inline codicon-ish SVGs so we stay dependency-free. */
   const icons = {
     add: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 3v10M3 8h10"/></svg>',
@@ -50,8 +56,32 @@
   // the toggle state. Cards start collapsed: the Agents bar shows the counts and
   // reveals the rows on click.
   const expanded = new Set((vscode.getState() || {}).expanded || []);
+
+  // Branches-overlay filter/sort selections, persisted alongside `expanded` so
+  // reopening the overlay restores the last view. `authors` is a list of logins
+  // (multi-select); `reviews` is one of the REVIEW_FILTERS keys or ""; `sort` is
+  // one of the SORT_OPTIONS keys.
+  const savedState = vscode.getState() || {};
+  const branchFilters = {
+    authors: Array.isArray(savedState.branchAuthors)
+      ? savedState.branchAuthors.slice()
+      : [],
+    reviews:
+      typeof savedState.branchReviews === "string"
+        ? savedState.branchReviews
+        : "",
+    assignedToYou: savedState.branchAssignedToYou === true,
+    sort:
+      typeof savedState.branchSort === "string" ? savedState.branchSort : "newest",
+  };
   function persist() {
-    vscode.setState({ expanded: Array.from(expanded) });
+    vscode.setState({
+      expanded: Array.from(expanded),
+      branchAuthors: branchFilters.authors.slice(),
+      branchReviews: branchFilters.reviews,
+      branchAssignedToYou: branchFilters.assignedToYou,
+      branchSort: branchFilters.sort,
+    });
   }
 
   // Last data we rendered, so the relative-time tick can re-render in place.
@@ -457,6 +487,9 @@
       '<button class="tbtn icon" data-action="agentWorktree" title="New Agent &amp; Worktree: create a worktree with Claude (claude -w) and start an agent in it">' +
       icons.agentWorktree +
       "</button>" +
+      '<button class="tbtn ghost" data-action="openBranches" title="Branches: list every branch and create a worktree from one">' +
+      icons.branch +
+      "</button>" +
       '<button class="tbtn ghost" data-tool="collapseAll" title="Collapse all">' +
       icons.collapse +
       "</button>" +
@@ -838,6 +871,418 @@
     if (settingsOpen && ghSig(data) !== lastGhSig) renderSettings();
   }
 
+  // --- Branches view ---------------------------------------------------------
+  // Rendered only in the dedicated editor-tab webview (VIEW === "branches"),
+  // where it fills the whole page. Lists every branch of the repo, its PR
+  // rollup (via prLine), and a create-worktree action. All filtering/sorting is
+  // client-side over the single BranchData payload the extension posts; no extra
+  // network calls. The sidebar (VIEW === "panel") never renders this; its
+  // "Branches" toolbar button just asks the extension to open this tab.
+  let branchesLoading = false;
+  let branchData = null;
+  // Tracks which filter/sort dropdown is open (webview-only UI state).
+  let openMenu = "";
+
+  // Single-select Reviews filter. Each entry maps a PR to a boolean predicate.
+  const REVIEW_FILTERS = [
+    { id: "none", label: "No reviews", test: (pr) => pr.review === "none" },
+    {
+      id: "required",
+      label: "Review required",
+      test: (pr) => pr.review === "required",
+    },
+    { id: "approved", label: "Approved", test: (pr) => pr.review === "approved" },
+    {
+      id: "changes",
+      label: "Changes requested",
+      test: (pr) => pr.review === "changes",
+    },
+    {
+      id: "reviewedByYou",
+      label: "Reviewed by you",
+      test: (pr) => !!pr.reviewedByViewer,
+    },
+    {
+      id: "notReviewedByYou",
+      label: "Not reviewed by you",
+      test: (pr) => !pr.reviewedByViewer,
+    },
+    {
+      id: "awaitingYou",
+      label: "Awaiting review from you",
+      test: (pr) => !!pr.reviewRequestedFromViewer,
+    },
+  ];
+
+  // Single-select Sort. `prSort` true entries fall back to branch-name order
+  // when PR data is unavailable.
+  const SORT_OPTIONS = [
+    { id: "newest", label: "Newest", prSort: true },
+    { id: "oldest", label: "Oldest", prSort: true },
+    { id: "mostCommented", label: "Most commented", prSort: true },
+    { id: "leastCommented", label: "Least commented", prSort: true },
+    { id: "recentlyUpdated", label: "Recently updated", prSort: true },
+    { id: "leastRecentlyUpdated", label: "Least recently updated", prSort: true },
+  ];
+
+  /** True when the GitHub integration is connected and PR display is enabled. */
+  function prAvailable(data) {
+    const gh = data && data.github;
+    return !!(gh && gh.connected && data.prEnabled !== false);
+  }
+
+  /** Any PR-based narrowing active? Used to hide no-PR rows (R16). */
+  function prFilterActive() {
+    return (
+      branchFilters.authors.length > 0 ||
+      !!branchFilters.reviews ||
+      branchFilters.assignedToYou
+    );
+  }
+
+  function timeVal(s) {
+    const t = s ? Date.parse(s) : NaN;
+    return isNaN(t) ? 0 : t;
+  }
+
+  /** Apply the active filters + sort to the branch list, client-side. */
+  function visibleBranches(data) {
+    const all = (data && data.branches) || [];
+    const pr = prAvailable(data);
+    const sortOpt =
+      SORT_OPTIONS.find((s) => s.id === branchFilters.sort) || SORT_OPTIONS[0];
+    const reviewFilter = pr
+      ? REVIEW_FILTERS.find((r) => r.id === branchFilters.reviews)
+      : null;
+    const authorSet = pr ? new Set(branchFilters.authors) : new Set();
+    const viewer = (data && data.viewerLogin) || "";
+
+    let rows = all.slice();
+
+    if (pr) {
+      // While any PR-based filter is active, drop rows with no PR (R16).
+      const filterActive = prFilterActive();
+      rows = rows.filter((b) => {
+        const p = b.pr;
+        if (filterActive && !p) return false;
+        if (!p) return true;
+        if (authorSet.size && !authorSet.has(p.author)) return false;
+        if (reviewFilter && !reviewFilter.test(p)) return false;
+        if (
+          branchFilters.assignedToYou &&
+          !(Array.isArray(p.assignees) && p.assignees.indexOf(viewer) !== -1)
+        )
+          return false;
+        return true;
+      });
+    }
+
+    // Sort. PR sorts need PR data; rows without a PR sort to the end, and when
+    // PR data is unavailable entirely we fall back to branch-name order.
+    if (pr && sortOpt.prSort) {
+      const dir = (a, b) => {
+        const pa = a.pr;
+        const pb = b.pr;
+        if (!pa && !pb) return a.name.localeCompare(b.name);
+        if (!pa) return 1;
+        if (!pb) return -1;
+        switch (sortOpt.id) {
+          case "oldest":
+            return timeVal(pa.createdAt) - timeVal(pb.createdAt);
+          case "mostCommented":
+            return (pb.comments || 0) - (pa.comments || 0);
+          case "leastCommented":
+            return (pa.comments || 0) - (pb.comments || 0);
+          case "recentlyUpdated":
+            return timeVal(pb.updatedAt) - timeVal(pa.updatedAt);
+          case "leastRecentlyUpdated":
+            return timeVal(pa.updatedAt) - timeVal(pb.updatedAt);
+          case "newest":
+          default:
+            return timeVal(pb.createdAt) - timeVal(pa.createdAt);
+        }
+      };
+      rows.sort(dir);
+    } else {
+      rows.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return rows;
+  }
+
+  /** Distinct PR authors, "you" pinned first (R12). */
+  function authorOptions(data) {
+    const viewer = (data && data.viewerLogin) || "";
+    const seen = new Set();
+    const out = [];
+    for (const b of (data && data.branches) || []) {
+      const a = b.pr && b.pr.author;
+      if (a && !seen.has(a)) {
+        seen.add(a);
+        out.push(a);
+      }
+    }
+    out.sort((a, b) => a.localeCompare(b));
+    if (viewer && seen.has(viewer)) {
+      return [viewer].concat(out.filter((a) => a !== viewer));
+    }
+    return out;
+  }
+
+  function menu(id, label, summary, items) {
+    const open = openMenu === id;
+    return (
+      '<div class="bfilter' +
+      (open ? " open" : "") +
+      '" data-menu="' +
+      id +
+      '">' +
+      '<button class="bfilter-btn" data-menu-toggle="' +
+      id +
+      '" aria-expanded="' +
+      open +
+      '"><span class="bfilter-label">' +
+      esc(label) +
+      "</span><span class=\"bfilter-summary\">" +
+      esc(summary) +
+      "</span>" +
+      '<span class="bfilter-caret">' +
+      icons.chevron +
+      "</span></button>" +
+      (open ? '<div class="bfilter-menu" role="menu">' + items + "</div>" : "") +
+      "</div>"
+    );
+  }
+
+  function filterBar(data) {
+    const pr = prAvailable(data);
+    const sortOpt =
+      SORT_OPTIONS.find((s) => s.id === branchFilters.sort) || SORT_OPTIONS[0];
+
+    let controls = "";
+
+    if (pr) {
+      const viewer = (data && data.viewerLogin) || "";
+      const authors = authorOptions(data);
+      const selected = new Set(branchFilters.authors);
+      const authorItems = authors.length
+        ? authors
+            .map(
+              (a) =>
+                '<button class="bfilter-item" role="menuitemcheckbox" data-author="' +
+                esc(a) +
+                '" aria-checked="' +
+                selected.has(a) +
+                '"><span class="bcheck">' +
+                (selected.has(a) ? icons.check : "") +
+                "</span>" +
+                esc(a) +
+                (a === viewer ? ' <span class="bdim">(you)</span>' : "") +
+                "</button>"
+            )
+            .join("")
+        : '<div class="bfilter-empty">No PR authors</div>';
+      const authorSummary = branchFilters.authors.length
+        ? branchFilters.authors.length + " selected"
+        : "Any";
+
+      const reviewItems = (
+        '<button class="bfilter-item" role="menuitemradio" data-review="" aria-checked="' +
+        (!branchFilters.reviews) +
+        '"><span class="bcheck">' +
+        (!branchFilters.reviews ? icons.check : "") +
+        "</span>Any</button>" +
+        REVIEW_FILTERS.map(
+          (r) =>
+            '<button class="bfilter-item" role="menuitemradio" data-review="' +
+            r.id +
+            '" aria-checked="' +
+            (branchFilters.reviews === r.id) +
+            '"><span class="bcheck">' +
+            (branchFilters.reviews === r.id ? icons.check : "") +
+            "</span>" +
+            esc(r.label) +
+            "</button>"
+        ).join("")
+      );
+      const rf = REVIEW_FILTERS.find((r) => r.id === branchFilters.reviews);
+      const reviewSummary = rf ? rf.label : "Any";
+
+      const presets =
+        '<div class="bpresets">' +
+        '<button class="bchip' +
+        (branchFilters.authors.length === 1 &&
+        branchFilters.authors[0] === viewer
+          ? " on"
+          : "") +
+        '" data-preset="yourPrs">Your PRs</button>' +
+        '<button class="bchip' +
+        (branchFilters.reviews === "awaitingYou" ? " on" : "") +
+        '" data-preset="awaitingReview">Awaiting your review</button>' +
+        '<button class="bchip' +
+        (branchFilters.assignedToYou ? " on" : "") +
+        '" data-preset="assigned">Assigned to you</button>' +
+        "</div>";
+
+      controls =
+        menu("author", "Author", authorSummary, authorItems) +
+        menu("reviews", "Reviews", reviewSummary, reviewItems) +
+        presets;
+    }
+
+    const sortItems = SORT_OPTIONS.map(
+      (s) =>
+        '<button class="bfilter-item" role="menuitemradio" data-sort="' +
+        s.id +
+        '" aria-checked="' +
+        (branchFilters.sort === s.id) +
+        '"><span class="bcheck">' +
+        (branchFilters.sort === s.id ? icons.check : "") +
+        "</span>" +
+        esc(s.label) +
+        "</button>"
+    ).join("");
+
+    return (
+      '<div class="bfilter-bar">' +
+      controls +
+      menu("sort", "Sort", sortOpt.label, sortItems) +
+      "</div>"
+    );
+  }
+
+  // The three locality states a branch row tags itself with.
+  const BRANCH_KINDS = {
+    "remote-only": {
+      label: "remote only",
+      title: "Exists only on origin; no local branch",
+    },
+    both: {
+      label: "local + remote",
+      title: "Local branch that also exists on origin",
+    },
+    local: {
+      label: "local only",
+      title: "Local branch with no matching origin branch",
+    },
+  };
+
+  function branchKind(b) {
+    if (b.remoteOnly) return "remote-only";
+    return b.hasRemote ? "both" : "local";
+  }
+
+  function branchRow(b, data) {
+    const pr = prAvailable(data) ? b.pr : null;
+    const kind = branchKind(b);
+    const k = BRANCH_KINDS[kind];
+    const tag =
+      '<span class="btag ' +
+      kind +
+      '" title="' +
+      k.title +
+      '">' +
+      esc(k.label) +
+      "</span>";
+
+    // Ahead/behind vs upstream, shown only for branches that track a remote and
+    // are actually diverged (an in-sync row stays uncluttered).
+    const segs = [];
+    if (b.hasRemote && b.ahead)
+      segs.push(
+        '<span class="bseg ahead" title="Commits to push">↑' + b.ahead + "</span>"
+      );
+    if (b.hasRemote && b.behind)
+      segs.push(
+        '<span class="bseg behind" title="Commits to pull">↓' + b.behind + "</span>"
+      );
+    const remoteMark =
+      tag + (segs.length ? '<span class="bsync">' + segs.join("") + "</span>" : "");
+    // A worktree already exists: show the marker, and (when we know its path)
+    // still let the user start a Claude agent in that existing worktree.
+    const control = b.hasWorktree
+      ? '<span class="bworktree" title="' +
+        (b.worktreePath ? esc(b.worktreePath) : "") +
+        '">' +
+        icons.check +
+        "Worktree exists</span>" +
+        (b.worktreePath
+          ? '<button class="bagent" data-action="agent" data-path="' +
+            esc(b.worktreePath) +
+            '" title="Start a Claude agent in this worktree">' +
+            icons.agentMark +
+            "Start agent</button>"
+          : "")
+      : '<button class="bcreate primary" data-action="worktreeFromBranch" data-branch="' +
+        esc(b.name) +
+        '" data-remote="' +
+        (b.remoteOnly ? "1" : "0") +
+        '" title="Create a worktree for this branch and start a Claude agent in it">' +
+        icons.agentMark +
+        "Create worktree &amp; start agent</button>";
+
+    return (
+      '<div class="brow">' +
+      '<div class="brow-top">' +
+      '<span class="brow-name">' +
+      esc(b.name) +
+      "</span>" +
+      remoteMark +
+      '<span class="brow-control">' +
+      control +
+      "</span>" +
+      "</div>" +
+      (pr ? prLine(pr) : "") +
+      "</div>"
+    );
+  }
+
+  function branchesContent() {
+    const data = branchData;
+    let body;
+    if (branchesLoading && !data) {
+      body = '<div class="bloading">Loading branches…</div>';
+    } else if (!data || !data.repoRoot) {
+      body =
+        '<div class="empty">No git repository in this window.<br/>Open a folder that is a git repository to list its branches.</div>';
+    } else if (!data.branches || !data.branches.length) {
+      body = '<div class="empty">No branches found in this repository.</div>';
+    } else {
+      const rows = visibleBranches(data);
+      const list = rows.length
+        ? rows.map((b) => branchRow(b, data)).join("")
+        : '<div class="empty">No branches match the current filters.</div>';
+      body = filterBar(data) + '<div class="brows">' + list + "</div>";
+    }
+
+    const repoName = (data && data.repoName) || "";
+    return (
+      '<div class="settings-view branches-view">' +
+      '<div class="settings-head">' +
+      '<span class="settings-title">' +
+      icons.branch +
+      "Branches" +
+      (repoName ? ' <span class="branches-repo">' + esc(repoName) + "</span>" : "") +
+      "</span>" +
+      "</div>" +
+      '<div class="branches-body">' +
+      body +
+      "</div>" +
+      "</div>"
+    );
+  }
+
+  function renderBranches() {
+    root.innerHTML = branchesContent();
+  }
+
+  // Branches-tab mount: request the branch + PR payload, show the loading state
+  // until it arrives. Called once when this webview is the branches editor tab.
+  function mountBranches() {
+    branchesLoading = !branchData;
+    renderBranches();
+    send("loadBranches");
+  }
+
   root.addEventListener("click", (e) => {
     // GitHub settings controls (save token / disconnect).
     const gh = e.target.closest("[data-gh]");
@@ -859,6 +1304,67 @@
       collapseAll();
       return;
     }
+    // Branches view: filter/sort dropdowns and selections (webview-only).
+    if (VIEW === "branches") {
+      const menuToggle = e.target.closest("[data-menu-toggle]");
+      if (menuToggle) {
+        const id = menuToggle.getAttribute("data-menu-toggle");
+        openMenu = openMenu === id ? "" : id;
+        renderBranches();
+        return;
+      }
+      const author = e.target.closest("[data-author]");
+      if (author) {
+        const name = author.getAttribute("data-author");
+        const i = branchFilters.authors.indexOf(name);
+        if (i === -1) branchFilters.authors.push(name);
+        else branchFilters.authors.splice(i, 1);
+        persist();
+        renderBranches();
+        return;
+      }
+      const review = e.target.closest("[data-review]");
+      if (review) {
+        branchFilters.reviews = review.getAttribute("data-review") || "";
+        openMenu = "";
+        persist();
+        renderBranches();
+        return;
+      }
+      const sort = e.target.closest("[data-sort]");
+      if (sort) {
+        branchFilters.sort = sort.getAttribute("data-sort") || "newest";
+        openMenu = "";
+        persist();
+        renderBranches();
+        return;
+      }
+      const preset = e.target.closest("[data-preset]");
+      if (preset) {
+        const kind = preset.getAttribute("data-preset");
+        const viewer = (branchData && branchData.viewerLogin) || "";
+        if (kind === "yourPrs") {
+          const on =
+            branchFilters.authors.length === 1 &&
+            branchFilters.authors[0] === viewer;
+          branchFilters.authors = on || !viewer ? [] : [viewer];
+        } else if (kind === "awaitingReview") {
+          branchFilters.reviews =
+            branchFilters.reviews === "awaitingYou" ? "" : "awaitingYou";
+        } else if (kind === "assigned") {
+          branchFilters.assignedToYou = !branchFilters.assignedToYou;
+        }
+        persist();
+        renderBranches();
+        return;
+      }
+      // Click outside any open menu closes it (but let real actions below run).
+      if (openMenu && !e.target.closest(".bfilter")) {
+        openMenu = "";
+        renderBranches();
+        // fall through so an action target still fires
+      }
+    }
     const btn = e.target.closest("[data-action]");
     if (btn) {
       e.stopPropagation();
@@ -876,6 +1382,21 @@
       }
       if (action === "closeSettings") {
         closeSettings();
+        return;
+      }
+      // Sidebar "Branches" toolbar button: ask the extension to open (or reveal)
+      // the dedicated branches editor tab. No in-sidebar overlay is rendered.
+      if (action === "openBranches") {
+        send("openBranches");
+        return;
+      }
+      // Create a worktree from a branch row, carrying which branch and whether
+      // it is remote-only so the extension knows to set up remote tracking.
+      if (action === "worktreeFromBranch") {
+        send("worktreeFromBranch", {
+          branch: btn.getAttribute("data-branch") || undefined,
+          remoteOnly: btn.getAttribute("data-remote") === "1",
+        });
         return;
       }
       send(action, {
@@ -898,6 +1419,15 @@
 
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (VIEW === "branches") {
+      // The branches tab is closed via the editor tab itself; Escape only
+      // dismisses an open filter/sort menu.
+      if (openMenu) {
+        openMenu = "";
+        renderBranches();
+      }
+      return;
+    }
     if (settingsOpen) {
       closeSettings();
       return;
@@ -929,6 +1459,20 @@
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (!msg) return;
+    if (VIEW === "branches") {
+      // The branches editor tab only consumes its own payload. A stray
+      // {type:"update"} (it should never arrive here) is ignored, not rendered.
+      if (msg.type === "branches") {
+        // Fresh branch + PR payload. Store and re-render in place; after a
+        // create the extension re-posts this, flipping the row to "Worktree
+        // exists".
+        branchData = msg.data;
+        branchesLoading = false;
+        renderBranches();
+      }
+      return;
+    }
+    // Sidebar. Ignore any {type:"branches"} meant for the branches tab.
     if (msg.type === "update") {
       render(msg.data);
       maybeRefreshSettings(msg.data);
@@ -994,6 +1538,11 @@
   // Scrolling moves the anchor out from under a fixed tooltip; just drop it.
   root.addEventListener("scroll", hideTip, true);
 
-  // Ask for data in case we mounted after the first push.
-  send("refresh");
+  // Mount. The branches editor tab requests its own data; the sidebar asks for
+  // a refresh in case it mounted after the first push.
+  if (VIEW === "branches") {
+    mountBranches();
+  } else {
+    send("refresh");
+  }
 })();

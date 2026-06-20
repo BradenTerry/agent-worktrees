@@ -7,7 +7,7 @@
 
 const path = require("path");
 const { test } = require("@playwright/test");
-const { OUT_DIR, overviewData, mountPanel } = require("./fixtures");
+const { OUT_DIR, overviewData, branchesData, mountPanel } = require("./fixtures");
 
 const shot = (name) => path.join(OUT_DIR, name);
 
@@ -29,6 +29,13 @@ test("settings - GitHub PR integration", async ({ page }) => {
   const data = overviewData();
   await mountPanel(page, { data, message: { type: "openSettings" } });
   await page.locator("#root").screenshot({ path: shot("settings.png") });
+});
+
+test("branches - all branches with PR status and filters", async ({ page }) => {
+  const data = branchesData();
+  // The branches view opens as a full editor tab, so render it wide like one.
+  await mountPanel(page, { data, view: "branches", width: 1000, height: 760 });
+  await page.locator("#root").screenshot({ path: shot("branches.png") });
 });
 
 test("skills - per-agent skills modal", async ({ page }) => {

@@ -3,12 +3,13 @@ import * as path from "path";
 import {
   findRepoRoot,
   listWorktrees,
+  listBranches,
   getStatus,
   fetchRemotes,
   GitStatus,
 } from "./git";
 import { normalizePath } from "./worktreeUtils";
-import { GithubConnection, PrInfo } from "./github";
+import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
 
 /**
  * Lifecycle status of an agent session, derived from Claude Code hooks.
@@ -165,5 +166,86 @@ export async function gatherWorktrees(
     repoName: path.basename(primary?.path ?? repoRoot),
     worktrees: vms,
     hooksInstalled,
+  };
+}
+
+/** View-model for a single branch row in the branches overlay. */
+export interface BranchVM {
+  name: string;
+  /** Exists only as origin/<name> (no local ref). */
+  remoteOnly: boolean;
+  /** A matching origin/<name> exists (distinguishes local + remote from local
+   *  only; always true when remoteOnly). */
+  hasRemote: boolean;
+  /** A worktree currently has this branch checked out. */
+  hasWorktree: boolean;
+  /** That worktree's path, when hasWorktree. */
+  worktreePath?: string;
+  /** Commits ahead of / behind upstream (0 when no upstream or not local). */
+  ahead: number;
+  behind: number;
+  /** PR rollup attached by the webview; null = looked up, no PR;
+   *  undefined = not looked up (integration off or no token). */
+  pr?: BranchPrInfo | null;
+}
+
+export interface BranchData {
+  repoRoot?: string;
+  repoName?: string;
+  branches: BranchVM[];
+  /** GitHub connection summary, attached by the webview. */
+  github?: GithubConnection;
+  /** Whether the PR integration is toggled on, attached by the webview. */
+  prEnabled?: boolean;
+  /** Authenticated login, attached by the webview so the "you" filters work. */
+  viewerLogin?: string;
+}
+
+/**
+ * Git-only branch list (no network). PR data + github fields are attached by
+ * the webview, mirroring how gatherWorktrees + attachPrStatus split work.
+ */
+export async function gatherBranches(): Promise<BranchData> {
+  const repo = await findRepo();
+  if (!repo) return { branches: [] };
+  const { repoRoot } = repo;
+
+  let branches;
+  try {
+    branches = await listBranches(repoRoot);
+  } catch {
+    return { repoRoot, repoName: path.basename(repoRoot), branches: [] };
+  }
+
+  const vms: BranchVM[] = branches.map((b) => ({
+    name: b.name,
+    remoteOnly: b.remoteOnly,
+    hasRemote: b.hasRemote,
+    hasWorktree: b.hasWorktree,
+    worktreePath: b.worktreePath,
+    ahead: b.ahead,
+    behind: b.behind,
+  }));
+
+  vms.sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  );
+
+  // Name the repo after its primary worktree so the header matches the sidebar
+  // even when the open folder is a linked worktree.
+  let primaryPath: string | undefined;
+  try {
+    const wts = await listWorktrees(repoRoot);
+    primaryPath = wts.find((wt) => wt.isPrimary)?.path;
+  } catch {
+    /* fall back to repoRoot basename */
+  }
+  return {
+    repoRoot,
+    repoName: path.basename(primaryPath ?? repoRoot),
+    branches: vms,
   };
 }

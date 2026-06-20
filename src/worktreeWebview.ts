@@ -5,12 +5,15 @@ import * as cp from "child_process";
 import { randomUUID } from "crypto";
 import {
   gatherWorktrees,
+  gatherBranches,
   normalize,
   AgentVM,
   WorktreeData,
+  BranchData,
 } from "./worktreeData";
 import {
   addWorktree,
+  addBranchWorktree,
   removeWorktree,
   listWorktrees,
   getRemoteInfo,
@@ -23,6 +26,8 @@ import {
   connection,
   setToken,
   clearToken,
+  fetchPrsByBranch,
+  getToken,
 } from "./github";
 import { PrService, PrTarget } from "./prs";
 
@@ -47,13 +52,20 @@ interface ActionMessage {
     | "clearGithubToken"
     | "togglePr"
     | "toggleScm"
-    | "scopeScm";
+    | "scopeScm"
+    | "openBranches"
+    | "loadBranches"
+    | "worktreeFromBranch";
   path?: string;
   sessionId?: string;
   /** GitHub PAT, for setGithubToken. */
   token?: string;
   /** New on/off state, for togglePr. */
   value?: boolean;
+  /** Branch name, for worktreeFromBranch. */
+  branch?: string;
+  /** Whether the branch is remote-only, for worktreeFromBranch. */
+  remoteOnly?: boolean;
 }
 
 export class WorktreeWebviewProvider
@@ -62,6 +74,9 @@ export class WorktreeWebviewProvider
   public static readonly viewType = "worktreeView.panel";
 
   private view?: vscode.WebviewView;
+
+  /** The branches overlay editor tab, when open (singleton). */
+  private branchesPanel?: vscode.WebviewPanel;
 
   /** Last payload posted, to skip redundant re-renders. */
   private lastPosted = "";
@@ -151,6 +166,7 @@ export class WorktreeWebviewProvider
   dispose(): void {
     this.watcher?.dispose();
     this.fileWatcher?.dispose();
+    this.branchesPanel?.dispose();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
   }
 
@@ -316,6 +332,8 @@ export class WorktreeWebviewProvider
         return this.toggleScm(msg.value);
       case "scopeScm":
         return this.scopeScm(msg.path);
+      case "openBranches":
+        return this.openBranchesPanel();
     }
   }
 
@@ -875,6 +893,164 @@ export class WorktreeWebviewProvider
   <script nonce="${nonce}" src="${uri("panel.js")}"></script>
 </body>
 </html>`;
+  }
+
+  // --- Branches overlay ------------------------------------------------------
+
+  /**
+   * Open (or reveal, if already open) the branches overlay as an editor tab in
+   * the active column. The panel is a singleton: re-opening reveals the
+   * existing one rather than spawning a duplicate. It reuses the same
+   * panel.js / panel.css, switched into branches mode by a view flag in its
+   * HTML, and carries its own message channel (separate from the sidebar's).
+   */
+  private openBranchesPanel(): void {
+    if (this.branchesPanel) {
+      this.branchesPanel.reveal(vscode.ViewColumn.Active);
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      "worktreeView.branches",
+      "Branches",
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        localResourceRoots: [
+          vscode.Uri.joinPath(this.extensionUri, "media"),
+        ],
+        retainContextWhenHidden: true,
+      }
+    );
+    panel.iconPath = this.terminalIcon;
+    panel.webview.html = this.branchesHtml(panel.webview);
+    panel.webview.onDidReceiveMessage((msg: ActionMessage) =>
+      this.onBranchesMessage(msg)
+    );
+    panel.onDidDispose(() => {
+      this.branchesPanel = undefined;
+    });
+    this.branchesPanel = panel;
+  }
+
+  /**
+   * HTML for the branches editor panel. Mirrors `html()` but injects a nonce'd
+   * inline script setting `window.AWT_VIEW = "branches"` before panel.js loads,
+   * so the shared panel script renders the branches view instead of the
+   * sidebar. The CSP already permits the nonce'd inline script.
+   */
+  private branchesHtml(webview: vscode.Webview): string {
+    const nonce = makeNonce();
+    const uri = (...p: string[]) =>
+      webview.asWebviewUri(
+        vscode.Uri.joinPath(this.extensionUri, "media", ...p)
+      );
+    const csp = [
+      `default-src 'none'`,
+      `style-src ${webview.cspSource}`,
+      `script-src 'nonce-${nonce}'`,
+    ].join("; ");
+
+    return /* html */ `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="${csp}" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="${uri("panel.css")}" rel="stylesheet" />
+  <title>Branches</title>
+  <script nonce="${nonce}">window.AWT_VIEW = "branches";</script>
+</head>
+<body>
+  <div id="root">
+    <div class="empty">Loading branches…</div>
+  </div>
+  <script nonce="${nonce}" src="${uri("panel.js")}"></script>
+</body>
+</html>`;
+  }
+
+  /** Messages from the branches panel (its own channel, not the sidebar's). */
+  private async onBranchesMessage(msg: ActionMessage): Promise<void> {
+    if (msg.type !== "action") return;
+    switch (msg.action) {
+      case "loadBranches":
+        return this.postBranches();
+      case "worktreeFromBranch":
+        return this.worktreeFromBranch(msg.branch, msg.remoteOnly);
+      case "agent":
+        // Start a Claude agent in an existing worktree (its path is on the row).
+        return this.agent(msg.path);
+    }
+  }
+
+  /**
+   * Compute the branch list (git-only) and attach GitHub connection + per-branch
+   * PR rollups, then post it to the branches panel. The PR rollups come from one
+   * batched GraphQL call (separate from the worktree cards' REST path). Any PR
+   * failure leaves branches with `pr` null and still posts — it never throws.
+   */
+  private async postBranches(): Promise<void> {
+    if (!this.branchesPanel) return;
+    const data = await gatherBranches();
+    const github = await connection();
+    data.github = github;
+    data.prEnabled = this.prService.isEnabled();
+
+    if (data.prEnabled && github.hasToken && data.repoRoot) {
+      try {
+        const repo = await this.remoteFor(data.repoRoot);
+        if (repo) {
+          const token = await getToken();
+          if (token) {
+            const { prs, viewerLogin } = await fetchPrsByBranch(token, repo);
+            data.viewerLogin = viewerLogin ?? github.login;
+            for (const b of data.branches) {
+              b.pr = prs.get(b.name) ?? null;
+            }
+          }
+        }
+      } catch {
+        // Degrade to "no PR data": rows still render, never throw.
+        for (const b of data.branches) {
+          if (b.pr === undefined) b.pr = null;
+        }
+      }
+    }
+
+    void this.branchesPanel.webview.postMessage({ type: "branches", data });
+  }
+
+  /**
+   * Create a worktree for an existing branch (local or remote-only) in the
+   * current window, start a Claude agent in it, and refresh both views so the
+   * sidebar gains the worktree and the branch row flips to "Worktree exists".
+   */
+  private async worktreeFromBranch(
+    branch?: string,
+    remoteOnly?: boolean
+  ): Promise<void> {
+    const name = branch?.trim();
+    if (!name) return;
+    const primary = await this.primaryWorktree();
+    if (!primary) {
+      vscode.window.showErrorMessage("No git repository in this window.");
+      return;
+    }
+    const dir = path.join(
+      path.dirname(primary),
+      name.replace(/[^\w.-]+/g, "-")
+    );
+    try {
+      await addBranchWorktree(primary, dir, name, !!remoteOnly);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Could not create worktree: ${(err as Error).message}`
+      );
+      return;
+    }
+    await this.agent(dir);
+    await this.refresh();
+    await this.postBranches();
   }
 }
 

@@ -175,6 +175,196 @@ function overviewData() {
   };
 }
 
+// ISO timestamp relative to now, for PR created/updated fields the branches
+// view sorts by. Kept relative so "newest" ordering is stable across runs.
+const iso = (ms) => new Date(ago(ms)).toISOString();
+
+/**
+ * Realistic branch data for the dedicated Branches editor tab. Exercises the
+ * full UI: local + remote-only branches, branches with and without a worktree,
+ * a no-PR branch, varied PR/CI/review states, multiple authors for the Author
+ * filter, an "awaiting your review" PR, and an "assigned to you" PR. viewerLogin
+ * matches overviewData's github.login so the "you" controls resolve.
+ */
+function branchesData() {
+  const you = "acme-dev";
+  return {
+    repoRoot: REPO,
+    repoName: "acme-web",
+    prEnabled: true,
+    github: { hasToken: true, connected: true, login: you, tokenType: "fine-grained" },
+    viewerLogin: you,
+    branches: [
+      {
+        name: "feat/search-filters",
+        remoteOnly: false,
+        hasRemote: true,
+        hasWorktree: false,
+        ahead: 2,
+        behind: 0,
+        pr: {
+          number: 486,
+          title: "Faceted search filters",
+          url: "https://github.com/acme/acme-web/pull/486",
+          state: "open",
+          checks: "pass",
+          checksPass: 6,
+          checksFail: 0,
+          checksPending: 0,
+          review: "required",
+          approvals: 0,
+          changesRequested: 0,
+          reviewsPending: 1,
+          comments: 2,
+          author: "lin-h",
+          assignees: [],
+          reviewedByViewer: false,
+          reviewRequestedFromViewer: true,
+          createdAt: iso(2 * HOUR),
+          updatedAt: iso(22 * MIN),
+        },
+      },
+      {
+        name: "feat/checkout-redesign",
+        remoteOnly: false,
+        hasRemote: true,
+        hasWorktree: true,
+        worktreePath: REPO + "-checkout",
+        ahead: 3,
+        behind: 0,
+        pr: {
+          number: 482,
+          title: "Checkout redesign",
+          url: "https://github.com/acme/acme-web/pull/482",
+          state: "open",
+          checks: "pending",
+          checksPass: 5,
+          checksFail: 0,
+          checksPending: 1,
+          review: "approved",
+          approvals: 2,
+          changesRequested: 0,
+          reviewsPending: 0,
+          comments: 3,
+          author: you,
+          assignees: [you],
+          reviewedByViewer: false,
+          reviewRequestedFromViewer: false,
+          createdAt: iso(26 * HOUR),
+          updatedAt: iso(30 * MIN),
+        },
+      },
+      {
+        name: "fix/login-race",
+        remoteOnly: false,
+        hasRemote: true,
+        hasWorktree: true,
+        worktreePath: REPO + "-login-fix",
+        ahead: 1,
+        behind: 2,
+        pr: {
+          number: 479,
+          title: "Fix login race",
+          url: "https://github.com/acme/acme-web/pull/479",
+          state: "open",
+          checks: "fail",
+          checksPass: 4,
+          checksFail: 1,
+          checksPending: 0,
+          review: "changes",
+          approvals: 0,
+          changesRequested: 1,
+          reviewsPending: 0,
+          comments: 1,
+          author: "rivera",
+          assignees: [],
+          reviewedByViewer: true,
+          reviewRequestedFromViewer: false,
+          createdAt: iso(2 * 24 * HOUR),
+          updatedAt: iso(3 * HOUR),
+        },
+      },
+      {
+        name: "chore/deps-bump",
+        remoteOnly: false,
+        hasRemote: false,
+        hasWorktree: false,
+        ahead: 0,
+        behind: 0,
+        pr: {
+          number: 471,
+          title: "Bump dependencies",
+          url: "https://github.com/acme/acme-web/pull/471",
+          state: "draft",
+          checks: "pending",
+          checksPass: 0,
+          checksFail: 0,
+          checksPending: 2,
+          review: "none",
+          approvals: 0,
+          changesRequested: 0,
+          reviewsPending: 0,
+          comments: 0,
+          author: you,
+          assignees: [],
+          reviewedByViewer: false,
+          reviewRequestedFromViewer: false,
+          createdAt: iso(3 * 24 * HOUR),
+          updatedAt: iso(28 * HOUR),
+        },
+      },
+      {
+        name: "feat/analytics-events",
+        remoteOnly: true,
+        hasRemote: true,
+        hasWorktree: false,
+        ahead: 0,
+        behind: 0,
+        pr: {
+          number: 468,
+          title: "Emit analytics events",
+          url: "https://github.com/acme/acme-web/pull/468",
+          state: "open",
+          checks: "pass",
+          checksPass: 8,
+          checksFail: 0,
+          checksPending: 0,
+          review: "approved",
+          approvals: 1,
+          changesRequested: 0,
+          reviewsPending: 0,
+          comments: 5,
+          author: "okafor",
+          assignees: [],
+          reviewedByViewer: true,
+          reviewRequestedFromViewer: false,
+          createdAt: iso(4 * 24 * HOUR),
+          updatedAt: iso(2 * 24 * HOUR),
+        },
+      },
+      {
+        name: "main",
+        remoteOnly: false,
+        hasRemote: true,
+        hasWorktree: true,
+        worktreePath: REPO,
+        ahead: 0,
+        behind: 2,
+        pr: null,
+      },
+      {
+        name: "fix/typo-readme",
+        remoteOnly: true,
+        hasRemote: true,
+        hasWorktree: false,
+        ahead: 0,
+        behind: 0,
+        pr: null,
+      },
+    ],
+  };
+}
+
 // Expand every worktree's agent list so the rows show in the screenshot.
 function expandedPaths(data) {
   return (data.worktrees || []).map((w) => w.path);
@@ -184,7 +374,7 @@ function expandedPaths(data) {
  * Mount the real panel UI in `page` with the given data, then optionally send a
  * follow-up message (e.g. to open the settings view). Returns when rendered.
  */
-async function mountPanel(page, { data, theme = THEME_DARK, width = 460, height = 900, message }) {
+async function mountPanel(page, { data, theme = THEME_DARK, width = 460, height = 900, message, view = "panel" }) {
   await page.setViewportSize({ width, height });
   await page.setContent(
     `<!doctype html><html><head><meta charset="utf-8">` +
@@ -196,14 +386,19 @@ async function mountPanel(page, { data, theme = THEME_DARK, width = 460, height 
   );
   await page.addScriptTag({
     content:
+      // The branches editor tab is selected by this flag, which panel.js reads at
+      // load time (mirrors the AWT_VIEW the extension injects into the tab HTML).
+      `window.AWT_VIEW = ${JSON.stringify(view)};` +
       `window.__expanded = ${JSON.stringify(expandedPaths(data))};` +
       `window.acquireVsCodeApi = () => ({ getState: () => ({ expanded: window.__expanded }), setState: () => {}, postMessage: () => {} });`,
   });
   await page.addStyleTag({ path: PANEL_CSS });
   await page.addScriptTag({ path: PANEL_JS });
+  // The branches tab consumes a {type:"branches"} payload; the sidebar an "update".
+  const updateType = view === "branches" ? "branches" : "update";
   await page.evaluate(
-    (d) => window.dispatchEvent(new MessageEvent("message", { data: { type: "update", data: d } })),
-    data
+    ([d, t]) => window.dispatchEvent(new MessageEvent("message", { data: { type: t, data: d } })),
+    [data, updateType]
   );
   if (message) {
     await page.evaluate(
@@ -219,5 +414,6 @@ module.exports = {
   OUT_DIR,
   THEME_DARK,
   overviewData,
+  branchesData,
   mountPanel,
 };

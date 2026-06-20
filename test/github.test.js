@@ -1,7 +1,11 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");
-const { getJson, resetGithubCache } = require("../out/github.js");
+const {
+  getJson,
+  resetGithubCache,
+  fetchPrsByBranch,
+} = require("../out/github.js");
 
 // Replace global fetch with a scripted stub for the duration of `fn`.
 async function withFetch(handler, fn) {
@@ -173,4 +177,149 @@ test("getJson: an untagged 403 is not cached", async () => {
       assert.strictEqual(calls.length, 2);
     }
   );
+});
+
+// --- fetchPrsByBranch (GraphQL) ---------------------------------------------
+
+const REPO = { owner: "acme", repo: "widgets" };
+
+// A scripted GraphQL "data" body wrapped in a 200 response.
+function gqlResponse(status, body) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    json: async () => body,
+  };
+}
+
+// One open PR by user "alice" on "feat-a": 1 approval, a failing check, a
+// passing check, a pending Actions run, viewer "you" requested + reviewed.
+function samplePrBody() {
+  return {
+    data: {
+      viewer: { login: "you" },
+      repository: {
+        pullRequests: {
+          nodes: [
+            {
+              number: 7,
+              title: "Add feature A",
+              url: "https://github.com/acme/widgets/pull/7",
+              isDraft: false,
+              state: "OPEN",
+              createdAt: "2026-06-01T00:00:00Z",
+              updatedAt: "2026-06-10T00:00:00Z",
+              headRefName: "feat-a",
+              author: { login: "alice" },
+              assignees: { nodes: [{ login: "bob" }, { login: "you" }] },
+              comments: { totalCount: 3 },
+              reviews: {
+                nodes: [
+                  { author: { login: "carol" }, state: "APPROVED", submittedAt: "2026-06-05T00:00:00Z" },
+                  { author: { login: "you" }, state: "COMMENTED", submittedAt: "2026-06-06T00:00:00Z" },
+                ],
+              },
+              reviewRequests: {
+                nodes: [
+                  { requestedReviewer: { __typename: "User", login: "you" } },
+                ],
+              },
+              commits: {
+                nodes: [
+                  {
+                    commit: {
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: [
+                            { __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" },
+                            { __typename: "CheckRun", status: "COMPLETED", conclusion: "FAILURE" },
+                            { __typename: "CheckRun", status: "IN_PROGRESS", conclusion: null },
+                            { __typename: "StatusContext", state: "SUCCESS" },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
+test("fetchPrsByBranch: maps a PR (state, checks, reviews, viewer, author, assignees)", async () => {
+  await withFetch(
+    () => gqlResponse(200, samplePrBody()),
+    async (calls) => {
+      const { prs, viewerLogin } = await fetchPrsByBranch("tok", REPO);
+      // One POST to /graphql, no per-branch REST calls.
+      assert.strictEqual(calls.length, 1);
+      assert.match(calls[0].url, /\/graphql$/);
+
+      assert.strictEqual(viewerLogin, "you");
+      const pr = prs.get("feat-a");
+      assert.ok(pr, "PR keyed by head ref name");
+
+      assert.strictEqual(pr.number, 7);
+      assert.strictEqual(pr.state, "open");
+      assert.strictEqual(pr.author, "alice");
+      assert.deepStrictEqual(pr.assignees, ["bob", "you"]);
+      assert.strictEqual(pr.comments, 3);
+      assert.strictEqual(pr.createdAt, "2026-06-01T00:00:00Z");
+      assert.strictEqual(pr.updatedAt, "2026-06-10T00:00:00Z");
+
+      // 1 success CheckRun + 1 success StatusContext = 2 pass, 1 fail, 1 pending.
+      assert.strictEqual(pr.checks, "fail"); // any fail wins
+      assert.strictEqual(pr.checksPass, 2);
+      assert.strictEqual(pr.checksFail, 1);
+      assert.strictEqual(pr.checksPending, 1);
+
+      // carol approved; "you" only commented; one reviewer ("you") still requested.
+      assert.strictEqual(pr.approvals, 1);
+      assert.strictEqual(pr.changesRequested, 0);
+      assert.strictEqual(pr.reviewsPending, 1);
+      assert.strictEqual(pr.review, "required"); // approval but a request still open
+
+      assert.strictEqual(pr.reviewedByViewer, true); // "you" submitted a review
+      assert.strictEqual(pr.reviewRequestedFromViewer, true); // "you" is requested
+    }
+  );
+});
+
+test("fetchPrsByBranch: a GraphQL errors body resolves to an empty map", async () => {
+  await withFetch(
+    () => gqlResponse(200, { errors: [{ message: "Bad credentials" }] }),
+    async () => {
+      const { prs, viewerLogin } = await fetchPrsByBranch("tok", REPO);
+      assert.strictEqual(prs.size, 0);
+      assert.strictEqual(viewerLogin, undefined);
+    }
+  );
+});
+
+test("fetchPrsByBranch: a non-2xx resolves to an empty map", async () => {
+  await withFetch(
+    () => gqlResponse(401, undefined),
+    async () => {
+      const { prs } = await fetchPrsByBranch("tok", REPO);
+      assert.strictEqual(prs.size, 0);
+    }
+  );
+});
+
+test("fetchPrsByBranch: a transport error resolves to an empty map", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("offline");
+  };
+  try {
+    const { prs } = await fetchPrsByBranch("tok", REPO);
+    assert.strictEqual(prs.size, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

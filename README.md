@@ -42,6 +42,12 @@ state, and its running agents in one view.
   it has invoked; click it for the full list.
 - **Collapsible agent lists** with per-status counts, so a card reads at a glance
   and expands to the individual sessions on demand.
+- **Branches view** — a toolbar button opens a dedicated editor tab listing every
+  branch (local plus remote-only `origin/*`). Each row shows whether a worktree
+  already exists, and branches without one get a **Create worktree & start agent**
+  action that creates the worktree in the current window and launches a Claude
+  agent. When the PR integration is connected, rows carry their open PR's rollup
+  and the view offers client-side author/reviews filters, sorting, and preset chips.
 
 ## Agent status from hooks
 
@@ -106,6 +112,72 @@ flowchart LR
     S -->|FileSystemWatcher| P
     T --> H
     TW --> H
+```
+
+### Branches view
+
+The **Branches** toolbar button posts an `openBranches` message to the webview
+provider, which opens (or reveals, if already open) a dedicated webview as an
+editor tab in the active column, filling the editor area. It is a singleton: a
+second click reveals the existing tab rather than duplicating it. The tab loads
+the same `media/panel.js` + `media/panel.css` as the sidebar, switched into
+branches mode by a `window.AWT_VIEW = "branches"` flag set in its HTML. On mount
+the tab requests data with a `loadBranches` message.
+
+On `loadBranches` the provider builds the branch data and posts it back to that
+panel as a `{ type: "branches" }` payload:
+
+- `git.listBranches` enumerates every local branch plus every remote-only
+  `origin/*` branch (each shown once by short name) and annotates whether a
+  worktree already holds it, whether a matching `origin/<name>` exists (so the
+  row can tag itself "local only" / "local + remote" / "remote only"), and the
+  ahead/behind distance from `%(upstream:track)` for the ↑/↓ indicator.
+- When the PR integration is enabled and a token is connected,
+  `github.fetchPrsByBranch` issues **one** `POST /graphql` request that returns
+  every open PR in the repo with its rollups (state, check rollup, comment
+  count) and the fields the filters need — author, created/updated timestamps,
+  assignee logins, review author/state, requested-reviewer logins, and
+  `viewer.login`. The result is mapped to branches by head ref client-side. A
+  transport or GraphQL failure degrades the whole view to "no PR data"; rows
+  still render.
+
+This GraphQL path is used **only** by the branches view. The per-worktree PR
+badges on the cards keep the existing per-branch REST `fetchPr` path unchanged,
+so the two are separate code paths.
+
+Filtering and sorting (author, reviews, sort, preset chips) run entirely
+client-side over that single cached payload — changing a filter or sort issues
+no new network requests. While any PR filter or PR sort is active, branches with
+no open PR are hidden. With the integration off or no token connected, only the
+branch-name sort is offered and the PR-based controls are hidden. The selected
+filters and sort persist across reopens via the webview state.
+
+A branch with no worktree shows a **Create worktree & start agent** action; one
+that already has a worktree shows a **Worktree exists** marker plus a **Start
+agent** action that posts an `agent` message to launch a Claude agent in that
+existing worktree. Clicking create posts a `worktreeFromBranch` message; the
+provider runs
+`git.addBranchWorktree` (checking out an existing local branch, or creating a
+local tracking branch for a remote-only branch), starts a Claude agent in it via
+the existing `agent(dir)` flow in the current window, then refreshes the sidebar
+and re-posts the branch data so the row flips to the marker.
+
+```mermaid
+flowchart TD
+    TB["sidebar panel.js toolbar"] -->|openBranches| WV[WorktreeWebviewProvider]
+    WV -->|create/reveal singleton| EP["Branches editor tab<br/>AWT_VIEW=branches<br/>same panel.js + panel.css"]
+    EP -->|loadBranches on mount| WV
+    WV --> LB["git.listBranches<br/>local + remote-only,<br/>worktree association"]
+    WV --> FPB["github.fetchPrsByBranch<br/>1 POST /graphql,<br/>all open PRs + rollups"]
+    WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
+    BO --> FB["Filter / Sort bar<br/>Author · Reviews · Sort · presets"]
+    FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]
+    CS --> ROWS[Branch rows]
+    ROWS -->|no worktree, worktreeFromBranch| WV
+    WV --> AW["git.addBranchWorktree<br/>+ remote-tracking path"]
+    WV --> AG["agent(dir): Claude terminal<br/>in current window"]
+    AW --> RF[refresh] --> BO
+    PRS["PrService REST fetchPr<br/>worktree cards, unchanged"] -. separate path .- FPB
 ```
 
 ## Caveats
