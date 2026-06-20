@@ -4,7 +4,10 @@
   "description": "Browse and switch between git worktrees from a side panel, without reloading the window.",
   "version": "0.0.1",
   "publisher": "bradenterry",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BradenTerry/agent-worktrees.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -69,7 +72,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node --test test/*.test.js"
+    "test": "npm run compile && node --test"
   },
   "devDependencies": {
     "@types/node": "^20.x",

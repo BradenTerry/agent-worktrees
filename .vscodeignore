@@ -1,8 +1,12 @@
 .vscode/**
+.claude/**
+.github/**
 src/**
 test/**
 **/*.ts
 **/*.map
 tsconfig.json
 .gitignore
+.vscodeignore
+package-lock.json
 node_modules/**
