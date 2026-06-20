@@ -19,6 +19,7 @@ interface ActionMessage {
     | "stopAgent"
     | "newWorktree"
     | "removeWorktree"
+    | "openWindow"
     | "acceptHooks"
     | "rename";
   path?: string;
@@ -162,6 +163,8 @@ export class WorktreeWebviewProvider
         return this.newWorktree();
       case "removeWorktree":
         return this.removeWorktreeAction(msg.path);
+      case "openWindow":
+        return this.openWindow(msg.path);
       case "acceptHooks":
         return this.acceptHooks();
       case "rename":
@@ -309,6 +312,59 @@ export class WorktreeWebviewProvider
         /* already gone, or not killable */
       }
     }
+  }
+
+  // --- Windows ---------------------------------------------------------------
+
+  /**
+   * Open a worktree in its own VS Code window. We prefer the `code` CLI because
+   * VS Code dedupes folders across windows: if a window for this worktree is
+   * already open the CLI focuses it (so re-clicking switches to it) instead of
+   * opening a duplicate, and otherwise opens a fresh window. The extension API
+   * can neither enumerate nor focus other windows, so when the CLI is not on
+   * PATH we fall back to vscode.openFolder, which always opens a new window.
+   */
+  private async openWindow(fsPath?: string): Promise<void> {
+    if (!fsPath) return;
+    if (await this.openViaCodeCli(fsPath)) return;
+    await vscode.commands.executeCommand(
+      "vscode.openFolder",
+      vscode.Uri.file(fsPath),
+      { forceNewWindow: true }
+    );
+  }
+
+  /**
+   * Launch the `code` (or `code-insiders`) CLI on a folder. Resolves true once
+   * the process has spawned, false if the binary is not found so the caller can
+   * fall back to the API path.
+   */
+  private openViaCodeCli(fsPath: string): Promise<boolean> {
+    const bin = vscode.env.appName.includes("Insiders")
+      ? "code-insiders"
+      : "code";
+    const isWin = process.platform === "win32";
+    return new Promise<boolean>((resolve) => {
+      try {
+        // On Windows go through a shell so the `code.cmd` shim resolves via
+        // PATHEXT, and quote the path since the shell re-parses the argument.
+        const child = isWin
+          ? cp.spawn(bin, [`"${fsPath}"`], {
+              shell: true,
+              detached: true,
+              stdio: "ignore",
+              windowsHide: true,
+            })
+          : cp.spawn(bin, [fsPath], { detached: true, stdio: "ignore" });
+        child.once("error", () => resolve(false));
+        child.once("spawn", () => {
+          child.unref();
+          resolve(true);
+        });
+      } catch {
+        resolve(false);
+      }
+    });
   }
 
   /** Drop our handle to a terminal that has closed. */

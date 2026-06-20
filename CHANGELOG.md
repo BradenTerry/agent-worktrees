@@ -2,6 +2,13 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 0.0.2
+
+- **Open in new window** — each worktree card has a button to open that worktree
+  in its own VS Code window. When a window for the worktree is already open, it
+  is focused instead of duplicated (focus behavior uses the `code` CLI when it is
+  on `PATH`; otherwise a new window is always opened).
+
 ## 0.0.1
 
 Initial release.

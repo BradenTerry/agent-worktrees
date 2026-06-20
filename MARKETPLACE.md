@@ -17,6 +17,9 @@ view, and floats the ones that need you to the top.
   in its own terminal. Reveal, rename, or stop it from the panel.
 - **Agent & Worktree in one step** — create a fresh worktree with `claude -w` and
   start an agent in it together.
+- **Open in a new window** — open any worktree in its own VS Code window in a
+  click; if one is already open for that worktree, it is focused instead of
+  duplicated.
 - **Attention routing** — worktrees with an agent that is *waiting* on you or
   *active* automatically rise to the top of the list.
 - **Live agent status** — each agent shows as **active**, **waiting**, or

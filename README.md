@@ -26,6 +26,10 @@ attention to the top.
   panel, and closing a terminal removes its row.
 - **Agent & Worktree** — create a new worktree with Claude (`claude -w`) and
   start an agent in it in a single step.
+- **Open in new window** — open any worktree in its own VS Code window from the
+  card header. If a window for that worktree is already open, VS Code focuses it
+  instead of duplicating (the focus behavior uses the `code` CLI when it is on
+  `PATH`; otherwise a fresh window is always opened).
 - **New Worktree** — `git worktree add` for a new (or existing) branch.
 - **Delete Worktree** — `git worktree remove` (offers `--force` when dirty, and
   stops any agents running in the worktree first).

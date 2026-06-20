@@ -22,6 +22,8 @@
     collapse:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>',
     edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-7 7-3.5.5.5-3.5z"/></svg>',
+    window:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
   };
@@ -217,6 +219,15 @@
       icons.sparkle +
       "Agent</button>";
 
+    // Open this worktree in its own VS Code window (focuses an existing one if
+    // already open). Available for every worktree, including the primary.
+    const openWindowBtn =
+      '<button class="act ghost iconact" data-action="openWindow" data-path="' +
+      esc(wt.path) +
+      '" title="Open this worktree in a new VS Code window">' +
+      icons.window +
+      "</button>";
+
     // Delete (git worktree remove) — never for the primary worktree.
     const deleteBtn = wt.isPrimary
       ? ""
@@ -238,6 +249,7 @@
       '<span class="badges">' +
       badges.join("") +
       "</span>" +
+      openWindowBtn +
       deleteBtn +
       "</div>" +
       '<hr class="card-sep" />' +
