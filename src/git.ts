@@ -48,9 +48,24 @@ export interface GitStatus {
 }
 
 /**
+ * Update remote-tracking refs so ahead/behind counts reflect the remote. All
+ * worktrees of a repo share one object store, so a single fetch at any worktree
+ * refreshes every worktree's behind/ahead distance. Never throws — offline or a
+ * missing remote simply leaves the refs (and counts) as they were.
+ */
+export async function fetchRemotes(cwd: string): Promise<void> {
+  try {
+    await execAsync("git fetch --all --quiet", { cwd, timeout: 15_000 });
+  } catch {
+    /* offline / no remote / timeout: keep stale refs */
+  }
+}
+
+/**
  * Summarize the working-tree state of a worktree using
  * `git status --porcelain=v2 --branch`: a count of changed entries plus the
- * ahead/behind distance from the upstream branch.
+ * ahead/behind distance from the upstream branch. Note ahead/behind is read
+ * from local refs; call `fetchRemotes` first for an up-to-date behind count.
  */
 export async function getStatus(cwd: string): Promise<GitStatus> {
   let dirty = 0;

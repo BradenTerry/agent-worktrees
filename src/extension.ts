@@ -17,7 +17,7 @@ export function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand("worktreeView.refresh", () =>
-      provider.refresh()
+      provider.refresh(true)
     ),
 
     vscode.commands.registerCommand("worktreeView.newWorktree", () =>

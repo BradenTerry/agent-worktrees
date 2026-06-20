@@ -168,8 +168,12 @@ export class WorktreeWebviewProvider
     void this.refresh();
   }
 
-  /** Recompute worktree data and push it to the webview (only when it changed). */
-  async refresh(): Promise<void> {
+  /**
+   * Recompute worktree data and push it to the webview (only when it changed).
+   * When `force` is set (the user clicked Refresh) this also runs a `git fetch`
+   * so the behind/ahead counts are current and forces a fresh GitHub PR fetch.
+   */
+  async refresh(force = false): Promise<void> {
     if (!this.view) return;
     const installed = await hooksInstalled();
     const agents = installed
@@ -178,14 +182,14 @@ export class WorktreeWebviewProvider
     if (agents) {
       await this.syncTerminalNames(agents);
     }
-    const data = await gatherWorktrees(agents, installed);
+    const data = await gatherWorktrees(agents, installed, force);
     if (!installed) {
       data.hooks = HOOKS.map((h) => ({
         label: h.label,
         description: h.description,
       }));
     }
-    await this.attachPrStatus(data);
+    await this.attachPrStatus(data, force);
     const json = JSON.stringify(data);
     if (json === this.lastPosted) return;
     this.lastPosted = json;
@@ -199,7 +203,10 @@ export class WorktreeWebviewProvider
    * network work, and leaves every `pr` undefined. Resolving remotes and reading
    * the cache never throws, so a GitHub hiccup can't break the worktree render.
    */
-  private async attachPrStatus(data: WorktreeData): Promise<void> {
+  private async attachPrStatus(
+    data: WorktreeData,
+    force = false
+  ): Promise<void> {
     const enabled = this.prService.isEnabled();
     const github = await connection();
     data.github = github;
@@ -215,6 +222,11 @@ export class WorktreeWebviewProvider
       }
     }
     this.prService.setTargets(targets);
+    // On an explicit refresh, refetch PR/CI status now so this payload carries
+    // the latest instead of waiting for the next background poll.
+    if (force && enabled && github.hasToken) {
+      await this.prService.refresh(true);
+    }
 
     for (const wt of data.worktrees) {
       const pr = this.prService.get(normalize(wt.path));
@@ -243,7 +255,7 @@ export class WorktreeWebviewProvider
     if (msg.type !== "action") return;
     switch (msg.action) {
       case "refresh":
-        return void this.refresh();
+        return void this.refresh(true);
       case "agent":
         return this.agent(msg.path);
       case "agentWorktree":
