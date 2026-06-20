@@ -24,6 +24,10 @@ export function activate(context: vscode.ExtensionContext) {
       provider.newWorktree()
     ),
 
+    vscode.commands.registerCommand("worktreeView.settings", () =>
+      provider.openSettings()
+    ),
+
     // Keep the panel in sync when folders change by any means.
     vscode.workspace.onDidChangeWorkspaceFolders(() => provider.refresh())
   );

@@ -137,6 +137,49 @@ export async function addWorktree(
   }
 }
 
+/** Owner/repo of a GitHub remote, parsed from its URL. */
+export interface RemoteInfo {
+  owner: string;
+  repo: string;
+}
+
+/**
+ * Resolve the `origin` remote of `cwd` to its GitHub owner/repo, or undefined
+ * when there is no origin, it is not a github.com remote, or git fails. Only
+ * github.com is supported (the REST client targets api.github.com). Never
+ * throws — a missing remote simply yields undefined so PR lookup is skipped.
+ */
+export async function getRemoteInfo(
+  cwd: string
+): Promise<RemoteInfo | undefined> {
+  let url: string;
+  try {
+    const { stdout } = await execAsync("git remote get-url origin", { cwd });
+    url = stdout.trim();
+  } catch {
+    return undefined;
+  }
+  return parseGitHubRemote(url);
+}
+
+/**
+ * Parse a GitHub remote URL into {owner, repo}. Handles the SSH, scp-like and
+ * HTTPS forms and strips a trailing `.git`. Returns undefined for non-github.com
+ * hosts or anything unrecognized.
+ */
+export function parseGitHubRemote(url: string): RemoteInfo | undefined {
+  // git@github.com:owner/repo.git  |  ssh://git@github.com/owner/repo.git
+  // https://github.com/owner/repo(.git)  |  https://user@github.com/owner/repo
+  const m = url.match(
+    /github\.com[/:]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/i
+  );
+  if (!m) return undefined;
+  const owner = m[1];
+  const repo = m[2];
+  if (!owner || !repo) return undefined;
+  return { owner, repo };
+}
+
 /** Remove a worktree. Passes `--force` only when explicitly requested. */
 export async function removeWorktree(
   repoRoot: string,

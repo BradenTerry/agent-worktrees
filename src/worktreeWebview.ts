@@ -3,10 +3,28 @@ import * as path from "path";
 import * as fs from "fs";
 import * as cp from "child_process";
 import { randomUUID } from "crypto";
-import { gatherWorktrees, normalize, AgentVM } from "./worktreeData";
-import { addWorktree, removeWorktree, listWorktrees } from "./git";
+import {
+  gatherWorktrees,
+  normalize,
+  AgentVM,
+  WorktreeData,
+} from "./worktreeData";
+import {
+  addWorktree,
+  removeWorktree,
+  listWorktrees,
+  getRemoteInfo,
+  RemoteInfo,
+} from "./git";
 import { hooksInstalled, installHooks, sessionsDir, HOOKS } from "./hooks";
 import { readSessionsByWorktree } from "./sessionStore";
+import {
+  initGithub,
+  connection,
+  setToken,
+  clearToken,
+} from "./github";
+import { PrService, PrTarget } from "./prs";
 
 /** Messages sent from the webview to the extension. */
 interface ActionMessage {
@@ -21,9 +39,17 @@ interface ActionMessage {
     | "removeWorktree"
     | "openWindow"
     | "acceptHooks"
-    | "rename";
+    | "rename"
+    | "openSettings"
+    | "setGithubToken"
+    | "clearGithubToken"
+    | "togglePr";
   path?: string;
   sessionId?: string;
+  /** GitHub PAT, for setGithubToken. */
+  token?: string;
+  /** New on/off state, for togglePr. */
+  value?: boolean;
 }
 
 export class WorktreeWebviewProvider
@@ -50,8 +76,14 @@ export class WorktreeWebviewProvider
   /** Where the emitter writes per-session state, under the extension's global
    *  storage (so nothing of ours lives in ~/.claude). Derived from the context. */
   private readonly sessionsDir: string;
+  /** Background PR-status fetcher; only does work when a token is stored. */
+  private readonly prService: PrService;
+  /** Resolved GitHub origin per worktree path (null = no github remote). */
+  private readonly remotes = new Map<string, RemoteInfo | null>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    initGithub(context);
+    this.prService = new PrService(context);
     this.sessionsDir = sessionsDir(context);
     // Ensure the sessions dir exists so the watcher attaches even before the
     // first hook fires.
@@ -63,7 +95,14 @@ export class WorktreeWebviewProvider
     this.watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.file(this.sessionsDir), "*.json")
     );
-    const onChange = () => void this.refresh();
+    // A session-state file changing is a Claude hook firing (a prompt, a tool
+    // run, a stop). Besides re-rendering, nudge the PR service: this is the
+    // signal that an agent may have just run `gh pr create`/merge, so PR status
+    // is worth a (throttled) refresh without waiting for the poll timer.
+    const onChange = () => {
+      void this.refresh();
+      void this.prService.refresh(false);
+    };
     this.watcher.onDidCreate(onChange);
     this.watcher.onDidChange(onChange);
     this.watcher.onDidDelete(onChange);
@@ -78,6 +117,9 @@ export class WorktreeWebviewProvider
     this.fileWatcher.onDidDelete(onFile);
 
     context.subscriptions.push(
+      this.prService,
+      // Re-render whenever fresh PR status lands.
+      this.prService.onChange(() => void this.refresh()),
       // Clean up our terminal handle when its terminal is closed by any means.
       vscode.window.onDidCloseTerminal((t) => this.forgetTerminal(t)),
       // Catch external/agent edits and commits when the window regains focus.
@@ -115,6 +157,7 @@ export class WorktreeWebviewProvider
       this.onMessage(msg)
     );
     webviewView.onDidChangeVisibility(() => {
+      this.prService.setVisible(webviewView.visible);
       if (webviewView.visible) {
         this.lastPosted = ""; // a re-shown view needs a fresh push
         void this.refresh();
@@ -142,10 +185,56 @@ export class WorktreeWebviewProvider
         description: h.description,
       }));
     }
+    await this.attachPrStatus(data);
     const json = JSON.stringify(data);
     if (json === this.lastPosted) return;
     this.lastPosted = json;
     void this.view.webview.postMessage({ type: "update", data });
+  }
+
+  /**
+   * Attach GitHub connection + per-worktree PR status onto the payload. This is
+   * the only place PR work is kicked off, and it is fully optional: with no
+   * token (or the integration toggled off) it sets an empty target list, does no
+   * network work, and leaves every `pr` undefined. Resolving remotes and reading
+   * the cache never throws, so a GitHub hiccup can't break the worktree render.
+   */
+  private async attachPrStatus(data: WorktreeData): Promise<void> {
+    const enabled = this.prService.isEnabled();
+    const github = await connection();
+    data.github = github;
+    data.prEnabled = enabled;
+
+    const targets: PrTarget[] = [];
+    if (enabled && github.hasToken) {
+      for (const wt of data.worktrees) {
+        if (!wt.branch || wt.detached) continue;
+        const repo = await this.remoteFor(wt.path);
+        if (!repo) continue;
+        targets.push({ key: normalize(wt.path), branch: wt.branch, repo });
+      }
+    }
+    this.prService.setTargets(targets);
+
+    for (const wt of data.worktrees) {
+      const pr = this.prService.get(normalize(wt.path));
+      if (pr !== undefined) wt.pr = pr;
+    }
+  }
+
+  /** Resolve (and cache) a worktree's GitHub origin. Never throws. */
+  private async remoteFor(fsPath: string): Promise<RemoteInfo | undefined> {
+    const key = normalize(fsPath);
+    const cached = this.remotes.get(key);
+    if (cached !== undefined) return cached ?? undefined;
+    let info: RemoteInfo | undefined;
+    try {
+      info = await getRemoteInfo(fsPath);
+    } catch {
+      info = undefined;
+    }
+    this.remotes.set(key, info ?? null);
+    return info;
   }
 
   // --- Webview messages ------------------------------------------------------
@@ -173,7 +262,57 @@ export class WorktreeWebviewProvider
         return this.acceptHooks();
       case "rename":
         return this.rename(msg.sessionId);
+      case "setGithubToken":
+        return this.setGithubToken(msg.token);
+      case "clearGithubToken":
+        return this.clearGithubToken();
+      case "togglePr":
+        return this.togglePr(msg.value);
     }
+  }
+
+  // --- GitHub settings -------------------------------------------------------
+
+  /** Open the settings modal in the webview (from the title-bar command). */
+  openSettings(): void {
+    void this.view?.webview.postMessage({ type: "openSettings" });
+  }
+
+  /** Store a pasted PAT, re-probe, and refresh PR status. */
+  private async setGithubToken(token?: string): Promise<void> {
+    const t = token?.trim();
+    if (!t) return;
+    try {
+      await setToken(t);
+    } catch (e) {
+      vscode.window.showErrorMessage(
+        `Could not save GitHub token: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    }
+    this.prService.reauth();
+    this.lastPosted = "";
+    await this.refresh();
+  }
+
+  /** Forget the stored token; PR badges disappear on the next render. */
+  private async clearGithubToken(): Promise<void> {
+    try {
+      await clearToken();
+    } catch {
+      /* best effort */
+    }
+    this.prService.reauth();
+    this.lastPosted = "";
+    await this.refresh();
+  }
+
+  /** Turn the PR integration on/off without discarding the stored token. */
+  private async togglePr(value?: boolean): Promise<void> {
+    await this.prService.setEnabled(!!value);
+    this.lastPosted = "";
+    await this.refresh();
   }
 
   /** The folder the panel operates on (the opened repo/worktree). */

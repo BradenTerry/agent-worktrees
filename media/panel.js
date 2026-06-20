@@ -27,6 +27,16 @@
     info: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5h.01"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
+    gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>',
+    pr: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8M12 11V7a2.5 2.5 0 0 0-2.5-2.5H7M9 2.5L7 4.5l2 2"/></svg>',
+    check:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3.5 8.5l3 3 6-6.5"/></svg>',
+    cross:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+    dot: '<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="3.2"/></svg>',
+    comment:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
+    link: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>',
   };
 
   // Worktree paths whose agent list is expanded, persisted so re-renders keep
@@ -222,6 +232,106 @@
     return '<div class="gitline">' + segs.join("") + "</div>";
   }
 
+  // PR-state badge labels and the CSS class that colors them.
+  const PR_STATE = {
+    open: { label: "Open", cls: "open" },
+    draft: { label: "Draft", cls: "draft" },
+    merged: { label: "Merged", cls: "merged" },
+    closed: { label: "Closed", cls: "closed" },
+  };
+
+  /**
+   * One-line PR summary for a worktree branch: state + number, CI rollup, review
+   * decision and comment count, the whole row linking out to the PR. Rendered
+   * only when PR data is present (the integration is on and a PR exists).
+   */
+  function prLine(pr) {
+    if (!pr) return "";
+    const st = PR_STATE[pr.state] || PR_STATE.open;
+    const segs = [];
+
+    segs.push(
+      '<span class="pr-state ' +
+        st.cls +
+        '">' +
+        st.label +
+        " #" +
+        pr.number +
+        "</span>"
+    );
+
+    // CI rollup: a colored glyph plus the failing/pending count when relevant.
+    if (pr.checks && pr.checks !== "none") {
+      var ci = "";
+      if (pr.checks === "pass")
+        ci =
+          '<span class="pr-seg pass" title="Checks passing">' +
+          icons.check +
+          "</span>";
+      else if (pr.checks === "fail")
+        ci =
+          '<span class="pr-seg fail" title="' +
+          (pr.checksFail || 0) +
+          ' check(s) failing">' +
+          icons.cross +
+          (pr.checksFail ? pr.checksFail : "") +
+          "</span>";
+      else
+        ci =
+          '<span class="pr-seg pending" title="' +
+          (pr.checksPending || 0) +
+          ' check(s) running">' +
+          icons.dot +
+          "</span>";
+      segs.push(ci);
+    }
+
+    // Review decision.
+    if (pr.review === "approved")
+      segs.push(
+        '<span class="pr-seg approved" title="Approved">' +
+          icons.check +
+          (pr.approvals ? pr.approvals : "") +
+          "</span>"
+      );
+    else if (pr.review === "changes")
+      segs.push(
+        '<span class="pr-seg changes" title="Changes requested">' +
+          icons.cross +
+          "</span>"
+      );
+    else if (pr.review === "required")
+      segs.push(
+        '<span class="pr-seg required" title="Review requested">@</span>'
+      );
+
+    if (pr.comments)
+      segs.push(
+        '<span class="pr-seg comments" title="' +
+          pr.comments +
+          ' comment(s)">' +
+          icons.comment +
+          pr.comments +
+          "</span>"
+      );
+
+    return (
+      '<a class="prline" href="' +
+      esc(pr.url) +
+      '" title="' +
+      esc(pr.title) +
+      ' — open on GitHub">' +
+      '<span class="pr-ico">' +
+      icons.pr +
+      "</span>" +
+      segs.join("") +
+      '<span class="pr-open">' +
+      icons.link +
+      "</span>" +
+      "</a>"
+    );
+  }
+
   function card(wt) {
     const isCollapsed = !expanded.has(wt.path);
     const badges = [];
@@ -277,6 +387,7 @@
       '<span class="actions-spacer"></span>' +
       agentBtn +
       "</div>" +
+      prLine(wt.pr) +
       agentsBar(agents, wt.path) +
       '<div class="card-body">' +
       agentRows(agents) +
@@ -439,6 +550,187 @@
     document.body.appendChild(modalEl);
   }
 
+  // --- Settings modal --------------------------------------------------------
+  // Holds the GitHub PR-status integration controls. Like the skills modal it
+  // lives on document.body so a data re-render never wipes it; it only re-renders
+  // itself when the GitHub connection (not the worktree data) changes, so typing
+  // a token is never interrupted by a routine refresh.
+  let settingsEl = null;
+  let lastGhSig = "";
+
+  function ghSig(data) {
+    return JSON.stringify([
+      (data && data.github) || null,
+      (data && data.prEnabled) !== false,
+    ]);
+  }
+
+  function settingsContent(data) {
+    const gh = (data && data.github) || { hasToken: false, connected: false };
+    const prEnabled = !data || data.prEnabled !== false;
+
+    let status;
+    if (!gh.hasToken) {
+      status =
+        '<div class="gh-status none">Not connected. Add a personal access token to show PR status per branch.</div>';
+    } else if (gh.connected) {
+      status =
+        '<div class="gh-status ok"><span class="status-dot active"></span>Connected' +
+        (gh.login ? " as <b>" + esc(gh.login) + "</b>" : "") +
+        (gh.tokenType
+          ? ' <span class="gh-type">' + esc(gh.tokenType) + " token</span>"
+          : "") +
+        "</div>";
+    } else {
+      status =
+        '<div class="gh-status err"><span class="status-dot waiting"></span>' +
+        esc(gh.error || "Token saved but not validated.") +
+        "</div>";
+    }
+
+    const disconnect = gh.hasToken
+      ? '<button class="gh-disconnect" data-gh="disconnect">Disconnect</button>'
+      : "";
+
+    const tokenField =
+      '<div class="gh-field">' +
+      '<input type="password" id="gh-token" placeholder="ghp_… or github_pat_…" autocomplete="off" spellcheck="false" />' +
+      '<button class="primary" data-gh="save">Save</button>' +
+      "</div>";
+
+    // Fine-grained PAT template URL (GitHub supports prefilling the token name
+    // and per-resource permissions via query params). We request read-only on
+    // exactly what the PR rollups touch: pull requests + reviews, commit
+    // statuses, check runs, and repo contents. (Metadata: read is mandatory and
+    // added by GitHub automatically.)
+    const fgUrl =
+      "https://github.com/settings/personal-access-tokens/new" +
+      "?name=Agent+Worktrees" +
+      "&description=Read-only+PR+status+for+the+Agent+Worktrees+extension" +
+      "&contents=read&pull_requests=read&statuses=read&checks=read";
+    // Classic PAT: the `repo` scope covers PR/status/check reads on private repos.
+    const classicUrl =
+      "https://github.com/settings/tokens/new?scopes=repo&description=Agent+Worktrees";
+
+    const links =
+      '<p class="gh-help">Generate a read-only token (permissions pre-filled): ' +
+      '<a href="' +
+      fgUrl +
+      '">Fine-grained</a> · ' +
+      '<a href="' +
+      classicUrl +
+      '">Classic</a></p>' +
+      '<div class="gh-perms">' +
+      '<div class="gh-perms-h">Fine-grained — Repository permissions (Read):</div>' +
+      "<ul>" +
+      "<li>Pull requests</li>" +
+      "<li>Commit statuses</li>" +
+      "<li>Checks</li>" +
+      "<li>Contents</li>" +
+      '<li>Metadata <span class="dim">— required, added automatically</span></li>' +
+      "</ul>" +
+      '<div class="gh-perms-h">Classic — scope: <code>repo</code></div>' +
+      "</div>" +
+      '<p class="gh-help dim">Choose the repositories you want under “Repository access”. ' +
+      "The token is kept in VS Code Secret Storage and is only ever sent to the GitHub API.</p>";
+
+    const toggle =
+      '<label class="gh-toggle"><input type="checkbox" id="gh-enable"' +
+      (prEnabled ? " checked" : "") +
+      " /> <span>Show PR status on worktrees</span></label>";
+
+    return (
+      '<div class="modal settings-modal" role="dialog" aria-modal="true">' +
+      '<div class="modal-head">' +
+      '<span class="modal-title">' +
+      icons.gear +
+      " Settings</span>" +
+      '<button class="iconbtn modal-close" title="Close">' +
+      icons.stop +
+      "</button>" +
+      "</div>" +
+      '<div class="settings-body">' +
+      '<section class="gh-section">' +
+      '<h3 class="gh-h">' +
+      icons.pr +
+      " GitHub PR status</h3>" +
+      '<p class="gh-lead">Tie GitHub into the panel to see each branch’s open PR — ' +
+      "state, CI checks, review status and comments — refreshed as your agents work.</p>" +
+      toggle +
+      status +
+      tokenField +
+      links +
+      disconnect +
+      "</section>" +
+      "</div>" +
+      "</div>"
+    );
+  }
+
+  function renderSettings() {
+    if (!settingsEl) return;
+    settingsEl.innerHTML = settingsContent(lastData);
+    lastGhSig = ghSig(lastData);
+    const input = settingsEl.querySelector("#gh-token");
+    if (input) {
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") saveToken();
+      };
+    }
+  }
+
+  function saveToken() {
+    if (!settingsEl) return;
+    const input = settingsEl.querySelector("#gh-token");
+    const token = input && input.value.trim();
+    if (!token) return;
+    send("setGithubToken", { token });
+    input.value = "";
+    const btn = settingsEl.querySelector('[data-gh="save"]');
+    if (btn) {
+      btn.textContent = "Saving…";
+      btn.disabled = true;
+    }
+  }
+
+  function closeSettings() {
+    if (settingsEl) {
+      settingsEl.remove();
+      settingsEl = null;
+    }
+  }
+
+  function openSettings() {
+    closeModal(); // never stack the two modals
+    if (!settingsEl) {
+      settingsEl = document.createElement("div");
+      settingsEl.className = "modal-backdrop";
+      settingsEl.addEventListener("click", (ev) => {
+        if (ev.target === settingsEl || ev.target.closest(".modal-close")) {
+          closeSettings();
+          return;
+        }
+        const act = ev.target.closest("[data-gh]");
+        if (!act) return;
+        const kind = act.getAttribute("data-gh");
+        if (kind === "save") saveToken();
+        else if (kind === "disconnect") send("clearGithubToken");
+      });
+      settingsEl.addEventListener("change", (ev) => {
+        if (ev.target && ev.target.id === "gh-enable") {
+          send("togglePr", { value: !!ev.target.checked });
+        }
+      });
+      document.body.appendChild(settingsEl);
+    }
+    renderSettings();
+  }
+
+  /** Re-render the open settings modal only when GitHub state changed. */
+  function maybeRefreshSettings(data) {
+    if (settingsEl && ghSig(data) !== lastGhSig) renderSettings();
+  }
+
   root.addEventListener("click", (e) => {
     const tool = e.target.closest("[data-tool='collapseAll']");
     if (tool) {
@@ -455,6 +747,11 @@
         openSkills(btn.getAttribute("data-session"));
         return;
       }
+      // Settings is a webview-only modal — no round trip to the extension.
+      if (action === "openSettings") {
+        openSettings();
+        return;
+      }
       send(action, {
         path: btn.getAttribute("data-path") || undefined,
         sessionId: btn.getAttribute("data-session") || undefined,
@@ -466,7 +763,12 @@
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && modalEl) {
+    if (e.key !== "Escape") return;
+    if (settingsEl) {
+      closeSettings();
+      return;
+    }
+    if (modalEl) {
       closeModal();
       return;
     }
@@ -492,7 +794,13 @@
 
   window.addEventListener("message", (e) => {
     const msg = e.data;
-    if (msg && msg.type === "update") render(msg.data);
+    if (!msg) return;
+    if (msg.type === "update") {
+      render(msg.data);
+      maybeRefreshSettings(msg.data);
+    } else if (msg.type === "openSettings") {
+      openSettings();
+    }
   });
 
   // Keep relative times fresh without round-tripping to the extension.
