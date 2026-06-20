@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
 import { WorktreeWebviewProvider } from "./worktreeWebview";
+import { syncHooks } from "./hooks";
 
 export function activate(context: vscode.ExtensionContext) {
-  const provider = new WorktreeWebviewProvider(
-    context.extensionUri,
-    context.globalStorageUri
-  );
+  // Refresh/repair already-accepted hooks; never installs without consent.
+  void syncHooks(context);
+
+  const provider = new WorktreeWebviewProvider(context);
 
   context.subscriptions.push(
     provider,
@@ -22,9 +23,6 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("worktreeView.newWorktree", () =>
       provider.newWorktree()
     ),
-
-    // Clean up an agent row when its terminal is closed by any means.
-    vscode.window.onDidCloseTerminal((t) => provider.forgetTerminal(t)),
 
     // Keep the panel in sync when folders change by any means.
     vscode.workspace.onDidChangeWorkspaceFolders(() => provider.refresh())
