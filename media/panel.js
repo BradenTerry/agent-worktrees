@@ -337,6 +337,7 @@
       reviewSegs.push(
         '<span class="pr-seg changes" title="Changes requested">' +
           icons.cross +
+          (pr.changesRequested ? pr.changesRequested : "") +
           "</span>"
       );
     else if (pr.review === "required")
