@@ -68,6 +68,7 @@ export async function getToken(): Promise<string | undefined> {
 export async function setToken(token: string): Promise<GithubConnection> {
   await ctx?.secrets.store(PAT_KEY, token);
   probeCache = undefined;
+  resetGithubCache();
   return connection();
 }
 
@@ -75,6 +76,7 @@ export async function setToken(token: string): Promise<GithubConnection> {
 export async function clearToken(): Promise<void> {
   await ctx?.secrets.delete(PAT_KEY);
   probeCache = undefined;
+  resetGithubCache();
 }
 
 /** Probe the token (cached) and report whether/who it connects as. */
@@ -126,17 +128,54 @@ function authHeaders(token: string): Record<string, string> {
 }
 
 /**
- * GET a JSON resource. Returns null on any non-2xx or transport error so callers
- * never have to try/catch — a failed call just means "no data".
+ * Per-URL conditional-request cache: the last ETag we saw plus the parsed body
+ * for it. Keyed by token + URL. A 304 "Not Modified" reply does not count
+ * against GitHub's primary rate limit, so reusing ETags keeps the adaptive PR
+ * poll cheap even while CI is running and we poll fast. Bounded so a long-lived
+ * session can't grow it without limit.
  */
-async function getJson<T>(
+const condCache = new Map<string, { etag: string; value: unknown }>();
+const COND_CACHE_MAX = 200;
+
+/** Drop the conditional-request cache (on token change, so we never reuse an
+ *  ETag across credentials). */
+export function resetGithubCache(): void {
+  condCache.clear();
+}
+
+/**
+ * GET a JSON resource. Returns undefined on any non-2xx or transport error so
+ * callers never have to try/catch — a failed call just means "no data".
+ *
+ * Sends `If-None-Match` when we have an ETag for this URL; a 304 reply returns
+ * the cached body without re-downloading it (and without spending rate limit).
+ */
+export async function getJson<T>(
   path: string,
   token: string
 ): Promise<T | undefined> {
+  const url = `${API}${path}`;
+  const key = `${token}\n${url}`;
+  const cached = condCache.get(key);
+  const headers = authHeaders(token);
+  if (cached) headers["If-None-Match"] = cached.etag;
   try {
-    const res = await fetch(`${API}${path}`, { headers: authHeaders(token) });
+    const res = await fetch(url, { headers });
+    // Unchanged since last fetch: reuse the cached body (free of rate limit).
+    if (res.status === 304 && cached) return cached.value as T;
     if (!res.ok) return undefined;
-    return (await res.json()) as T;
+    const value = (await res.json()) as T;
+    const etag = res.headers.get("etag");
+    if (etag) {
+      // Refresh recency: delete + re-set so eviction below is roughly LRU.
+      condCache.delete(key);
+      condCache.set(key, { etag, value });
+      if (condCache.size > COND_CACHE_MAX) {
+        const oldest = condCache.keys().next().value;
+        if (oldest !== undefined) condCache.delete(oldest);
+      }
+    }
+    return value;
   } catch {
     return undefined;
   }
