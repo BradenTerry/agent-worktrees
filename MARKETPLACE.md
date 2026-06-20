@@ -22,7 +22,7 @@ view.
 - **Live git status per worktree** — changed-file count, `+`/`−` line totals, and
   ahead/behind from upstream, updated as you work.
 - **Start agents in a click** — launch a Claude CLI session in any worktree, each
-  in its own terminal. Reveal, rename, or stop it from the panel.
+  in its own terminal. Reveal or stop it from the panel.
 - **Agent & Worktree in one step** — create a fresh worktree with `claude -w` and
   start an agent in it together.
 - **Open in a new window** — open any worktree in its own VS Code window in a
@@ -31,9 +31,8 @@ view.
 - **Live agent status** — each agent shows as **active**, **waiting**, or
   **idle**, driven by Claude Code hook events.
 - **Skills used** — see which Claude skills each agent has invoked.
-- **Worktree management** — create (`git worktree add`) and delete
-  (`git worktree remove`, with a force option) worktrees without leaving the
-  panel.
+- **Delete worktrees** — remove a worktree (`git worktree remove`, with a force
+  option) without leaving the panel.
 
 ## How agent status works
 
