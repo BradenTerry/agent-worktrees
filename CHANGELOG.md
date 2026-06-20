@@ -2,6 +2,15 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 0.3.0
+
+- **Cheaper GitHub polling with conditional requests** - PR status fetches now
+  send `If-None-Match` with the ETag from the previous response. GitHub answers
+  unchanged resources with a `304 Not Modified` that does not count against the
+  API rate limit, so the adaptive poll stays well within limits even while CI is
+  running and it polls every 15 seconds. Stored ETags are cleared whenever the
+  token changes.
+
 ## 0.2.0
 
 - **Settings is now a full page** - the gear opens a full-window settings view
