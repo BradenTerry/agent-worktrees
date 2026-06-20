@@ -65,17 +65,6 @@
     vscode.postMessage(Object.assign({ type: "action", action }, extra || {}));
   }
 
-  /** Compact relative time, e.g. "just now", "3m", "2h". */
-  function rel(ts) {
-    if (!ts) return "";
-    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-    if (s < 10) return "just now";
-    if (s < 60) return s + "s";
-    const m = Math.round(s / 60);
-    if (m < 60) return m + "m";
-    return Math.round(m / 60) + "h";
-  }
-
   // Status metadata. Colors come from VS Code chart variables in panel.css.
   const STATUS = {
     active: { label: "Active" },
@@ -85,17 +74,6 @@
 
   function statusOf(a) {
     return STATUS[a && a.status] ? a.status : "idle";
-  }
-
-  /** Per-agent secondary text, derived from status and timestamps. */
-  function agentMeta(a) {
-    const s = statusOf(a);
-    if (s === "active") return "running · " + rel(a.startedAt);
-    if (s === "waiting") return "needs input";
-    if (a.lastActivity && a.lastActivity - a.startedAt > 1500) {
-      return "done · " + rel(a.lastActivity);
-    }
-    return "idle";
   }
 
   function agentRows(agents) {
@@ -141,9 +119,6 @@
             esc(fullInfo) +
             '">' +
             esc(a.label) +
-            "</span>" +
-            '<span class="agent-meta">' +
-            esc(agentMeta(a)) +
             "</span>" +
             skillChip +
             '<span class="row-actions">' +
@@ -1022,11 +997,6 @@
   });
   // Scrolling moves the anchor out from under a fixed tooltip; just drop it.
   root.addEventListener("scroll", hideTip, true);
-
-  // Keep relative times fresh without round-tripping to the extension.
-  setInterval(() => {
-    if (lastData) render(lastData);
-  }, 30000);
 
   // Ask for data in case we mounted after the first push.
   send("refresh");

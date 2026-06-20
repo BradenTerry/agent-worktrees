@@ -428,15 +428,6 @@ button.accept {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.agent-meta {
-  font-size: 11px;
-  opacity: 0.85;
-  white-space: nowrap;
-}
-.agent-row.attention .agent-meta {
-  color: var(--vscode-charts-yellow, #cca700);
-  opacity: 1;
-}
 .row-actions {
   display: flex;
   gap: 1px;
