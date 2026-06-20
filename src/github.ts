@@ -326,6 +326,276 @@ export async function fetchPr(
   };
 }
 
+// --- branches overlay: all PRs in one GraphQL request -----------------------
+
+/**
+ * Rolled-up PR status for a branch, plus the fields the branches-overlay
+ * filters and sorts need. Produced from a single GraphQL query, keyed by head
+ * ref. A superset of `PrInfo` semantics with the extra filter fields.
+ */
+export interface BranchPrInfo {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "draft" | "merged" | "closed";
+  checks: "pass" | "fail" | "pending" | "none";
+  checksPass: number;
+  checksFail: number;
+  checksPending: number;
+  review: "approved" | "changes" | "required" | "none";
+  approvals: number;
+  changesRequested: number;
+  reviewsPending: number;
+  comments: number;
+  createdAt?: string;
+  updatedAt?: string;
+  /** PR author login. */
+  author?: string;
+  /** Assignee logins. */
+  assignees: string[];
+  /** Viewer submitted any review. */
+  reviewedByViewer: boolean;
+  /** Viewer is a requested reviewer. */
+  reviewRequestedFromViewer: boolean;
+}
+
+/** The GraphQL query: a page of the repo's PRs (open, merged and closed) with
+ *  their rollups + filter fields, ordered most-recently-updated first and paged
+ *  via `$after`. We include merged/closed so a branch whose PR has landed still
+ *  shows its status, matching the per-worktree REST path which queries
+ *  state=all. */
+const PRS_BY_BRANCH_QUERY = `query($owner:String!,$name:String!,$after:String){
+  viewer { login }
+  repository(owner:$owner, name:$name){
+    pullRequests(states:[OPEN,MERGED,CLOSED], first:100, after:$after, orderBy:{field:UPDATED_AT, direction:DESC}){
+      pageInfo { hasNextPage endCursor }
+      nodes{
+        number title url isDraft state createdAt updatedAt headRefName
+        author { login }
+        assignees(first:20){ nodes { login } }
+        comments { totalCount }
+        reviews(first:100){ nodes { author { login } state submittedAt } }
+        reviewRequests(first:50){ nodes { requestedReviewer { __typename ... on User { login } } } }
+        commits(last:1){ nodes { commit {
+          statusCheckRollup {
+            contexts(first:100){ nodes {
+              __typename
+              ... on CheckRun { status conclusion }
+              ... on StatusContext { state }
+            } }
+          }
+        } } }
+      }
+    }
+  }
+}`;
+
+/** GraphQL node shapes, narrowed to the fields the query selects. */
+interface GqlLogin {
+  login?: string;
+}
+interface GqlReview {
+  author?: GqlLogin;
+  state?: string;
+  submittedAt?: string;
+}
+interface GqlReviewRequest {
+  requestedReviewer?: { __typename?: string; login?: string };
+}
+interface GqlCheckContext {
+  __typename?: string;
+  status?: string;
+  conclusion?: string | null;
+  state?: string;
+}
+interface GqlPr {
+  number: number;
+  title: string;
+  url: string;
+  isDraft?: boolean;
+  state?: string; // OPEN | CLOSED | MERGED
+  createdAt?: string;
+  updatedAt?: string;
+  headRefName: string;
+  author?: GqlLogin;
+  assignees?: { nodes?: GqlLogin[] };
+  comments?: { totalCount?: number };
+  reviews?: { nodes?: GqlReview[] };
+  reviewRequests?: { nodes?: GqlReviewRequest[] };
+  commits?: {
+    nodes?: {
+      commit?: {
+        statusCheckRollup?: { contexts?: { nodes?: GqlCheckContext[] } } | null;
+      };
+    }[];
+  };
+}
+interface GqlResponse {
+  data?: {
+    viewer?: GqlLogin;
+    repository?: {
+      pullRequests?: {
+        pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+        nodes?: GqlPr[];
+      };
+    };
+  };
+  errors?: unknown[];
+}
+
+/** PR lifecycle from the GraphQL enums: merged wins, then closed, then draft. */
+function prStateFromGql(pr: GqlPr): BranchPrInfo["state"] {
+  if (pr.state === "MERGED") return "merged";
+  if (pr.state === "CLOSED") return "closed";
+  if (pr.isDraft) return "draft";
+  return "open";
+}
+
+/**
+ * Adapt the statusCheckRollup contexts to the `{status, conclusion}` shape
+ * `rollupChecks` consumes. CheckRun carries Actions status/conclusion (GraphQL
+ * enums are UPPERCASE, so normalize to the REST lowercase the helper expects);
+ * a legacy StatusContext carries a single `state` we map to a synthetic
+ * conclusion so it flows through the same pass/fail/pending logic.
+ */
+function checksFromRollup(
+  contexts?: GqlCheckContext[]
+): { state: BranchPrInfo["checks"]; pass: number; fail: number; pending: number } {
+  const runs: { status?: string; conclusion?: string | null }[] = [];
+  for (const c of contexts ?? []) {
+    if (c.__typename === "CheckRun") {
+      runs.push({
+        status: c.status ? c.status.toLowerCase() : undefined,
+        conclusion: c.conclusion ? c.conclusion.toLowerCase() : c.conclusion,
+      });
+    } else {
+      // StatusContext: SUCCESS / PENDING / FAILURE / ERROR / EXPECTED.
+      const s = (c.state ?? "").toUpperCase();
+      if (s === "SUCCESS") runs.push({ status: "completed", conclusion: "success" });
+      else if (s === "FAILURE" || s === "ERROR")
+        runs.push({ status: "completed", conclusion: "failure" });
+      else runs.push({ status: "queued" }); // PENDING / EXPECTED / unknown -> pending
+    }
+  }
+  // Reuse the REST rollup so branch and worktree-card semantics stay identical.
+  return rollupChecks(runs);
+}
+
+/** Page cap for the PR fetch: up to ~1000 PRs (100/page, UPDATED_AT desc). The
+ *  loop stops early once GitHub reports no further pages, so small repos cost a
+ *  single request; the cap only bounds pathologically large repos. */
+const MAX_PR_PAGES = 10;
+
+/**
+ * Fetch the repo's PRs (open, merged, closed) with rollups + filter fields via
+ * paged POST /graphql, mapped by head ref name. Paging from most-recently-
+ * updated means a freshly merged PR is always covered; the cap bounds cost on
+ * huge repos. Any failure (transport, non-2xx, GraphQL errors) on the first page
+ * resolves to an empty map; a failure on a later page keeps the pages already
+ * collected. Never throws. Separate code path from the REST `fetchPr` the
+ * worktree cards use.
+ */
+export async function fetchPrsByBranch(
+  token: string,
+  repo: RemoteInfo
+): Promise<{ prs: Map<string, BranchPrInfo>; viewerLogin?: string }> {
+  const prs = new Map<string, BranchPrInfo>();
+  const nodes: GqlPr[] = [];
+  let viewerLogin: string | undefined;
+  let after: string | null = null;
+
+  for (let page = 0; page < MAX_PR_PAGES; page++) {
+    let body: GqlResponse | undefined;
+    try {
+      const res = await fetch(`${API}/graphql`, {
+        method: "POST",
+        headers: { ...authHeaders(token), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: PRS_BY_BRANCH_QUERY,
+          variables: { owner: repo.owner, name: repo.repo, after },
+        }),
+      });
+      if (!res.ok) break;
+      body = (await res.json()) as GqlResponse;
+    } catch {
+      break;
+    }
+    // A GraphQL error body still comes back 200; treat it as failure.
+    if (!body || (body.errors && body.errors.length)) break;
+
+    if (viewerLogin === undefined) viewerLogin = body.data?.viewer?.login;
+    const conn = body.data?.repository?.pullRequests;
+    nodes.push(...(conn?.nodes ?? []));
+
+    const pageInfo = conn?.pageInfo;
+    if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+    after = pageInfo.endCursor;
+  }
+
+  for (const pr of nodes) {
+    if (!pr || !pr.headRefName) continue;
+
+    const checks = checksFromRollup(
+      pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes
+    );
+
+    const reviewNodes = pr.reviews?.nodes ?? [];
+    const requestedReviewers = (pr.reviewRequests?.nodes ?? [])
+      .map((r) => r.requestedReviewer?.login)
+      .filter((l): l is string => !!l);
+    const requested = pr.reviewRequests?.nodes?.length ?? 0;
+    const rev = reviewSummary(
+      reviewNodes.map((r) => ({
+        user: { login: r.author?.login },
+        state: r.state,
+        submitted_at: r.submittedAt,
+      })),
+      requested
+    );
+
+    const reviewedByViewer =
+      !!viewerLogin && reviewNodes.some((r) => r.author?.login === viewerLogin);
+    const reviewRequestedFromViewer =
+      !!viewerLogin && requestedReviewers.includes(viewerLogin);
+
+    const info: BranchPrInfo = {
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      state: prStateFromGql(pr),
+      checks: checks.state,
+      checksPass: checks.pass,
+      checksFail: checks.fail,
+      checksPending: checks.pending,
+      review: rev.review,
+      approvals: rev.approvals,
+      changesRequested: rev.changesRequested,
+      reviewsPending: requested,
+      comments: pr.comments?.totalCount ?? 0,
+      createdAt: pr.createdAt,
+      updatedAt: pr.updatedAt,
+      author: pr.author?.login,
+      assignees: (pr.assignees?.nodes ?? [])
+        .map((a) => a.login)
+        .filter((l): l is string => !!l),
+      reviewedByViewer,
+      reviewRequestedFromViewer,
+    };
+
+    // Key by head ref. Nodes arrive UPDATED_AT desc, so the first seen is the
+    // most recent. Prefer an open/draft PR over a merged/closed one for the same
+    // branch (mirrors the REST path's `find(open) ?? latest`); otherwise the
+    // newest already-stored one wins.
+    const active = (s: BranchPrInfo["state"]) => s === "open" || s === "draft";
+    const existing = prs.get(pr.headRefName);
+    if (!existing || (active(info.state) && !active(existing.state))) {
+      prs.set(pr.headRefName, info);
+    }
+  }
+
+  return { prs, viewerLogin };
+}
+
 // --- pure mapping helpers (unit-tested) -------------------------------------
 
 /** PR lifecycle from the raw fields: merged wins, then closed, then draft. */

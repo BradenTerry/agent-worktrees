@@ -152,6 +152,132 @@ export async function addWorktree(
   }
 }
 
+/** A branch of the repository, annotated with its worktree association. */
+export interface BranchInfo {
+  /** Short branch name, e.g. "feature/x". */
+  name: string;
+  /** Exists only as origin/<name> (no local ref). */
+  remoteOnly: boolean;
+  /** A matching origin/<name> exists. Always true when remoteOnly; for a local
+   *  branch it distinguishes "local + remote" from "local only". */
+  hasRemote: boolean;
+  /** A worktree currently has this branch checked out. */
+  hasWorktree: boolean;
+  /** That worktree's path, when hasWorktree. */
+  worktreePath?: string;
+  /** Commits ahead of the upstream branch (0 when no upstream / not local). */
+  ahead: number;
+  /** Commits behind the upstream branch (0 when no upstream / not local). */
+  behind: number;
+}
+
+/**
+ * List local branches plus remote-only origin branches (origin/<name> with no
+ * local counterpart), each annotated with worktree association. Excludes
+ * origin/HEAD. Never returns the same short name twice (local wins).
+ *
+ * Local branches come from `git for-each-ref refs/heads` with `%(worktreepath)`
+ * (empty unless a worktree holds the ref) and `%(upstream:track)` for the
+ * ahead/behind distance. A second pass over refs/remotes/origin supplies the
+ * origin name set (so a local branch can be flagged "local + remote") and adds
+ * the remote-only names. Ahead/behind is read from local refs, so it reflects
+ * the last fetch. Genuine git failures propagate the way `listWorktrees` does.
+ */
+export async function listBranches(cwd: string): Promise<BranchInfo[]> {
+  // A NUL between fields and a newline between records, so branch names that
+  // contain odd characters never confuse the parse.
+  const { stdout: localOut } = await execAsync(
+    "git for-each-ref --format='%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)' refs/heads",
+    { cwd }
+  );
+  const branches: BranchInfo[] = [];
+  for (const raw of localOut.split("\n")) {
+    const line = raw.replace(/^'/, "").replace(/'$/, "").trimEnd();
+    if (line === "") continue;
+    const [name, worktreePath, track] = line.split("\0");
+    if (!name) continue;
+    const { ahead, behind } = parseTrack(track || "");
+    branches.push({
+      name,
+      remoteOnly: false,
+      hasRemote: false, // set below once origin names are known
+      hasWorktree: !!worktreePath,
+      worktreePath: worktreePath || undefined,
+      ahead,
+      behind,
+    });
+  }
+
+  // origin/<name> set: marks which locals also live on the remote, and supplies
+  // the remote-only branches. origin/HEAD is a symbolic alias for the default
+  // branch, never a branch of its own.
+  const { stdout: remoteOut } = await execAsync(
+    "git for-each-ref --format='%(refname:short)' refs/remotes/origin",
+    { cwd }
+  );
+  const originNames = new Set<string>();
+  for (const raw of remoteOut.split("\n")) {
+    const ref = raw.replace(/^'/, "").replace(/'$/, "").trimEnd();
+    if (ref === "" || ref === "origin/HEAD") continue;
+    const name = ref.replace(/^origin\//, "");
+    if (name) originNames.add(name);
+  }
+
+  const localNames = new Set(branches.map((b) => b.name));
+  for (const b of branches) b.hasRemote = originNames.has(b.name);
+  for (const name of originNames) {
+    if (localNames.has(name)) continue;
+    branches.push({
+      name,
+      remoteOnly: true,
+      hasRemote: true,
+      hasWorktree: false,
+      ahead: 0,
+      behind: 0,
+    });
+  }
+  return branches;
+}
+
+/** Parse `%(upstream:track,nobracket)` (e.g. "ahead 2, behind 1") into counts. */
+function parseTrack(track: string): { ahead: number; behind: number } {
+  const am = track.match(/ahead (\d+)/);
+  const bm = track.match(/behind (\d+)/);
+  return { ahead: am ? Number(am[1]) : 0, behind: bm ? Number(bm[1]) : 0 };
+}
+
+/**
+ * Create a worktree at `dir` for an EXISTING branch.
+ *  - local branch:  git worktree add <dir> <branch>
+ *  - remoteOnly:    git worktree add --track -b <branch> <dir> origin/<branch>
+ * Throws with git's trimmed stderr on failure.
+ */
+export async function addBranchWorktree(
+  repoRoot: string,
+  dir: string,
+  branch: string,
+  remoteOnly: boolean
+): Promise<void> {
+  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
+  try {
+    if (remoteOnly) {
+      await execAsync(
+        `git worktree add --track -b ${q(branch)} ${q(dir)} ${q(
+          `origin/${branch}`
+        )}`,
+        { cwd: repoRoot }
+      );
+    } else {
+      await execAsync(`git worktree add ${q(dir)} ${q(branch)}`, {
+        cwd: repoRoot,
+      });
+    }
+  } catch (err) {
+    const msg = String((err as { stderr?: string }).stderr ?? err);
+    throw new Error(msg.trim());
+  }
+}
+
 /** Owner/repo of a GitHub remote, parsed from its URL. */
 export interface RemoteInfo {
   owner: string;
