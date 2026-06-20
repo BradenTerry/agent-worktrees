@@ -24,10 +24,12 @@
     edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-7 7-3.5.5.5-3.5z"/></svg>',
   };
 
-  // Collapsed worktree paths, persisted so re-renders keep the toggle state.
-  const collapsed = new Set((vscode.getState() || {}).collapsed || []);
+  // Worktree paths whose agent list is expanded, persisted so re-renders keep
+  // the toggle state. Cards start collapsed: the Agents bar shows the counts and
+  // reveals the rows on click.
+  const expanded = new Set((vscode.getState() || {}).expanded || []);
   function persist() {
-    vscode.setState({ collapsed: Array.from(collapsed) });
+    vscode.setState({ expanded: Array.from(expanded) });
   }
 
   // Last data we rendered, so the relative-time tick can re-render in place.
@@ -89,7 +91,9 @@
           return (
             '<div class="agent-row' +
             (s === "waiting" ? " attention" : "") +
-            '">' +
+            '" data-action="focusAgent" data-session="' +
+            esc(a.sessionId) +
+            '" role="button" tabindex="0" title="Click to reveal terminal">' +
             '<span class="status-dot ' +
             s +
             '"></span>' +
@@ -104,11 +108,6 @@
             esc(a.sessionId) +
             '" title="Rename agent">' +
             icons.edit +
-            "</button>" +
-            '<button class="iconbtn" data-action="focusAgent" data-session="' +
-            esc(a.sessionId) +
-            '" title="Reveal terminal">' +
-            icons.focus +
             "</button>" +
             '<button class="iconbtn" data-action="stopAgent" data-session="' +
             esc(a.sessionId) +
@@ -125,10 +124,11 @@
   }
 
   /**
-   * Aggregate stat strip: total + a colored marker and count per status.
-   * Zero-count statuses are dimmed so the row reads at a glance.
+   * Collapsible "Agents" bar at the bottom of a card: it toggles the agent list
+   * and carries the per-status counts. Zero-count statuses are dimmed so the row
+   * reads at a glance.
    */
-  function statusStrip(agents) {
+  function agentsBar(agents, path) {
     const counts = { active: 0, waiting: 0, idle: 0 };
     for (const a of agents) counts[statusOf(a)]++;
 
@@ -145,16 +145,21 @@
       "</span>";
 
     return (
-      '<div class="status-strip">' +
-      '<span class="stat total" title="Total agents">' +
+      '<div class="agents-bar" data-toggle="' +
+      esc(path) +
+      '" role="button" tabindex="0">' +
+      '<span class="chevron">' +
+      icons.chevron +
+      "</span>" +
+      '<span class="agents-bar-label">Agents</span>' +
+      '<span class="agents-bar-count">' +
       agents.length +
-      "<span class='stat-label'>" +
-      (agents.length === 1 ? "agent" : "agents") +
-      "</span></span>" +
-      '<span class="stat-sep"></span>' +
+      "</span>" +
+      '<span class="agents-bar-stats">' +
       stat("active") +
       stat("waiting") +
       stat("idle") +
+      "</span>" +
       "</div>"
     );
   }
@@ -177,7 +182,7 @@
   }
 
   function card(wt) {
-    const isCollapsed = collapsed.has(wt.path);
+    const isCollapsed = !expanded.has(wt.path);
     const badges = [];
     if (wt.isPrimary) badges.push('<span class="badge">primary</span>');
     if (wt.detached) badges.push('<span class="badge warn">detached</span>');
@@ -222,12 +227,7 @@
       (wt.inWorkspace ? " open" : "") +
       (isCollapsed ? " collapsed" : "") +
       '">' +
-      '<div class="card-top" data-toggle="' +
-      esc(wt.path) +
-      '" role="button" tabindex="0">' +
-      '<span class="chevron">' +
-      icons.chevron +
-      "</span>" +
+      '<div class="card-top">' +
       '<span class="dot"></span>' +
       '<span class="branch">' +
       esc(wt.name) +
@@ -236,14 +236,19 @@
       badges.join("") +
       "</span>" +
       "</div>" +
+      '<div class="meta-row">' +
       gitLine(wt.git) +
-      statusStrip(agents) +
-      '<div class="actions">' +
-      mountBtn +
-      agentBtn +
       '<span class="actions-spacer"></span>' +
-      deleteBtn +
+      agentBtn +
       "</div>" +
+      (mountBtn || deleteBtn
+        ? '<div class="actions">' +
+          mountBtn +
+          '<span class="actions-spacer"></span>' +
+          deleteBtn +
+          "</div>"
+        : "") +
+      agentsBar(agents, wt.path) +
       '<div class="card-body">' +
       agentRows(agents) +
       "</div>" +
@@ -320,8 +325,8 @@
   }
 
   function toggle(path) {
-    if (collapsed.has(path)) collapsed.delete(path);
-    else collapsed.add(path);
+    if (expanded.has(path)) expanded.delete(path);
+    else expanded.add(path);
     persist();
     const el = root.querySelector('[data-toggle="' + cssEscape(path) + '"]');
     if (el && el.parentElement) el.parentElement.classList.toggle("collapsed");
@@ -329,9 +334,9 @@
 
   function collapseAll() {
     const wts = (lastData && lastData.worktrees) || [];
-    const allCollapsed = wts.every((w) => collapsed.has(w.path));
-    if (allCollapsed) collapsed.clear();
-    else for (const w of wts) collapsed.add(w.path);
+    const anyExpanded = wts.some((w) => expanded.has(w.path));
+    if (anyExpanded) expanded.clear();
+    else for (const w of wts) expanded.add(w.path);
     persist();
     if (lastData) render(lastData);
   }
@@ -356,16 +361,26 @@
       });
       return;
     }
-    const header = e.target.closest(".card-top");
-    if (header) toggle(header.getAttribute("data-toggle"));
+    const bar = e.target.closest(".agents-bar");
+    if (bar) toggle(bar.getAttribute("data-toggle"));
   });
 
   root.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    const header = e.target.closest(".card-top");
-    if (!header) return;
-    e.preventDefault();
-    toggle(header.getAttribute("data-toggle"));
+    const bar = e.target.closest(".agents-bar");
+    if (bar) {
+      e.preventDefault();
+      toggle(bar.getAttribute("data-toggle"));
+      return;
+    }
+    // Activate a focused agent row (but not when a child button has focus —
+    // buttons fire their own click on Enter/Space).
+    if (e.target.matches && e.target.matches(".agent-row")) {
+      e.preventDefault();
+      send("focusAgent", {
+        sessionId: e.target.getAttribute("data-session") || undefined,
+      });
+    }
   });
 
   window.addEventListener("message", (e) => {

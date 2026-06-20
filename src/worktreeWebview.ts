@@ -39,6 +39,10 @@ export class WorktreeWebviewProvider
   /** Watches the session-state dir so status changes refresh the panel without
    *  a polling loop. */
   private watcher?: vscode.FileSystemWatcher;
+  /** Watches workspace files so git status (dirty/ahead/behind) tracks edits. */
+  private fileWatcher?: vscode.FileSystemWatcher;
+  /** Debounce timer coalescing bursts of file changes into one refresh. */
+  private refreshTimer?: ReturnType<typeof setTimeout>;
   /** Terminals we launched, keyed by the session id we started Claude with. */
   private terminals = new Map<string, vscode.Terminal>();
   /** Last name we applied to each session's terminal, so we only rename on a
@@ -65,14 +69,35 @@ export class WorktreeWebviewProvider
     this.watcher.onDidChange(onChange);
     this.watcher.onDidDelete(onChange);
 
+    // Track working-tree edits so the git dirty/ahead/behind line stays current.
+    // Respects the user's files.watcherExclude (node_modules, etc.); debounced
+    // so a burst of saves triggers one refresh.
+    this.fileWatcher = vscode.workspace.createFileSystemWatcher("**/*");
+    const onFile = () => this.scheduleRefresh();
+    this.fileWatcher.onDidCreate(onFile);
+    this.fileWatcher.onDidChange(onFile);
+    this.fileWatcher.onDidDelete(onFile);
+
     context.subscriptions.push(
       // Clean up our terminal handle when its terminal is closed by any means.
-      vscode.window.onDidCloseTerminal((t) => this.forgetTerminal(t))
+      vscode.window.onDidCloseTerminal((t) => this.forgetTerminal(t)),
+      // Catch external/agent edits and commits when the window regains focus.
+      vscode.window.onDidChangeWindowState((s) => {
+        if (s.focused) this.scheduleRefresh();
+      })
     );
   }
 
   dispose(): void {
     this.watcher?.dispose();
+    this.fileWatcher?.dispose();
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+  }
+
+  /** Coalesce frequent file-change events into a single refresh. */
+  private scheduleRefresh(): void {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => void this.refresh(), 500);
   }
 
   private get extensionUri(): vscode.Uri {
