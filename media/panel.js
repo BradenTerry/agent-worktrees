@@ -21,6 +21,7 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/></svg>',
     collapse:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>',
+    edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-7 7-3.5.5.5-3.5z"/></svg>',
   };
 
   // Collapsed worktree paths, persisted so re-renders keep the toggle state.
@@ -99,13 +100,18 @@
             esc(agentMeta(a)) +
             "</span>" +
             '<span class="row-actions">' +
-            '<button class="iconbtn" data-action="focusAgent" data-agent="' +
-            a.id +
+            '<button class="iconbtn" data-action="rename" data-session="' +
+            esc(a.sessionId) +
+            '" title="Rename agent">' +
+            icons.edit +
+            "</button>" +
+            '<button class="iconbtn" data-action="focusAgent" data-session="' +
+            esc(a.sessionId) +
             '" title="Reveal terminal">' +
             icons.focus +
             "</button>" +
-            '<button class="iconbtn" data-action="stopAgent" data-agent="' +
-            a.id +
+            '<button class="iconbtn" data-action="stopAgent" data-session="' +
+            esc(a.sessionId) +
             '" title="Stop agent">' +
             icons.stop +
             "</button>" +
@@ -252,9 +258,9 @@
       esc(data.repoName || "Repository") +
       "</span>" +
       '<span class="tools">' +
-      '<button class="tbtn" data-action="newWorktree" title="Create a new worktree">' +
-      icons.add +
-      "New Worktree</button>" +
+      '<button class="tbtn" data-action="agentWorktree" title="Create a worktree with Claude (claude -w) and start an agent in it">' +
+      icons.sparkle +
+      "Agent &amp; Worktree</button>" +
       '<button class="tbtn ghost" data-tool="collapseAll" title="Collapse all">' +
       icons.collapse +
       "</button>" +
@@ -266,8 +272,41 @@
     );
   }
 
+  function renderConsent(data) {
+    const hooks = data.hooks || [];
+    const rows = hooks
+      .map(
+        (h) =>
+          '<li class="hook"><code class="hook-name">' +
+          esc(h.label) +
+          "</code><span class='hook-why'>" +
+          esc(h.description) +
+          "</span></li>"
+      )
+      .join("");
+
+    root.innerHTML =
+      '<div class="consent">' +
+      '<h2 class="consent-title">Enable agent status tracking</h2>' +
+      '<p class="consent-lead">Agent Worktrees reads Claude Code hook events to show whether each ' +
+      "agent is <b>active</b>, <b>waiting</b> on you, or <b>idle</b>. To do that it must add the " +
+      "hooks below to your global Claude settings file:</p>" +
+      '<p class="consent-path"><code>~/.claude/settings.json</code></p>' +
+      '<ul class="hooks">' +
+      rows +
+      "</ul>" +
+      '<p class="consent-note">Each hook runs a small bundled Node script that writes a status ' +
+      "file per session. Nothing is sent anywhere. You can remove the hooks anytime by editing that file.</p>" +
+      '<button class="accept primary" data-action="acceptHooks">Accept &amp; add hooks</button>' +
+      "</div>";
+  }
+
   function render(data) {
     lastData = data;
+    if (data && data.hooksInstalled === false) {
+      renderConsent(data);
+      return;
+    }
     if (!data || !data.repoRoot) {
       root.innerHTML =
         '<div class="empty">No git repository in this window.<br/>Open a folder that is a git repository to see its worktrees.</div>';
@@ -311,10 +350,9 @@
     const btn = e.target.closest("[data-action]");
     if (btn) {
       e.stopPropagation();
-      const agent = btn.getAttribute("data-agent");
       send(btn.getAttribute("data-action"), {
         path: btn.getAttribute("data-path") || undefined,
-        agentId: agent != null ? Number(agent) : undefined,
+        sessionId: btn.getAttribute("data-session") || undefined,
       });
       return;
     }

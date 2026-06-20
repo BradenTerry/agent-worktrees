@@ -65,6 +65,71 @@ body {
   line-height: 1.5;
 }
 
+/* Consent page shown until the agent-status hooks are accepted. */
+.consent {
+  padding: 6px 6px 12px;
+  line-height: 1.5;
+}
+.consent-title {
+  margin: 4px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.consent-lead {
+  margin: 0 0 10px;
+  color: var(--vscode-foreground);
+}
+.consent-lead b {
+  font-weight: 600;
+}
+.consent-path {
+  margin: 0 0 12px;
+}
+.consent-path code,
+.hook-name {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.15));
+  color: var(--vscode-foreground);
+}
+.hooks {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hook {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, transparent);
+}
+.hook-name {
+  align-self: flex-start;
+}
+.hook-why {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.consent-note {
+  margin: 0 0 14px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+button.accept {
+  width: 100%;
+  justify-content: center;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
 .card {
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
   border-radius: 6px;

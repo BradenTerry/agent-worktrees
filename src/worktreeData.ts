@@ -12,13 +12,25 @@ export type AgentStatus = "active" | "waiting" | "idle";
 
 /** A single agent session created within a worktree. */
 export interface AgentVM {
-  id: number;
+  /** Claude session id; ties the panel row to its terminal and state file. */
+  sessionId: string;
+  /** Display name: user-given name, else work summary, else a default. */
   label: string;
+  /** User-given name (pencil button or /rename), when set; overrides summary. */
+  name?: string;
+  /** The raw work summary (last prompt), when known. */
+  summary?: string;
   status: AgentStatus;
-  /** Epoch ms when the session was created. */
+  /** Epoch ms when the session was first seen. */
   startedAt: number;
   /** Epoch ms of the most recent hook event. */
   lastActivity: number;
+}
+
+/** A hook shown on the consent page (name + why it is needed). */
+export interface HookInfoVM {
+  label: string;
+  description: string;
 }
 
 /** View-model for a single worktree row sent to the webview. */
@@ -38,6 +50,10 @@ export interface WorktreeData {
   repoRoot?: string;
   repoName?: string;
   worktrees: WorktreeVM[];
+  /** False until the user has accepted the agent-status hooks. */
+  hooksInstalled: boolean;
+  /** The hooks the consent page lists when they are not yet installed. */
+  hooks?: HookInfoVM[];
 }
 
 export function normalize(p: string): string {
@@ -65,19 +81,25 @@ function attentionRank(wt: WorktreeVM): number {
 
 /** Gather worktrees of the repo containing the first workspace folder. */
 export async function gatherWorktrees(
-  agentsByPath?: Map<string, AgentVM[]>
+  agentsByPath?: Map<string, AgentVM[]>,
+  hooksInstalled = false
 ): Promise<WorktreeData> {
   const cwd = primaryFolder();
-  if (!cwd) return { worktrees: [] };
+  if (!cwd) return { worktrees: [], hooksInstalled };
 
   const repoRoot = await findRepoRoot(cwd);
-  if (!repoRoot) return { worktrees: [] };
+  if (!repoRoot) return { worktrees: [], hooksInstalled };
 
   let worktrees;
   try {
     worktrees = await listWorktrees(repoRoot);
   } catch {
-    return { repoRoot, repoName: path.basename(repoRoot), worktrees: [] };
+    return {
+      repoRoot,
+      repoName: path.basename(repoRoot),
+      worktrees: [],
+      hooksInstalled,
+    };
   }
 
   const openPaths = new Set(
@@ -108,5 +130,10 @@ export async function gatherWorktrees(
     return attentionRank(a) - attentionRank(b);
   });
 
-  return { repoRoot, repoName: path.basename(repoRoot), worktrees: vms };
+  return {
+    repoRoot,
+    repoName: path.basename(repoRoot),
+    worktrees: vms,
+    hooksInstalled,
+  };
 }
