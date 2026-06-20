@@ -51,7 +51,7 @@ test("SessionStart writes an idle state with the worktree", () => {
   assert.match(s.worktree, /repo$/);
 });
 
-test("UserPromptSubmit marks active and records the prompt as the task", () => {
+test("UserPromptSubmit marks active but does not store the prompt as the task", () => {
   const r = run({
     hook_event_name: "UserPromptSubmit",
     session_id: SID,
@@ -61,7 +61,8 @@ test("UserPromptSubmit marks active and records the prompt as the task", () => {
   assert.strictEqual(r.status, 0);
   const s = stateOf(SID);
   assert.strictEqual(s.state, "active");
-  assert.strictEqual(s.task, "do the thing");
+  // No ai-title yet, so the summary stays empty rather than echoing the prompt.
+  assert.ok(!s.task, "the raw prompt is not stored as the task");
 });
 
 test("prefers Claude's ai-title from the transcript over the raw prompt", () => {
@@ -93,7 +94,7 @@ test("prefers Claude's ai-title from the transcript over the raw prompt", () => 
   assert.strictEqual(s.task, "Refactor the auth flow");
 });
 
-test("falls back to the prompt when the transcript has no ai-title", () => {
+test("leaves the task empty when the transcript has no ai-title", () => {
   const sid = "session-notitle";
   const transcript = path.join(dir, sid + ".jsonl");
   fs.writeFileSync(
@@ -108,52 +109,17 @@ test("falls back to the prompt when the transcript has no ai-title", () => {
     transcript_path: transcript,
   });
   assert.strictEqual(r.status, 0);
-  assert.strictEqual(stateOf(sid).task, "do the other thing");
+  assert.ok(!stateOf(sid).task, "the prompt is never used as a fallback summary");
 });
 
-test("/rename-agent sets the name and blocks the prompt (exit 2)", () => {
-  const r = run({
-    hook_event_name: "UserPromptSubmit",
-    session_id: SID,
-    cwd: repo,
-    prompt: "/rename-agent My Cool Agent",
-  });
-  assert.strictEqual(r.status, 2, "exit 2 blocks the prompt");
-  assert.match(r.stderr, /renamed/i);
-  const s = stateOf(SID);
-  assert.strictEqual(s.name, "My Cool Agent");
-  assert.strictEqual(s.task, "do the thing", "the command is not stored as a task");
-});
-
-test("Stop marks idle and carries the name forward", () => {
+test("Stop marks idle", () => {
   run({ hook_event_name: "Stop", session_id: SID, cwd: repo });
   const s = stateOf(SID);
   assert.strictEqual(s.state, "idle");
-  assert.strictEqual(s.name, "My Cool Agent");
 });
 
 test("SessionEnd removes the state file", () => {
   const r = run({ hook_event_name: "SessionEnd", session_id: SID, cwd: repo });
   assert.strictEqual(r.status, 0);
   assert.strictEqual(fs.existsSync(path.join(sessions, SID + ".json")), false);
-});
-
-test("a slash command with text before it is a normal prompt, not a rename", () => {
-  const sid = "session-b";
-  run({
-    hook_event_name: "SessionStart",
-    session_id: sid,
-    cwd: repo,
-    source: "startup",
-  });
-  const r = run({
-    hook_event_name: "UserPromptSubmit",
-    session_id: sid,
-    cwd: repo,
-    prompt: "please /rename-agent later",
-  });
-  assert.strictEqual(r.status, 0, "not blocked");
-  const s = stateOf(sid);
-  assert.strictEqual(s.state, "active");
-  assert.ok(!s.name, "no name set");
 });

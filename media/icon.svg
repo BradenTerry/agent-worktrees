@@ -1,43 +1,57 @@
 <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agent Worktrees">
   <defs>
-    <!-- noir backdrop -->
-    <radialGradient id="bg" cx="50%" cy="32%" r="85%">
-      <stop offset="0%" stop-color="#10242A"/>
-      <stop offset="55%" stop-color="#0A171C"/>
-      <stop offset="100%" stop-color="#040A0D"/>
+    <!-- noir backdrop: deep, with a cool spotlight up top so the agent pops -->
+    <radialGradient id="bg" cx="50%" cy="28%" r="90%">
+      <stop offset="0%" stop-color="#143A41"/>
+      <stop offset="42%" stop-color="#0A2024"/>
+      <stop offset="100%" stop-color="#02080A"/>
     </radialGradient>
-    <!-- brushed-steel head -->
-    <linearGradient id="steel" x1="32" y1="46" x2="96" y2="100" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#3A4F59"/>
-      <stop offset="45%" stop-color="#26363D"/>
-      <stop offset="100%" stop-color="#121E23"/>
+    <!-- floor spotlight pooled under the agent -->
+    <radialGradient id="pool" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2BFFB0" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#2BFFB0" stop-opacity="0"/>
+    </radialGradient>
+    <!-- brushed-steel head: brighter, more chrome for contrast -->
+    <linearGradient id="steel" x1="36" y1="44" x2="92" y2="98" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#8FB0BC"/>
+      <stop offset="38%" stop-color="#4D6772"/>
+      <stop offset="72%" stop-color="#2A3C44"/>
+      <stop offset="100%" stop-color="#0E1B20"/>
     </linearGradient>
     <linearGradient id="steelEdge" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#6E8C97"/>
+      <stop offset="0%" stop-color="#CFE6EE"/>
       <stop offset="100%" stop-color="#1A282E"/>
     </linearGradient>
-    <!-- fedora -->
+    <!-- fedora: darker, crisper silhouette -->
     <linearGradient id="hat" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#243137"/>
-      <stop offset="100%" stop-color="#0C1418"/>
+      <stop offset="0%" stop-color="#2C3C43"/>
+      <stop offset="100%" stop-color="#070D10"/>
     </linearGradient>
-    <!-- phosphor visor -->
+    <!-- phosphor visor: hot core, neon edges -->
     <linearGradient id="visor" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#0FBF7A"/>
-      <stop offset="50%" stop-color="#5BFFC0"/>
-      <stop offset="100%" stop-color="#0FBF7A"/>
+      <stop offset="0%" stop-color="#10D98A"/>
+      <stop offset="50%" stop-color="#D6FFF0"/>
+      <stop offset="100%" stop-color="#10D98A"/>
     </linearGradient>
-    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="2.4" result="b"/>
+    <linearGradient id="branch" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5BFFC0"/>
+      <stop offset="100%" stop-color="#16C98C"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="hotglow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="4.5" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
     <filter id="softglow" x="-80%" y="-80%" width="260%" height="260%">
-      <feGaussianBlur stdDeviation="3.6"/>
+      <feGaussianBlur stdDeviation="4"/>
     </filter>
     <filter id="grain">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
       <feColorMatrix type="saturate" values="0"/>
-      <feComponentTransfer><feFuncA type="linear" slope="0.05"/></feComponentTransfer>
+      <feComponentTransfer><feFuncA type="linear" slope="0.045"/></feComponentTransfer>
     </filter>
     <clipPath id="card"><rect x="2" y="2" width="124" height="124" rx="28"/></clipPath>
   </defs>
@@ -46,11 +60,14 @@
   <rect x="2" y="2" width="124" height="124" rx="28" fill="url(#bg)"/>
 
   <g clip-path="url(#card)">
-    <!-- ground glow -->
-    <ellipse cx="64" cy="118" rx="46" ry="14" fill="#0FBF7A" opacity="0.16" filter="url(#softglow)"/>
+    <!-- vignette to deepen the corners and frame the subject -->
+    <rect x="2" y="2" width="124" height="124" rx="28" fill="url(#bg)" opacity="0"/>
 
-    <!-- worktree: branching circuit-tree behind the agent -->
-    <g stroke="#23E59A" stroke-width="1.6" fill="none" opacity="0.5" stroke-linecap="round">
+    <!-- ground glow / spotlight pool -->
+    <ellipse cx="64" cy="116" rx="50" ry="18" fill="url(#pool)" filter="url(#softglow)"/>
+
+    <!-- ===== WORKTREE: branching circuit-tree behind the agent ===== -->
+    <g stroke="url(#branch)" stroke-width="2.1" fill="none" opacity="0.85" stroke-linecap="round">
       <!-- spine -->
       <path d="M64 112 V26"/>
       <!-- canopy branches -->
@@ -63,57 +80,79 @@
       <path d="M64 108 C 56 112, 48 114, 38 120"/>
       <path d="M64 108 C 74 112, 82 114, 90 120"/>
     </g>
-    <!-- branch nodes -->
-    <g fill="#5BFFC0" filter="url(#glow)">
-      <circle cx="30" cy="22" r="3"/>
-      <circle cx="24" cy="50" r="2.6"/>
-      <circle cx="98" cy="24" r="3"/>
-      <circle cx="104" cy="52" r="2.6"/>
-      <circle cx="64" cy="12" r="3.2"/>
-      <circle cx="38" cy="120" r="2.4"/>
-      <circle cx="90" cy="120" r="2.4"/>
+    <!-- branch nodes: hollow git-commit rings + hot cores -->
+    <g filter="url(#glow)">
+      <g fill="#03130D" stroke="#5BFFC0" stroke-width="1.8">
+        <circle cx="30" cy="22" r="4"/>
+        <circle cx="24" cy="50" r="3.4"/>
+        <circle cx="98" cy="24" r="4"/>
+        <circle cx="104" cy="52" r="3.4"/>
+        <circle cx="64" cy="12" r="4.2"/>
+        <circle cx="38" cy="120" r="3.2"/>
+        <circle cx="90" cy="120" r="3.2"/>
+      </g>
+      <g fill="#D6FFF0">
+        <circle cx="30" cy="22" r="1.5"/>
+        <circle cx="24" cy="50" r="1.3"/>
+        <circle cx="98" cy="24" r="1.5"/>
+        <circle cx="104" cy="52" r="1.3"/>
+        <circle cx="64" cy="12" r="1.6"/>
+        <circle cx="38" cy="120" r="1.2"/>
+        <circle cx="90" cy="120" r="1.2"/>
+      </g>
     </g>
 
     <!-- ===== ROBOT FIELD AGENT ===== -->
     <!-- antenna through hat -->
-    <line x1="64" y1="20" x2="64" y2="9" stroke="#FFC24B" stroke-width="1.6" stroke-linecap="round"/>
-    <circle cx="64" cy="7" r="3" fill="#FFC24B" filter="url(#glow)"/>
+    <line x1="64" y1="20" x2="64" y2="9" stroke="#FFC24B" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="64" cy="7" r="3.4" fill="#FFD36B" filter="url(#hotglow)"/>
 
     <!-- fedora -->
-    <path d="M44 38 C 44 24, 84 24, 84 38 Z" fill="url(#hat)"/>
-    <path d="M44 38 C 44 26, 84 26, 84 38" fill="none" stroke="#3C525B" stroke-width="1"/>
+    <path d="M43 38 C 43 23, 85 23, 85 38 Z" fill="url(#hat)"/>
+    <path d="M43 38 C 43 25, 85 25, 85 38" fill="none" stroke="#5A7682" stroke-width="1.2"/>
+    <!-- crown highlight -->
+    <path d="M49 30 C 53 27, 62 26, 66 26" stroke="#7E9CA8" stroke-width="1.6" fill="none" opacity="0.7" stroke-linecap="round"/>
     <!-- hat band -->
-    <path d="M44.5 37 C 54 33.5, 74 33.5, 83.5 37" stroke="#0FBF7A" stroke-width="2.4" fill="none"/>
+    <path d="M43.5 37 C 54 33, 74 33, 84.5 37" stroke="#16E59A" stroke-width="2.8" fill="none" filter="url(#glow)"/>
     <!-- brim -->
-    <ellipse cx="64" cy="39.5" rx="33" ry="6.5" fill="url(#hat)"/>
-    <ellipse cx="64" cy="39.5" rx="33" ry="6.5" fill="none" stroke="#46606B" stroke-width="1" opacity="0.7"/>
+    <ellipse cx="64" cy="39.5" rx="34" ry="7" fill="url(#hat)"/>
+    <ellipse cx="64" cy="39.5" rx="34" ry="7" fill="none" stroke="#6E8C97" stroke-width="1.2"/>
+    <!-- brim top sheen -->
+    <path d="M34 38 C 46 34, 82 34, 94 38" stroke="#8FB0BC" stroke-width="1.2" fill="none" opacity="0.6"/>
 
     <!-- head -->
-    <rect x="38" y="42" width="52" height="50" rx="15" fill="url(#steel)" stroke="url(#steelEdge)" stroke-width="1.4"/>
+    <rect x="38" y="42" width="52" height="50" rx="15" fill="url(#steel)" stroke="url(#steelEdge)" stroke-width="1.8"/>
+    <!-- left-edge rim light -->
+    <path d="M40 58 V76" stroke="#CFE6EE" stroke-width="1.6" opacity="0.55" stroke-linecap="round"/>
     <!-- cheek seam -->
-    <path d="M42 74 H86" stroke="#0B1417" stroke-width="1.2" opacity="0.6"/>
+    <path d="M42 78 H86" stroke="#080F12" stroke-width="1.4" opacity="0.7"/>
     <!-- bolts -->
-    <g fill="#46606B"><circle cx="44" cy="84" r="1.7"/><circle cx="84" cy="84" r="1.7"/></g>
+    <g fill="#9DBAC5"><circle cx="44" cy="85" r="1.9"/><circle cx="84" cy="85" r="1.9"/></g>
     <!-- ear modules -->
-    <rect x="33" y="60" width="6" height="14" rx="2.5" fill="#1B292F" stroke="#3C525B" stroke-width="1"/>
-    <rect x="89" y="60" width="6" height="14" rx="2.5" fill="#1B292F" stroke="#3C525B" stroke-width="1"/>
+    <rect x="32.5" y="59" width="6.5" height="15" rx="2.5" fill="#1E2D33" stroke="#5A7682" stroke-width="1.2"/>
+    <rect x="89" y="59" width="6.5" height="15" rx="2.5" fill="#1E2D33" stroke="#5A7682" stroke-width="1.2"/>
 
     <!-- visor housing -->
-    <rect x="42" y="56" width="44" height="16" rx="8" fill="#070E11"/>
+    <rect x="41" y="55" width="46" height="17" rx="8.5" fill="#040A0C"/>
+    <rect x="41" y="55" width="46" height="17" rx="8.5" fill="none" stroke="#16E59A" stroke-width="0.8" opacity="0.5"/>
     <!-- phosphor visor slit -->
-    <rect x="46" y="61.5" width="36" height="5" rx="2.5" fill="url(#visor)" filter="url(#glow)"/>
-    <!-- sensor pip -->
-    <circle cx="74" cy="64" r="1.4" fill="#04130C" opacity="0.8"/>
+    <rect x="45" y="60.5" width="38" height="6" rx="3" fill="url(#visor)" filter="url(#hotglow)"/>
+    <!-- sensor pip / scan glint -->
+    <circle cx="75" cy="63.5" r="1.5" fill="#03130D" opacity="0.85"/>
+    <circle cx="51" cy="63.5" r="0.9" fill="#FFFFFF" opacity="0.9"/>
 
     <!-- collar / suit -->
-    <path d="M48 92 L64 100 L80 92 L84 104 L44 104 Z" fill="#14222A" stroke="#33484F" stroke-width="1"/>
+    <path d="M48 92 L64 101 L80 92 L85 105 L43 105 Z" fill="#17262E" stroke="#42606B" stroke-width="1.2"/>
+    <!-- lapels -->
+    <path d="M64 101 L54 93 L60 99 Z" fill="#0E1A20"/>
+    <path d="M64 101 L74 93 L68 99 Z" fill="#0E1A20"/>
     <!-- bow tie -->
-    <path d="M64 96 L58 92 L58 100 Z" fill="#0FBF7A"/>
-    <path d="M64 96 L70 92 L70 100 Z" fill="#0FBF7A"/>
-    <circle cx="64" cy="96" r="1.8" fill="#5BFFC0"/>
+    <path d="M64 97 L57 92.5 L57 101.5 Z" fill="#16E59A"/>
+    <path d="M64 97 L71 92.5 L71 101.5 Z" fill="#16E59A"/>
+    <circle cx="64" cy="97" r="2" fill="#D6FFF0"/>
   </g>
 
   <!-- grain + frame -->
   <rect x="2" y="2" width="124" height="124" rx="28" filter="url(#grain)" clip-path="url(#card)" opacity="0.5"/>
-  <rect x="2.5" y="2.5" width="123" height="123" rx="27.5" fill="none" stroke="#3DF7A6" stroke-width="1" opacity="0.25"/>
+  <rect x="3" y="3" width="122" height="122" rx="27" fill="none" stroke="#3DF7A6" stroke-width="1.4" opacity="0.4"/>
 </svg>

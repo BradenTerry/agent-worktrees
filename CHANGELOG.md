@@ -2,6 +2,19 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 1.2.0
+
+- **Terminal tab icon is legible on dark themes** - agent terminal tabs now use
+  a theme-specific glyph (light on dark themes, dark on light) instead of a
+  single `currentColor` SVG that rendered black and vanished on dark backgrounds.
+- **Refreshed panel contrast** - the New Agent button moves to its own
+  right-aligned row and uses the Agent Worktrees glyph instead of a generic
+  sparkle, with assorted contrast/readability tweaks across the panel.
+- **Agents are named by their work summary** - rows and terminals follow
+  Claude's generated session title; the per-row manual rename button was removed.
+- **Docs** - dropped the standalone "New Worktree" action from the README (the
+  panel creates worktrees through the New Agent & Worktree flow).
+
 ## 1.1.0
 
 - **PR status reads as two labeled rows** - the PR summary now shows a header

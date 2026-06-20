@@ -22,11 +22,9 @@ export type AgentStatus = "active" | "waiting" | "idle";
 export interface AgentVM {
   /** Claude session id; ties the panel row to its terminal and state file. */
   sessionId: string;
-  /** Display name: user-given name, else work summary, else a default. */
+  /** Display name: work summary, else a default. */
   label: string;
-  /** User-given name (pencil button or /rename), when set; overrides summary. */
-  name?: string;
-  /** The raw work summary (last prompt), when known. */
+  /** The work summary (Claude's generated title), when known. */
   summary?: string;
   /** Bare names of skills this session has invoked (deduped, in first-use order). */
   skills?: string[];

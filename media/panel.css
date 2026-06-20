@@ -231,7 +231,7 @@ button.accept {
   border-top: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
   margin: 8px 0 0;
 }
-/* Git diff info and the New Agent button share one row. */
+/* Git diff info row. */
 .meta-row {
   display: flex;
   align-items: center;
@@ -244,9 +244,19 @@ button.accept {
   flex: 1 1 auto;
   min-width: 0;
 }
-.meta-row .act.agent {
+/* New Agent button sits on its own line, always pinned to the right edge. */
+.agent-action-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.agent-action-row .act.agent {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+.act.agent .agent-plus {
+  font-size: 14px;
+  line-height: 1;
 }
 /* Git working-tree summary line. */
 .gitline {
@@ -490,9 +500,6 @@ button.accept {
   gap: 4px;
   margin-top: 8px;
   flex-wrap: wrap;
-}
-.actions-spacer {
-  flex: 1 1 auto;
 }
 .act.ghost {
   background: transparent;
