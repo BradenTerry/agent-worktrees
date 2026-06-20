@@ -146,13 +146,6 @@ button.accept {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  cursor: pointer;
-  user-select: none;
-}
-.card-top:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: 2px;
-  border-radius: 3px;
 }
 .chevron {
   display: inline-flex;
@@ -188,6 +181,8 @@ button.accept {
 }
 .branch {
   font-weight: 600;
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -211,6 +206,16 @@ button.accept {
 .badge.warn {
   background: var(--vscode-inputValidation-warningBackground, #6b5300);
   color: var(--vscode-foreground);
+}
+/* Git diff info and the New Agent button share one row. */
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.meta-row .gitline {
+  margin-top: 0;
 }
 /* Git working-tree summary line. */
 .gitline {
@@ -275,40 +280,55 @@ button.accept {
   }
 }
 
-/* Aggregate stat strip above the action buttons. */
-.status-strip {
+/* Collapsible "Agents" bar at the bottom of a card; toggles the agent list and
+   carries the per-status counts. */
+.agents-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.14));
+  cursor: pointer;
+  user-select: none;
+}
+.agents-bar:hover {
+  background: var(
+    --vscode-button-secondaryHoverBackground,
+    rgba(128, 128, 128, 0.24)
+  );
+}
+.agents-bar:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.agents-bar-label {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+.agents-bar-count {
+  opacity: 0.7;
+}
+.agents-bar-stats {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
 }
 .stat {
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
-.stat.total {
-  color: var(--vscode-foreground);
-  font-weight: 600;
-}
-.stat .stat-label {
-  font-weight: 400;
-  opacity: 0.7;
-}
 .stat.zero {
   opacity: 0.4;
 }
-.stat-sep {
-  width: 1px;
-  align-self: stretch;
-  margin: 1px 0;
-  background: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
-}
 
 .agents {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -316,10 +336,19 @@ button.accept {
 .agent-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
+  gap: 8px;
+  padding: 7px 8px;
   border-radius: 4px;
-  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.08));
+  cursor: pointer;
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.06));
+}
+.agent-row:hover {
+  background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.2));
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.agent-row:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
 }
 .agent-row.attention {
   outline: 1px solid var(--vscode-charts-yellow, #cca700);
