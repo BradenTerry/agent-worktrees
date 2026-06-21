@@ -65,15 +65,11 @@
 
   // Branches-overlay filter/sort selections, persisted alongside `expanded` so
   // reopening the overlay restores the last view. `authors` is a list of logins
-  // (multi-select); `reviews` is one of the REVIEW_FILTERS keys or ""; `sort` is
-  // one of the SORT_OPTIONS keys.
+  // (multi-select); `reviews` is one of the REVIEW_FILTERS keys or ""; `openOnly`
+  // and `autoMerge` are boolean preset toggles; `sort` is one of the SORT_OPTIONS
+  // keys.
   const savedState = vscode.getState() || {};
   const branchFilters = {
-    // Default scope: show only branches you created (any local branch, or a
-    // remote-only branch whose PR you authored) plus any whose review involved
-    // you (review requested from you at some point, or already reviewed by you).
-    // On by default; clear it to see every branch. Persisted like the rest.
-    mine: savedState.branchMine !== false,
     // Prune on fetch. On by default; persisted so the checkbox stays set.
     prune: savedState.branchPrune !== false,
     authors: Array.isArray(savedState.branchAuthors)
@@ -83,18 +79,19 @@
       typeof savedState.branchReviews === "string"
         ? savedState.branchReviews
         : "",
-    assignedToYou: savedState.branchAssignedToYou === true,
+    openOnly: savedState.branchOpenOnly === true,
+    autoMerge: savedState.branchAutoMerge === true,
     sort:
       typeof savedState.branchSort === "string" ? savedState.branchSort : "newest",
   };
   function persist() {
     vscode.setState({
       expanded: Array.from(expanded),
-      branchMine: branchFilters.mine,
       branchPrune: branchFilters.prune,
       branchAuthors: branchFilters.authors.slice(),
       branchReviews: branchFilters.reviews,
-      branchAssignedToYou: branchFilters.assignedToYou,
+      branchOpenOnly: branchFilters.openOnly,
+      branchAutoMerge: branchFilters.autoMerge,
       branchSort: branchFilters.sort,
     });
   }
@@ -1010,28 +1007,14 @@
     return (
       branchFilters.authors.length > 0 ||
       !!branchFilters.reviews ||
-      branchFilters.assignedToYou
+      branchFilters.openOnly ||
+      branchFilters.autoMerge
     );
   }
 
   function timeVal(s) {
     const t = s ? Date.parse(s) : NaN;
     return isNaN(t) ? 0 : t;
-  }
-
-  // The "Mine + to review" scope: a branch you created (any local branch, or a
-  // remote-only branch whose PR you authored) plus any whose review involved you
-  // (review was requested from you at some point, or you already reviewed it).
-  // Local branches always qualify since you made them on this machine; remote-
-  // only branches need PR data to decide, so without it they are excluded.
-  function relevantToMe(b, viewer) {
-    if (!b.remoteOnly) return true;
-    const p = b.pr;
-    if (!p) return false;
-    if (viewer && p.author === viewer) return true;
-    if (p.reviewRequestedFromViewer) return true;
-    if (p.reviewedByViewer) return true;
-    return false;
   }
 
   /** Apply the active filters + sort to the branch list, client-side. */
@@ -1044,16 +1027,8 @@
       ? REVIEW_FILTERS.find((r) => r.id === branchFilters.reviews)
       : null;
     const authorSet = pr ? new Set(branchFilters.authors) : new Set();
-    const viewer = (data && data.viewerLogin) || "";
 
     let rows = all.slice();
-
-    // Default scope, applied before the PR-based narrowing. Independent of the
-    // GitHub connection: with no PR data it keeps local branches (yours) and
-    // drops remote-only ones, which is the closest "yours" we can know.
-    if (branchFilters.mine) {
-      rows = rows.filter((b) => relevantToMe(b, viewer));
-    }
 
     if (pr) {
       // While any PR-based filter is active, drop rows with no PR (R16).
@@ -1065,10 +1040,12 @@
         if (authorSet.size && !authorSet.has(p.author)) return false;
         if (reviewFilter && !reviewFilter.test(p)) return false;
         if (
-          branchFilters.assignedToYou &&
-          !(Array.isArray(p.assignees) && p.assignees.indexOf(viewer) !== -1)
+          branchFilters.openOnly &&
+          p.state !== "open" &&
+          p.state !== "draft"
         )
           return false;
+        if (branchFilters.autoMerge && !p.autoMerge) return false;
         return true;
       });
     }
@@ -1154,16 +1131,6 @@
     const sortOpt =
       SORT_OPTIONS.find((s) => s.id === branchFilters.sort) || SORT_OPTIONS[0];
 
-    // Always available, even without a GitHub connection (it still scopes to
-    // local branches). On by default; click to widen to every branch.
-    const scope =
-      '<div class="bpresets">' +
-      '<button class="bchip' +
-      (branchFilters.mine ? " on" : "") +
-      '" data-preset="mine" title="Branches you created plus any whose review involved you">' +
-      "Mine + to review</button>" +
-      "</div>";
-
     let controls = "";
 
     if (pr) {
@@ -1216,17 +1183,13 @@
       const presets =
         '<div class="bpresets">' +
         '<button class="bchip' +
-        (branchFilters.authors.length === 1 &&
-        branchFilters.authors[0] === viewer
-          ? " on"
-          : "") +
-        '" data-preset="yourPrs">Your PRs</button>' +
+        (branchFilters.openOnly ? " on" : "") +
+        '" data-preset="openPr" title="Only branches whose PR is open">' +
+        "Open PR</button>" +
         '<button class="bchip' +
-        (branchFilters.reviews === "awaitingYou" ? " on" : "") +
-        '" data-preset="awaitingReview">Awaiting your review</button>' +
-        '<button class="bchip' +
-        (branchFilters.assignedToYou ? " on" : "") +
-        '" data-preset="assigned">Assigned to you</button>' +
+        (branchFilters.autoMerge ? " on" : "") +
+        '" data-preset="autoMerge" title="Only branches whose PR has auto-merge enabled">' +
+        "Auto merge</button>" +
         "</div>";
 
       controls =
@@ -1250,7 +1213,6 @@
 
     return (
       '<div class="bfilter-bar">' +
-      scope +
       controls +
       menu("sort", "Sort", sortOpt.label, sortItems) +
       "</div>"
@@ -1587,19 +1549,10 @@
       const preset = e.target.closest("[data-preset]");
       if (preset) {
         const kind = preset.getAttribute("data-preset");
-        const viewer = (branchData && branchData.viewerLogin) || "";
-        if (kind === "mine") {
-          branchFilters.mine = !branchFilters.mine;
-        } else if (kind === "yourPrs") {
-          const on =
-            branchFilters.authors.length === 1 &&
-            branchFilters.authors[0] === viewer;
-          branchFilters.authors = on || !viewer ? [] : [viewer];
-        } else if (kind === "awaitingReview") {
-          branchFilters.reviews =
-            branchFilters.reviews === "awaitingYou" ? "" : "awaitingYou";
-        } else if (kind === "assigned") {
-          branchFilters.assignedToYou = !branchFilters.assignedToYou;
+        if (kind === "openPr") {
+          branchFilters.openOnly = !branchFilters.openOnly;
+        } else if (kind === "autoMerge") {
+          branchFilters.autoMerge = !branchFilters.autoMerge;
         }
         branchPage = 0;
         persist();

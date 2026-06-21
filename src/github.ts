@@ -380,6 +380,8 @@ export interface BranchPrInfo {
   reviewedByViewer: boolean;
   /** Viewer is a requested reviewer. */
   reviewRequestedFromViewer: boolean;
+  /** Auto-merge is enabled: GitHub will merge once required checks/reviews pass. */
+  autoMerge: boolean;
 }
 
 /** The GraphQL query: a page of the repo's PRs (open, merged and closed) with
@@ -394,6 +396,7 @@ const PRS_BY_BRANCH_QUERY = `query($owner:String!,$name:String!,$after:String){
       pageInfo { hasNextPage endCursor }
       nodes{
         number title url isDraft state createdAt updatedAt headRefName
+        autoMergeRequest { enabledAt }
         author { login }
         assignees(first:20){ nodes { login } }
         comments { totalCount }
@@ -440,6 +443,7 @@ interface GqlPr {
   createdAt?: string;
   updatedAt?: string;
   headRefName: string;
+  autoMergeRequest?: { enabledAt?: string } | null;
   author?: GqlLogin;
   assignees?: { nodes?: GqlLogin[] };
   comments?: { totalCount?: number };
@@ -603,6 +607,7 @@ export async function fetchPrsByBranch(
         .filter((l): l is string => !!l),
       reviewedByViewer,
       reviewRequestedFromViewer,
+      autoMerge: !!pr.autoMergeRequest,
     };
 
     // Key by head ref. Nodes arrive UPDATED_AT desc, so the first seen is the
