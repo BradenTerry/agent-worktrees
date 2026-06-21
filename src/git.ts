@@ -52,10 +52,14 @@ export interface GitStatus {
  * worktrees of a repo share one object store, so a single fetch at any worktree
  * refreshes every worktree's behind/ahead distance. Never throws — offline or a
  * missing remote simply leaves the refs (and counts) as they were.
+ *
+ * `--prune` drops `refs/remotes/origin/*` refs for branches deleted on the
+ * remote, so the Branches view stops showing phantom "remote only" / "local +
+ * remote" branches that no longer exist (and that a remote delete would fail on).
  */
 export async function fetchRemotes(cwd: string): Promise<void> {
   try {
-    await execAsync("git fetch --all --quiet", { cwd, timeout: 15_000 });
+    await execAsync("git fetch --all --prune --quiet", { cwd, timeout: 15_000 });
   } catch {
     /* offline / no remote / timeout: keep stale refs */
   }
@@ -328,6 +332,11 @@ export function parseGitHubRemote(url: string): RemoteInfo | undefined {
  * (instead of -d) so an unmerged local branch is still removed. The local
  * deletion runs before the remote push; each step throws with git's trimmed
  * stderr on failure.
+ *
+ * Remote deletion is tolerant of a stale tracking ref: if origin/<name> no
+ * longer exists on the remote (the push fails with "remote ref does not
+ * exist"), the goal is already met, so instead of failing we prune the local
+ * `refs/remotes/origin/<name>` so the branch stops showing as remote.
  */
 export async function deleteBranch(
   repoRoot: string,
@@ -347,7 +356,17 @@ export async function deleteBranch(
     await run(`git branch ${opts.force ? "-D" : "-d"} ${q(name)}`);
   }
   if (opts.remote) {
-    await run(`git push origin --delete ${q(name)}`);
+    try {
+      await run(`git push origin --delete ${q(name)}`);
+    } catch (err) {
+      // Already gone on the remote (stale tracking ref): drop the local mirror
+      // so the UI updates, and treat the delete as done rather than erroring.
+      if (/remote ref does not exist/i.test((err as Error).message)) {
+        await run(`git branch -dr ${q(`origin/${name}`)}`).catch(() => {});
+      } else {
+        throw err;
+      }
+    }
   }
 }
 

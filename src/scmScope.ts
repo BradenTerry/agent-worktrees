@@ -57,9 +57,12 @@ const SETTLE_TRIES = 24;
 const SETTLE_DELAY_MS = 25;
 
 /**
- * Scope Source Control to `target`. Opens it, swaps out a lone previous repo,
- * self-heals if that close drops the target, and waits for the Git model to
- * reflect the result before returning.
+ * Scope Source Control to `target`: open it, close every other open repo so the
+ * view shows only this worktree, self-heal if a close drops the target
+ * (worktree-vs-main dedupe), and wait for the Git model to settle.
+ *
+ * This always reduces to the single target — the button is "show only this
+ * worktree in Source Control", so leaving other repos open would not honor it.
  */
 export async function applyScopeScm(
   model: ScmModel,
@@ -68,29 +71,23 @@ export async function applyScopeScm(
 ): Promise<void> {
   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 
-  // Decide swap-vs-keep from the scope *before* we touch anything.
-  const wasMultiple = model.list().length > 1;
-
   await model.open(target);
-  // Let the open register before we close the old scope, so the close loop sees
-  // the target and we never tear down the only repo prematurely.
+  // Let the open register before we close the others, so the close loop sees the
+  // target and we never tear down the only repo prematurely.
   await settle(model, target, false, sleep);
 
-  if (!wasMultiple) {
-    for (const root of model.list()) {
-      if (root !== target) await model.close(root);
-    }
-    // If closing the previous single repo dropped the target (worktree-vs-main
-    // dedupe), re-open it now that the conflicting repo is gone. This is the fix
-    // for the "select again to make it stick" bug.
-    if (!model.list().includes(target)) {
-      await model.open(target);
-    }
+  for (const root of model.list()) {
+    if (root !== target) await model.close(root);
+  }
+  // If closing a repo that shares the target's git dir dropped the target
+  // (worktree-vs-main dedupe), re-open it now that the conflict is gone. This is
+  // the fix for the "select again to make it stick" bug.
+  if (!model.list().includes(target)) {
+    await model.open(target);
   }
 
-  // Wait for the model to reflect the final scope: target present, and the only
-  // one when we swapped a single repo.
-  await settle(model, target, !wasMultiple, sleep);
+  // Wait for the model to reflect the final scope: the target is the only repo.
+  await settle(model, target, true, sleep);
 }
 
 /**

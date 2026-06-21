@@ -56,13 +56,13 @@ test("regression: main -> worktree sticks on the first click despite dedupe", as
   );
 });
 
-test("multiple repos open: scoping is non-destructive (keeps the others)", async () => {
+test("multiple repos open: scoping reduces to only the target", async () => {
+  // "Show only this worktree" must close the others, even when several repos
+  // are open, so the Source Control view ends up showing just the target.
   const other = "/repo-other";
   const m = makeModel({ open: [MAIN, other] });
   await applyScopeScm(m, WT, opts);
-  const repos = m.repos();
-  assert.ok(repos.includes(WT), "target is opened");
-  assert.ok(repos.includes(MAIN) && repos.includes(other), "others are kept");
+  assert.deepStrictEqual(m.repos(), [WT]);
 });
 
 test("re-scoping to the already-active sole repo is a no-op", async () => {
