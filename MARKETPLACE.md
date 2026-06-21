@@ -71,10 +71,11 @@ remote-only branch checks it out as a new local tracking branch.
 
 When the GitHub integration is connected, each branch row can also show its open
 PR's status — the same title, state badge, CI checks, review and comment summary
-you see on the worktree cards. To keep the view fast and put you in control of
-when it calls GitHub, opening it does **not** fetch PR status: the header reads
-**Last refreshed: Never** until you click **Refresh GitHub** (see below), after
-which the rows fill in and the label shows when you last refreshed. A filter and
+you see on the worktree cards. The branch list paints instantly from local git,
+then PR status loads in the background: opening the view starts a **Refresh
+GitHub** of PR/CI status on its own (the button spins until it lands, and the
+**Last refreshed** label fills in with the time). You can re-run it anytime from
+that button (see below). A filter and
 sort bar across the top lets you slice the
 list without any extra loading. Nothing is filtered by default — every branch is
 listed until you make a selection:
@@ -102,12 +103,12 @@ also removes tracking refs for branches deleted on the remote, so merged-and-
 deleted branches stop lingering as **remote only** rows.
 
 **Refresh GitHub.** When you have connected a GitHub token, a **Refresh GitHub**
-button appears in the header beside a **Last refreshed** label. It is the only
-thing that calls the GitHub API for this view: the label reads **Never** until
-your first refresh, then shows the time of the most recent one. Each click
-re-queries the GitHub API for current PR and CI status on its own, without
-running a git fetch — so you can refresh just the PR view, or just your local
-branch state, independently.
+button appears in the header beside a **Last refreshed** label. The view refreshes
+PR and CI status automatically when it opens, and this button re-queries on demand
+afterwards. The label reads **Never** only until that first on-open refresh lands,
+then shows the time of the most recent one. The GitHub refresh runs without a git
+fetch — so you can refresh just the PR view, or just your local branch state,
+independently.
 
 **Delete branches.** Every branch that exists on your machine shows a **Delete
 Local** button that removes the local branch only. The branch on the remote is

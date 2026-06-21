@@ -1103,14 +1103,20 @@ export class WorktreeWebviewProvider
   private async onBranchesMessage(msg: ActionMessage): Promise<void> {
     if (msg.type !== "action") return;
     switch (msg.action) {
-      case "loadBranches":
-        // Post the current (local, fast) list right away so the tab paints, then
-        // refresh local git state in the background and re-post. Opening the
-        // panel never calls the GitHub API: PR/CI status stays "Never" refreshed
-        // until the user clicks Refresh GitHub.
-        await this.postBranches(false);
+      case "loadBranches": {
+        // Opening the tab paints the fast local list immediately, then (when a
+        // token is connected) auto-runs a Refresh GitHub — the Refresh GitHub
+        // button spins until the PR/CI data lands. No git fetch on open: that
+        // stays a manual action. The posts are awaited in order (not raced) so
+        // the slow GitHub post isn't dropped by the branchPostSeq staleness
+        // guard; the background sidebar refresh runs last.
+        const github = await connection();
+        const auto = this.prService.isEnabled() && github.hasToken;
+        await this.postBranches(false, { githubRefreshing: auto });
+        if (auto) await this.postBranches(true);
         void this.refresh(false);
         return;
+      }
       case "fetchBranches":
         // The explicit Fetch button (git only). `value` carries the Prune
         // checkbox; fetch remotes then re-post so ahead/behind, diffs and merge
@@ -1144,7 +1150,10 @@ export class WorktreeWebviewProvider
    * GitHub. With no cache yet, false means no PR data and a "Never" refresh time.
    * Any PR failure leaves branches with `pr` null and still posts — never throws.
    */
-  private async postBranches(refetchPrs = false): Promise<void> {
+  private async postBranches(
+    refetchPrs = false,
+    flags: { githubRefreshing?: boolean } = {}
+  ): Promise<void> {
     if (!this.branchesPanel) return;
     // Claim this post's place in line. Anything that started earlier and resolves
     // after a newer post must not overwrite it (see branchPostSeq).
@@ -1189,6 +1198,7 @@ export class WorktreeWebviewProvider
     }
 
     data.lastGithubRefresh = this.branchPrsAt;
+    if (flags.githubRefreshing) data.githubRefreshing = true;
 
     // A newer post superseded this one while we awaited git/GitHub; drop this
     // stale result rather than letting it overwrite the fresher render. (The

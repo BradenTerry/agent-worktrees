@@ -118,11 +118,14 @@
   // Actions that kick off real (often network/git) work the user waits on. Their
   // button gets an in-progress spinner on click; it clears when the next payload
   // re-renders the view (or via a safety timeout if no re-render follows).
+  // Note: "openBranches" is intentionally absent. It opens the branches editor
+  // tab (which paints instantly), but the sidebar never re-renders on that
+  // action, so a spinner on its button would hang until the safety timeout. The
+  // branches view shows its own load state instead.
   const BUSY_ACTIONS = new Set([
     "agent",
     "agentWorktree",
     "openWindow",
-    "openBranches",
     "worktreeFromBranch",
     "fetchBranches",
     "refreshGithub",
@@ -1062,8 +1065,9 @@
     return isNaN(t) ? 0 : t;
   }
 
-  // "Last refreshed" label for the GitHub PR data. The branches view never
-  // fetches on open, so this reads "Never" until the user clicks Refresh GitHub.
+  // "Last refreshed" label for the GitHub PR data. The branches view fetches on
+  // open (when a token is connected) and on each Refresh GitHub click; this reads
+  // "Never" only until that first on-open fetch lands.
   function lastRefreshedText(data) {
     const t = data && data.lastGithubRefresh;
     if (!t) return "Never";
@@ -1510,14 +1514,19 @@
       " Delete gone</button>" +
       // Refresh GitHub is the API-only counterpart to the git-only Fetch: it
       // re-polls PR/CI status without a git fetch. Only useful (and only shown)
-      // when a token is stored. The "Last refreshed" time sits directly below it
-      // to make clear the view does not call GitHub until this button is pressed.
+      // when a token is stored. PR/CI status is fetched on open and on each click;
+      // it spins (data.githubRefreshing) while the on-open fetch is in flight. The
+      // "Last refreshed" time sits directly below it.
       (data && data.github && data.github.hasToken
         ? '<div class="branches-action-stack">' +
-          '<button class="branches-refresh" data-action="refreshGithub" title="Re-query the GitHub API to refresh PR and CI status">' +
-          icons.pr +
+          '<button class="branches-refresh' +
+          (data.githubRefreshing ? " busy" : "") +
+          '" data-action="refreshGithub"' +
+          (data.githubRefreshing ? " disabled" : "") +
+          ' title="Re-query the GitHub API to refresh PR and CI status">' +
+          (data.githubRefreshing ? icons.spinner : icons.pr) +
           " Refresh GitHub</button>" +
-          '<span class="branches-lastrefresh" title="When the GitHub PR and CI status was last refreshed. The branches view does not call GitHub until you click Refresh GitHub.">Last refreshed: ' +
+          '<span class="branches-lastrefresh" title="When the GitHub PR and CI status was last refreshed. PR/CI status is refreshed when the view opens and whenever you click Refresh GitHub.">Last refreshed: ' +
           esc(lastRefreshedText(data)) +
           "</span>" +
           "</div>"
