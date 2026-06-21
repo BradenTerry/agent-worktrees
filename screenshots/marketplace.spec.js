@@ -15,20 +15,20 @@ test("overview - worktrees, git status, PRs and agents", async ({ page }) => {
   const data = overviewData();
   await mountPanel(page, { data });
   // Capture the panel body (#root) at its natural content height.
-  await page.locator("#root").screenshot({ path: shot("overview.png") });
+  await page.locator("#root").screenshot({ path: shot("overview.png"), animations: "disabled" });
 });
 
 test("pr-status - CI checks and review on the PR row", async ({ page }) => {
   const data = overviewData();
   await mountPanel(page, { data });
   // Crop to the worktree with the richest PR row for a focused close-up.
-  await page.locator(".card").nth(1).screenshot({ path: shot("pr-status.png") });
+  await page.locator(".card").nth(1).screenshot({ path: shot("pr-status.png"), animations: "disabled" });
 });
 
 test("settings - GitHub PR integration", async ({ page }) => {
   const data = overviewData();
   await mountPanel(page, { data, message: { type: "openSettings" } });
-  await page.locator("#root").screenshot({ path: shot("settings.png") });
+  await page.locator("#root").screenshot({ path: shot("settings.png"), animations: "disabled" });
 });
 
 test("branches - all branches with PR status and filters", async ({ page }) => {
@@ -42,7 +42,7 @@ test("branches - all branches with PR status and filters", async ({ page }) => {
     width: 1000,
     height: 760,
   });
-  await page.locator("#root").screenshot({ path: shot("branches.png") });
+  await page.locator("#root").screenshot({ path: shot("branches.png"), animations: "disabled" });
 });
 
 test("skills - per-agent skills modal", async ({ page }) => {
@@ -53,5 +53,5 @@ test("skills - per-agent skills modal", async ({ page }) => {
   await page.locator('.skill-chip[data-session="s-co-1"]').click();
   await page.waitForSelector(".modal-backdrop .skill-list");
   // Full viewport: the dimmed panel stays visible behind the centered modal.
-  await page.screenshot({ path: shot("skills.png") });
+  await page.screenshot({ path: shot("skills.png"), animations: "disabled" });
 });

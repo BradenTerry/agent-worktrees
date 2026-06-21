@@ -357,6 +357,13 @@ button.accept {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-active) 0%, transparent);
   }
 }
+/* Honor reduced-motion: keep the dots colored, just stop them pulsing. */
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.active,
+  .pr-seg.pending svg {
+    animation: none;
+  }
+}
 
 /* Collapsible "Agents" bar at the bottom of a card; toggles the agent list and
    carries the per-status counts. */
@@ -788,6 +795,21 @@ button svg {
 .pr-seg.pending svg {
   width: 8px;
   height: 8px;
+  /* CI is still running: pulse the dot so "checks in progress" reads at a glance,
+     mirroring the active agent's pulsing status dot. */
+  transform-origin: center;
+  animation: dot-pulse 1.4s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.82);
+  }
 }
 .pr-seg.required {
   color: var(--vscode-charts-yellow, #cca700);

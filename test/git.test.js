@@ -164,9 +164,39 @@ test("listBranches reports ahead/behind and diff vs the default branch", async (
   // main is its own base, so no divergence and no diff.
   assert.strictEqual(byName["main"].ahead, 0);
   assert.strictEqual(byName["main"].insertions, 0);
-  // The default branch is flagged so the UI can protect it from deletion.
-  assert.strictEqual(byName["main"].isDefault, true, "main is the default branch");
-  assert.strictEqual(topic.isDefault, false, "topic is not the default branch");
+  // With no remote there is no origin/HEAD, so nothing is flagged as the
+  // default branch (we trust git, not a guessed name).
+  assert.strictEqual(byName["main"].isDefault, false);
+  assert.strictEqual(topic.isDefault, false);
+});
+
+test("listBranches flags the default branch from origin/HEAD", async () => {
+  // A bare "remote" plus a clone, so origin/HEAD actually points at the default
+  // branch the way a real checkout does.
+  const remote = path.join(dir, "origin.git");
+  git(dir, ["init", "--bare", "-b", "trunk", remote]);
+
+  const seed = path.join(dir, "seed");
+  fs.mkdirSync(seed);
+  git(seed, ["init", "-b", "trunk"]);
+  git(seed, ["config", "user.email", "t@example.com"]);
+  git(seed, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(seed, "a.txt"), "hi\n");
+  git(seed, ["add", "."]);
+  git(seed, ["commit", "-m", "init"]);
+  git(seed, ["remote", "add", "origin", remote]);
+  git(seed, ["push", "-u", "origin", "trunk"]);
+
+  const clone = path.join(dir, "clone");
+  git(dir, ["clone", remote, clone]); // clone sets refs/remotes/origin/HEAD
+  git(clone, ["checkout", "-b", "side"]);
+
+  const byName = Object.fromEntries(
+    (await listBranches(clone)).map((b) => [b.name, b])
+  );
+  // The default branch is whatever origin/HEAD names ("trunk" here), not "main".
+  assert.strictEqual(byName["trunk"].isDefault, true, "trunk is the default");
+  assert.strictEqual(byName["side"].isDefault, false);
 });
 
 test("unpushedCommitCount counts commits not on the base branch", async () => {
