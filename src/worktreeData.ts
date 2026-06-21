@@ -212,9 +212,12 @@ export interface BranchData {
    *  and the repo's branches page. */
   repoUrl?: string;
   /** Epoch ms of the last successful GitHub PR fetch for the branches view, or
-   *  undefined if it has never been fetched ("Never"). Only the explicit
-   *  Refresh GitHub button triggers a fetch, so this stays "Never" on open. */
+   *  undefined if it has never been fetched ("Never"). */
   lastGithubRefresh?: number;
+  /** True while an on-load GitHub refresh is in flight, so the view shows the
+   *  Refresh GitHub button as busy until the follow-up post (with the fetched PR
+   *  data) replaces it. */
+  githubRefreshing?: boolean;
 }
 
 /**
