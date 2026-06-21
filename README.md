@@ -162,21 +162,26 @@ panel as a `{ type: "branches" }` payload:
   diff from `git diff --numstat base...tip`. The per-branch git calls run with
   bounded concurrency so a many-branch repo doesn't spawn a process per branch at
   once, and any per-branch failure leaves that branch's counts at zero.
-- When the PR integration is enabled and a token is connected,
-  `github.fetchPrsByBranch` issues a batched `POST /graphql` request (paged from
-  most-recently-updated, so one call for small repos and a bounded few for large
-  ones) that returns the repo's PRs (open, merged and closed) with their rollups
-  (state, check rollup, comment count) and the fields the filters need — author,
-  created/updated timestamps, assignee logins, review author/state,
-  requested-reviewer logins, and `viewer.login`. The result is mapped to branches
-  by head ref client-side. A transport or GraphQL failure degrades the whole view
-  to "no PR data"; rows still render.
+- PR data is **not** fetched on open. Opening the tab never calls the GitHub
+  API: rows render with no PR status and the header shows **Last refreshed:
+  Never** until the user clicks **Refresh GitHub** (see below). This keeps the
+  view cheap to open and puts the user in control of when the API is hit.
+- When the user refreshes and the PR integration is enabled with a token
+  connected, `github.fetchPrsByBranch` issues a batched `POST /graphql` request
+  (paged from most-recently-updated, so one call for small repos and a bounded
+  few for large ones) that returns the repo's PRs (open, merged and closed) with
+  their rollups (state, check rollup, comment count) and the fields the filters
+  need — author, created/updated timestamps, assignee logins, review
+  author/state, requested-reviewer logins, and `viewer.login`. The result is
+  mapped to branches by head ref client-side, and the fetch time is surfaced as
+  the header's **Last refreshed** label. A transport or GraphQL failure degrades
+  the whole view to "no PR data"; rows still render.
 
 This GraphQL path is used **only** by the branches view. The per-worktree PR
 badges on the cards keep the existing per-branch REST `fetchPr` path unchanged,
 so the two are separate code paths.
 
-Filtering and sorting (author, reviews, sort, the Open PR / Auto merge chips) run
+Filtering and sorting (author, reviews, sort, the Open PRs / Auto merge chips) run
 entirely client-side over that single cached payload — changing a filter or sort
 issues no new network requests. Nothing is selected by default: the view lists
 every branch until you pick a filter. The **Author** select is a multi-select
@@ -258,19 +263,24 @@ round-trip.
 (with `--prune` unless disabled), so stale `refs/remotes/origin/*` (branches
 deleted on the remote) are dropped and no longer surface as phantom "remote only"
 / "local + remote" rows. Opening the tab (`loadBranches`) posts the local list
-immediately, then runs a forced `refresh(true)` in the background to reconcile
-with the remote. The header **Fetch** button posts `fetchBranches` with the
+immediately, then runs a `refresh(false)` in the background to reconcile local
+git state — without hitting the GitHub API. The header **Fetch** button posts
+`fetchBranches` with the
 **Prune** checkbox state; the provider fetches with the chosen prune setting, then
 re-reads both views (without a second fetch) and re-posts the branches reusing the
 cached PR map (`postBranches(false)`) — so the git fetch never hits the GitHub
 API. The Prune choice is persisted in the webview state.
 
-**Refresh GitHub (decoupled).** PR/CI status is refreshed by its own **Refresh
-GitHub** button, shown only when a token is stored (`github.hasToken`). It posts
-`refreshGithub`, which calls `postBranches(true)` to re-run `fetchPrsByBranch`
-without any git fetch. This is the API-only counterpart to the git-only Fetch;
-the two are independent so refreshing PR state never triggers a fetch and vice
-versa. (Background watcher-driven refreshes still reuse the cached PR map.)
+**Refresh GitHub (the only API trigger).** PR/CI status is fetched **only** by
+the **Refresh GitHub** button, shown next to a **Last refreshed** label (the
+fetch time, or **Never** before the first refresh) when a token is stored
+(`github.hasToken`). It posts `refreshGithub`, which is the sole caller of
+`postBranches(true)` — the only path that runs `fetchPrsByBranch` and stamps
+`branchPrsAt`. Every other path (opening the tab, the git Fetch, watcher-driven
+refreshes, worktree/branch mutations) calls `postBranches(false)` and reuses the
+cached PR map, so they re-render rows without touching the GitHub API. This is
+the API-only counterpart to the git-only Fetch; the two are independent so
+refreshing PR state never triggers a fetch and vice versa.
 
 **Performance.** The webview only rebuilds the DOM when the posted payload
 actually changed (it compares a JSON signature, mirroring the settings view's
