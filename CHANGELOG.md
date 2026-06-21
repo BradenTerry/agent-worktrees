@@ -2,6 +2,16 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.7.0
+
+- **Branches view refreshes GitHub on open** - opening the tab paints your local
+  branches instantly, then automatically re-polls PR and CI status in the
+  background, with the **Refresh GitHub** button spinning until it lands. The git
+  Fetch stays a manual action, so opening the view never runs a git fetch.
+- **Branches button no longer hangs with a spinner** - the sidebar **Branches**
+  button just opens the view now (it makes no calls), so it no longer spins until
+  a timeout while the editor tab loads.
+
 ## 2.6.0
 
 - **Branches view no longer calls GitHub on open** - opening the tab reads your
