@@ -11,6 +11,7 @@ const {
   findRepoRoot,
   listBranches,
   deleteBranch,
+  unpushedCommitCount,
 } = require("../out/git.js");
 
 function git(cwd, args) {
@@ -131,6 +132,63 @@ test("listBranches never surfaces a phantom 'origin' from origin/HEAD", async ()
     "no phantom 'origin' branch"
   );
   assert.ok(!branches.some((b) => b.name === "HEAD"));
+});
+
+test("listBranches reports ahead/behind and diff vs the default branch", async () => {
+  // A self-contained repo: main with one file, a topic branch ahead by one
+  // commit that adds two lines. No remote, so the compare base falls back to the
+  // local default branch (main).
+  const r = path.join(dir, "enrich");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hello\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  git(r, ["branch", "topic"]);
+  git(r, ["checkout", "topic"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hello\nworld\nfoo\n");
+  git(r, ["commit", "-am", "extend"]);
+  git(r, ["checkout", "main"]);
+
+  const byName = Object.fromEntries(
+    (await listBranches(r)).map((b) => [b.name, b])
+  );
+  const topic = byName["topic"];
+  assert.ok(topic, "topic is listed");
+  assert.strictEqual(topic.ahead, 1, "one commit ahead of main");
+  assert.strictEqual(topic.behind, 0);
+  assert.strictEqual(topic.insertions, 2, "two lines added vs main");
+  assert.strictEqual(topic.deletions, 0);
+  // main is its own base, so no divergence and no diff.
+  assert.strictEqual(byName["main"].ahead, 0);
+  assert.strictEqual(byName["main"].insertions, 0);
+});
+
+test("unpushedCommitCount counts commits not on the base branch", async () => {
+  const r = path.join(dir, "unpushed");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hello\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  git(r, ["checkout", "-b", "work"]);
+  fs.writeFileSync(path.join(r, "b.txt"), "one\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "c1"]);
+  fs.writeFileSync(path.join(r, "c.txt"), "two\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "c2"]);
+  git(r, ["checkout", "main"]);
+
+  // No upstream configured, so it falls back to the default branch (main): two
+  // commits on work are not reachable from main.
+  assert.strictEqual(await unpushedCommitCount(r, "work"), 2);
+  // main has nothing beyond itself.
+  assert.strictEqual(await unpushedCommitCount(r, "main"), 0);
 });
 
 test("findRepoRoot resolves a worktree to a git top-level", async () => {

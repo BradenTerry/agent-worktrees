@@ -53,10 +53,16 @@ state, and its running agents in one view.
   and expands to the individual sessions on demand.
 - **Branches view** — a toolbar button opens a dedicated editor tab listing every
   branch (local plus remote-only `origin/*`). Each row shows whether a worktree
-  already exists, and branches without one get a **Create worktree & start agent**
-  action that creates the worktree in the current window and launches a Claude
-  agent. When the PR integration is connected, rows carry their open PR's rollup
-  and the view offers client-side author/reviews filters, sorting, and preset chips.
+  already exists, ahead/behind and the +/- line diff vs the branch's base, a
+  **Delete** action (any local branch, or a remote-only branch whose PR you
+  authored), and — for branches without a worktree — a **Create worktree & start
+  agent** action that creates the worktree in the current window and launches a
+  Claude agent. A header **Fetch** button with a **Prune** toggle refreshes from
+  the remote. By default a **Mine + to review** scope narrows the list to branches
+  you created (local branches, or remote-only branches whose PR you authored) plus
+  any whose review involved you; clear the chip to see every branch. When the PR
+  integration is connected, rows carry their open PR's rollup and the view offers
+  client-side author/reviews filters, sorting, and preset chips.
 
 ## Agent status from hooks
 
@@ -138,9 +144,15 @@ panel as a `{ type: "branches" }` payload:
 
 - `git.listBranches` enumerates every local branch plus every remote-only
   `origin/*` branch (each shown once by short name) and annotates whether a
-  worktree already holds it, whether a matching `origin/<name>` exists (so the
-  row can tag itself "local only" / "local + remote" / "remote only"), and the
-  ahead/behind distance from `%(upstream:track)` for the ↑/↓ indicator.
+  worktree already holds it and whether a matching `origin/<name>` exists (so the
+  row can tag itself "local only" / "local + remote" / "remote only"). It then
+  enriches each branch with ahead/behind and a +/- line diff against its compare
+  base — its upstream when configured, otherwise the repo's default branch
+  (`origin/HEAD`). Ahead/behind comes from `%(upstream:track)` when there is an
+  upstream and from `git rev-list --left-right --count base...tip` otherwise; the
+  diff from `git diff --numstat base...tip`. The per-branch git calls run with
+  bounded concurrency so a many-branch repo doesn't spawn a process per branch at
+  once, and any per-branch failure leaves that branch's counts at zero.
 - When the PR integration is enabled and a token is connected,
   `github.fetchPrsByBranch` issues a batched `POST /graphql` request (paged from
   most-recently-updated, so one call for small repos and a bounded few for large
@@ -155,12 +167,16 @@ This GraphQL path is used **only** by the branches view. The per-worktree PR
 badges on the cards keep the existing per-branch REST `fetchPr` path unchanged,
 so the two are separate code paths.
 
-Filtering and sorting (author, reviews, sort, preset chips) run entirely
-client-side over that single cached payload — changing a filter or sort issues
-no new network requests. While any PR filter or PR sort is active, branches with
-no open PR are hidden. With the integration off or no token connected, only the
-branch-name sort is offered and the PR-based controls are hidden. The selected
-filters and sort persist across reopens via the webview state.
+Filtering and sorting (the **Mine + to review** scope, author, reviews, sort,
+preset chips) run entirely client-side over that single cached payload — changing
+a filter or sort issues no new network requests. The **Mine + to review** scope
+is on by default: it keeps a branch when it has a local ref, or (for a
+remote-only branch) when its PR author is the viewer, the viewer's review was
+requested, or the viewer already reviewed it; with no PR data it falls back to
+local branches. While any PR filter or PR sort is active, branches with no open PR
+are hidden. With the integration off or no token connected, only the branch-name
+sort is offered and the PR-based controls are hidden (the scope chip stays). The
+selected filters and sort persist across reopens via the webview state.
 
 A branch with no worktree shows a **Create worktree & start agent** action; one
 that already has a worktree shows a **Worktree exists** marker plus a **Start
@@ -172,18 +188,25 @@ local tracking branch for a remote-only branch), starts a Claude agent in it via
 the existing `agent(dir)` flow in the current window, then refreshes the sidebar
 and re-posts the branch data so the row flips to the marker.
 
-**Deleting branches.** A row for a branch the signed-in user authored (its PR
-author equals `viewer.login`) shows a **Delete** action. Git carries no branch
-ownership, so PR authorship is the only signal — branches with no PR, or when the
-GitHub integration is off, never show it. Clicking it posts a `deleteBranch`
-message carrying the branch name and which sides exist (`remoteOnly`,
-`hasRemote`). The provider then prompts via a modal: when both a local ref and
-`origin/<name>` exist the user picks **Local + remote / Local only / Remote
-only**; otherwise a single confirm. `git.deleteBranch` runs `git branch -d`
-(local) and/or `git push origin --delete` (remote); an unmerged local branch is
-refused by `-d` and the provider offers a force delete (`-D`). A remote delete
-whose `origin/<name>` is already gone (a stale tracking ref) is treated as done:
-instead of erroring with "remote ref does not exist", the stale
+**Deleting branches.** Every local branch shows a **Delete** action (a local ref
+is the user's by virtue of existing on this machine); a remote-only branch shows
+one only when the signed-in user authored its PR (`pr.author === viewer.login`),
+since git carries no branch ownership for remote refs. Clicking it posts a
+`deleteBranch` message carrying the branch name, which sides exist (`remoteOnly`,
+`hasRemote`), and whether its PR is `merged`. The provider then prompts via a
+modal: when both a local ref and `origin/<name>` exist the user picks **Local +
+remote / Local only / Remote only**; otherwise a single confirm.
+
+Before a local delete it computes `unpushedCommitCount` — commits not on the
+branch's upstream, or (with no upstream) not on the default branch — and, when
+non-zero and the PR is not merged, surfaces the count in the confirm and
+force-deletes on consent. A merged PR also force-deletes without the "not fully
+merged" prompt: a squash-merge leaves the branch's commits unreachable from the
+base, so `git branch -d` would refuse even though the work landed. `git.deleteBranch`
+runs `git branch -d`/`-D` (local) and/or `git push origin --delete` (remote); a
+residual unmerged refusal still falls back to an explicit force prompt. A remote
+delete whose `origin/<name>` is already gone (a stale tracking ref) is treated as
+done: instead of erroring with "remote ref does not exist", the stale
 `refs/remotes/origin/<name>` is pruned. Both views refresh afterward so the row
 drops or flips to remote-only.
 
@@ -194,14 +217,16 @@ survive), and the header carries a **Branches on GitHub** link to `/branches`.
 These are plain `<a target="_blank">` anchors that VS Code opens externally — no
 round-trip.
 
-**Refresh and fetch.** `fetchRemotes` runs `git fetch --all --prune`, so stale
-`refs/remotes/origin/*` (branches deleted on the remote) are dropped and no
-longer surface as phantom "remote only" / "local + remote" rows. Opening the tab
-(`loadBranches`) posts the local list immediately, then runs a forced
-`refresh(true)` in the background to reconcile with the remote. The header
-refresh button posts `refreshBranches`, the same forced `refresh(true)`: a
-`git fetch --prune` for fresh ahead/behind and pruned remote refs plus a re-fetch
-of PR data, re-posted to both views.
+**Refresh and fetch.** `fetchRemotes(cwd, { prune })` runs `git fetch --all`
+(with `--prune` unless disabled), so stale `refs/remotes/origin/*` (branches
+deleted on the remote) are dropped and no longer surface as phantom "remote only"
+/ "local + remote" rows. Opening the tab (`loadBranches`) posts the local list
+immediately, then runs a forced `refresh(true)` in the background to reconcile
+with the remote. The header **Fetch** button posts `fetchBranches` with the
+**Prune** checkbox state; the provider fetches with the chosen prune setting, then
+re-reads both views (without a second fetch) and re-fetches PR data so a
+newly-merged PR is reflected — which is what lets a subsequent delete skip the
+unmerged prompt. The Prune choice is persisted in the webview state.
 
 **Performance.** The webview only rebuilds the DOM when the posted payload
 actually changed (it compares a JSON signature, mirroring the settings view's

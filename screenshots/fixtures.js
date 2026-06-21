@@ -208,6 +208,8 @@ function branchesData() {
         hasWorktree: false,
         ahead: 2,
         behind: 0,
+        insertions: 142,
+        deletions: 18,
         pr: {
           number: 486,
           title: "Faceted search filters",
@@ -238,6 +240,8 @@ function branchesData() {
         worktreePath: REPO + "-checkout",
         ahead: 3,
         behind: 0,
+        insertions: 310,
+        deletions: 96,
         pr: {
           number: 482,
           title: "Checkout redesign",
@@ -268,6 +272,8 @@ function branchesData() {
         worktreePath: REPO + "-login-fix",
         ahead: 1,
         behind: 2,
+        insertions: 24,
+        deletions: 12,
         pr: {
           number: 479,
           title: "Fix login race",
@@ -295,8 +301,10 @@ function branchesData() {
         remoteOnly: false,
         hasRemote: false,
         hasWorktree: false,
-        ahead: 0,
+        ahead: 4,
         behind: 0,
+        insertions: 12,
+        deletions: 12,
         pr: {
           number: 471,
           title: "Bump dependencies",
@@ -324,8 +332,10 @@ function branchesData() {
         remoteOnly: true,
         hasRemote: true,
         hasWorktree: false,
-        ahead: 0,
-        behind: 0,
+        ahead: 5,
+        behind: 1,
+        insertions: 64,
+        deletions: 5,
         pr: {
           number: 468,
           title: "Emit analytics events",
@@ -356,6 +366,8 @@ function branchesData() {
         worktreePath: REPO,
         ahead: 0,
         behind: 2,
+        insertions: 0,
+        deletions: 0,
         pr: null,
       },
       {
@@ -363,8 +375,10 @@ function branchesData() {
         remoteOnly: true,
         hasRemote: true,
         hasWorktree: false,
-        ahead: 0,
+        ahead: 1,
         behind: 0,
+        insertions: 1,
+        deletions: 1,
         pr: null,
       },
     ],
@@ -380,7 +394,7 @@ function expandedPaths(data) {
  * Mount the real panel UI in `page` with the given data, then optionally send a
  * follow-up message (e.g. to open the settings view). Returns when rendered.
  */
-async function mountPanel(page, { data, theme = THEME_DARK, width = 460, height = 900, message, view = "panel" }) {
+async function mountPanel(page, { data, theme = THEME_DARK, width = 460, height = 900, message, view = "panel", state = {} }) {
   await page.setViewportSize({ width, height });
   await page.setContent(
     `<!doctype html><html><head><meta charset="utf-8">` +
@@ -396,7 +410,8 @@ async function mountPanel(page, { data, theme = THEME_DARK, width = 460, height 
       // load time (mirrors the AWT_VIEW the extension injects into the tab HTML).
       `window.AWT_VIEW = ${JSON.stringify(view)};` +
       `window.__expanded = ${JSON.stringify(expandedPaths(data))};` +
-      `window.acquireVsCodeApi = () => ({ getState: () => ({ expanded: window.__expanded }), setState: () => {}, postMessage: () => {} });`,
+      `window.__state = ${JSON.stringify({ ...state, expanded: expandedPaths(data) })};` +
+      `window.acquireVsCodeApi = () => ({ getState: () => window.__state, setState: () => {}, postMessage: () => {} });`,
   });
   await page.addStyleTag({ path: PANEL_CSS });
   await page.addScriptTag({ path: PANEL_JS });

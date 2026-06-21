@@ -2,6 +2,35 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.3.0
+
+- **Branches view defaults to your branches** - a new **Mine + to review** scope
+  (on by default) narrows the Branches view to branches you created (any local
+  branch, or a remote-only branch whose PR you authored) plus any whose review
+  involved you (review was requested from you at some point, or you already
+  reviewed it). Clear the chip to see every branch again. Without the GitHub
+  integration connected it falls back to your local branches. The choice persists
+  across reopens like the other filters.
+- **Delete local branches** - the **Delete** action now appears on any local
+  branch, not just branches whose PR you authored (a local branch is yours by
+  virtue of living on this machine). Remote-only branches still require that you
+  authored their PR.
+- **Unpushed-work warning on delete** - deleting a local branch with commits not
+  on its upstream (or, with no upstream, not on the default branch) now shows the
+  count in the confirm dialog and force-deletes on confirm, so nothing is lost
+  silently.
+- **Merged branches delete without the scary prompt** - when a branch's PR is
+  merged, deleting it no longer hits git's "not fully merged" refusal (a
+  squash-merge leaves the commits unreachable even though the work is in the
+  base); it force-deletes after the normal confirm.
+- **Commit and diff summary on each branch row** - rows now show ahead/behind
+  (↑/↓) and the +/- line diff against the branch's compare base (its upstream, or
+  the default branch when it has none), mirroring the worktree cards.
+- **Explicit Fetch button with a Prune toggle** - the Branches header has a
+  **Fetch** button and a **Prune** checkbox (on by default). Fetching refreshes
+  ahead/behind, diffs and PR merge state; with Prune on it also drops tracking
+  refs for branches deleted on the remote.
+
 ## 2.2.1
 
 - **Branches view prunes deleted remote branches** - fetches now run with

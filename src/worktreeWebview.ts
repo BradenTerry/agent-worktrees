@@ -16,6 +16,8 @@ import {
   addBranchWorktree,
   removeWorktree,
   deleteBranch,
+  unpushedCommitCount,
+  fetchRemotes,
   listWorktrees,
   getRemoteInfo,
   RemoteInfo,
@@ -62,14 +64,14 @@ interface ActionMessage {
     | "scopeScm"
     | "openBranches"
     | "loadBranches"
-    | "refreshBranches"
+    | "fetchBranches"
     | "worktreeFromBranch"
     | "deleteBranch";
   path?: string;
   sessionId?: string;
   /** GitHub PAT, for setGithubToken. */
   token?: string;
-  /** New on/off state, for togglePr. */
+  /** New on/off state, for togglePr; or the Prune choice for fetchBranches. */
   value?: boolean;
   /** Branch name, for worktreeFromBranch / deleteBranch. */
   branch?: string;
@@ -77,6 +79,9 @@ interface ActionMessage {
   remoteOnly?: boolean;
   /** Whether a matching origin/<branch> exists, for deleteBranch. */
   hasRemote?: boolean;
+  /** Whether the branch's PR is merged, for deleteBranch (skips the unmerged
+   *  force prompt that squash-merges would otherwise trigger). */
+  merged?: boolean;
 }
 
 export class WorktreeWebviewProvider
@@ -997,18 +1002,18 @@ export class WorktreeWebviewProvider
         await this.postBranches();
         void this.refresh(true);
         return;
-      case "refreshBranches":
-        // A forced refresh: git fetch --prune (fresh ahead/behind, new remote
-        // branches, and stale remote-tracking refs removed) plus a re-fetch of
-        // PR data, then re-post to both views.
-        return this.refresh(true);
+      case "fetchBranches":
+        // The explicit Fetch button. `value` carries the Prune checkbox; refetch
+        // remotes then re-post so ahead/behind, diffs and merge state are current.
+        return this.fetchBranchesAction(msg.value !== false);
       case "worktreeFromBranch":
         return this.worktreeFromBranch(msg.branch, msg.remoteOnly);
       case "deleteBranch":
         return this.deleteBranchAction(
           msg.branch,
           msg.remoteOnly,
-          msg.hasRemote
+          msg.hasRemote,
+          msg.merged
         );
       case "agent":
         // Start a Claude agent in an existing worktree (its path is on the row).
@@ -1102,16 +1107,41 @@ export class WorktreeWebviewProvider
   }
 
   /**
+   * Fetch from the remote (the explicit Fetch button), optionally pruning stale
+   * remote-tracking refs, then re-read both views so ahead/behind, diffs and PR
+   * merge state are current. Pruning matters for the delete flow: a branch whose
+   * PR was merged and remote deleted otherwise lingers as a phantom origin ref.
+   */
+  private async fetchBranchesAction(prune: boolean): Promise<void> {
+    const repoRoot = await this.primaryWorktree();
+    if (!repoRoot) {
+      vscode.window.showErrorMessage("No git repository in this window.");
+      return;
+    }
+    await fetchRemotes(repoRoot, { prune });
+    // We already fetched, so re-read without a second fetch; refetch PR data so a
+    // newly-merged PR is reflected (which is what lets the delete skip the
+    // unmerged prompt).
+    await this.refresh();
+    await this.postBranches(true);
+  }
+
+  /**
    * Delete a branch the user owns, locally and/or on origin. When both a local
    * ref and an origin/<branch> exist the user picks the scope (local, remote, or
-   * both); otherwise it deletes whichever side exists after a single confirm. An
-   * unmerged local branch prompts for a force delete (git's `-d` refusal). Both
-   * views refresh so the row drops or flips to remote-only.
+   * both); otherwise it deletes whichever side exists after a single confirm.
+   *
+   * Local deletes guard against losing work: a branch with commits not on its
+   * upstream surfaces the count in the prompt and force-deletes on confirm. A
+   * branch whose PR is merged force-deletes without the "not fully merged" prompt
+   * (a squash-merge leaves the commits unreachable, so git's `-d` would refuse
+   * even though the work is safely in the base). Both views refresh after.
    */
   private async deleteBranchAction(
     branch?: string,
     remoteOnly?: boolean,
-    hasRemote?: boolean
+    hasRemote?: boolean,
+    merged?: boolean
   ): Promise<void> {
     const name = branch?.trim();
     if (!name) return;
@@ -1123,11 +1153,29 @@ export class WorktreeWebviewProvider
     const hasLocal = !remoteOnly;
     const hasRemoteRef = !!hasRemote;
 
+    // Unpushed-work warning, only for a local delete and only when the PR is not
+    // merged (a merged squash leaves commits that look unpushed but are not lost).
+    let warn = "";
+    let unpushed = 0;
+    if (hasLocal && !merged) {
+      unpushed = await unpushedCommitCount(repoRoot, name);
+      if (unpushed > 0) {
+        const c = unpushed === 1 ? "1 commit" : `${unpushed} commits`;
+        warn =
+          `\n\nThis branch has ${c} not pushed to its upstream; ` +
+          `deleting it loses ${unpushed === 1 ? "that commit" : "those commits"}.`;
+      }
+    }
+    // A merged or unpushed local branch is force-deleted (git's `-d` refuses an
+    // unmerged ref); the prompt above already secured consent for the unpushed
+    // case, and a merged branch is safe.
+    const forceLocal = !!merged || unpushed > 0;
+
     let local = false;
     let remote = false;
     if (hasLocal && hasRemoteRef) {
       const pick = await vscode.window.showWarningMessage(
-        `Delete branch "${name}"? Choose what to remove. The remote deletion cannot be undone.`,
+        `Delete branch "${name}"? Choose what to remove. The remote deletion cannot be undone.${warn}`,
         { modal: true },
         "Local + remote",
         "Local only",
@@ -1138,7 +1186,7 @@ export class WorktreeWebviewProvider
       remote = pick !== "Local only";
     } else if (hasLocal) {
       const ok = await vscode.window.showWarningMessage(
-        `Delete local branch "${name}"?`,
+        `Delete local branch "${name}"?${warn}`,
         { modal: true },
         "Delete"
       );
@@ -1155,12 +1203,13 @@ export class WorktreeWebviewProvider
     }
 
     try {
-      await deleteBranch(repoRoot, name, { local, remote });
+      await deleteBranch(repoRoot, name, { local, remote, force: forceLocal });
     } catch (err) {
       const msg = (err as Error).message;
-      // `git branch -d` refuses an unmerged branch; the remote step never ran,
-      // so a force retry can safely redo local then proceed to the remote.
-      if (local && /not fully merged/i.test(msg)) {
+      // Fallback: git still refused as unmerged (e.g. unpushed count failed and
+      // the PR is not flagged merged). The remote step never ran, so a force
+      // retry can safely redo local then proceed to the remote.
+      if (local && !forceLocal && /not fully merged/i.test(msg)) {
         const force = await vscode.window.showWarningMessage(
           `Local branch "${name}" is not fully merged. Force delete it?`,
           { modal: true },
