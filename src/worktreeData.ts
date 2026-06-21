@@ -211,6 +211,10 @@ export interface BranchData {
    *  the webview when origin is a github.com remote. Used to link branch rows
    *  and the repo's branches page. */
   repoUrl?: string;
+  /** Epoch ms of the last successful GitHub PR fetch for the branches view, or
+   *  undefined if it has never been fetched ("Never"). Only the explicit
+   *  Refresh GitHub button triggers a fetch, so this stays "Never" on open. */
+  lastGithubRefresh?: number;
 }
 
 /**

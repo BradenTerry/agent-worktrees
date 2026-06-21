@@ -1062,6 +1062,17 @@
     return isNaN(t) ? 0 : t;
   }
 
+  // "Last refreshed" label for the GitHub PR data. The branches view never
+  // fetches on open, so this reads "Never" until the user clicks Refresh GitHub.
+  function lastRefreshedText(data) {
+    const t = data && data.lastGithubRefresh;
+    if (!t) return "Never";
+    return new Date(t).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
   /** Apply the active filters + sort to the branch list, client-side. */
   function visibleBranches(data) {
     const all = (data && data.branches) || [];
@@ -1230,7 +1241,7 @@
         '<button class="bchip' +
         (branchFilters.openOnly ? " on" : "") +
         '" data-preset="openPr" title="Only branches whose PR is open">' +
-        "Open PR</button>" +
+        "Open PRs</button>" +
         '<button class="bchip' +
         (branchFilters.autoMerge ? " on" : "") +
         '" data-preset="autoMerge" title="Only branches whose PR has auto-merge enabled">' +
@@ -1482,13 +1493,16 @@
       "</span>" +
       '<div class="branches-head-actions">' +
       repoLink +
+      // Fetch (git only) with its Prune checkbox stacked directly underneath.
+      '<div class="branches-action-stack">' +
+      '<button class="branches-refresh" data-action="fetchBranches" title="Fetch from the remote to refresh local branch state (ahead/behind, diffs)">' +
+      icons.refresh +
+      " Fetch</button>" +
       '<label class="branches-prune" title="Also remove remote-tracking refs for branches deleted on the remote">' +
       '<input type="checkbox" id="branches-prune"' +
       (branchFilters.prune ? " checked" : "") +
       " /> Prune</label>" +
-      '<button class="branches-refresh" data-action="fetchBranches" title="Fetch from the remote to refresh local branch state (ahead/behind, diffs)">' +
-      icons.refresh +
-      " Fetch</button>" +
+      "</div>" +
       // Bulk-delete local branches whose upstream is gone (merged or deleted on
       // the remote). Prompts before deleting; never touches the remote.
       '<button class="branches-refresh branches-danger" data-action="deleteGoneBranches" title="Delete every local branch whose upstream branch is gone (merged or deleted on the remote). The remote is left untouched.">' +
@@ -1496,11 +1510,17 @@
       " Delete gone</button>" +
       // Refresh GitHub is the API-only counterpart to the git-only Fetch: it
       // re-polls PR/CI status without a git fetch. Only useful (and only shown)
-      // when a token is stored.
+      // when a token is stored. The "Last refreshed" time sits directly below it
+      // to make clear the view does not call GitHub until this button is pressed.
       (data && data.github && data.github.hasToken
-        ? '<button class="branches-refresh" data-action="refreshGithub" title="Re-query the GitHub API to refresh PR and CI status">' +
+        ? '<div class="branches-action-stack">' +
+          '<button class="branches-refresh" data-action="refreshGithub" title="Re-query the GitHub API to refresh PR and CI status">' +
           icons.pr +
-          " Refresh GitHub</button>"
+          " Refresh GitHub</button>" +
+          '<span class="branches-lastrefresh" title="When the GitHub PR and CI status was last refreshed. The branches view does not call GitHub until you click Refresh GitHub.">Last refreshed: ' +
+          esc(lastRefreshedText(data)) +
+          "</span>" +
+          "</div>"
         : "") +
       "</div>" +
       "</div>" +

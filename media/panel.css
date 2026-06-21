@@ -1149,12 +1149,23 @@ button.busy {
   font-weight: 400;
   color: var(--vscode-descriptionForeground);
 }
-/* Right-aligned header controls: the "Branches on GitHub" link + refresh. */
+/* Right-aligned header controls: the "Branches on GitHub" link + refresh. The
+   buttons align along the top so the Prune checkbox / Last refreshed labels can
+   hang directly beneath Fetch / Refresh GitHub (see .branches-action-stack). */
 .branches-head-actions {
   flex: 0 0 auto;
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+}
+/* A header button with its secondary control (Prune checkbox, Last refreshed
+   time) stacked directly underneath it. */
+.branches-action-stack {
+  flex: 0 0 auto;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 .branches-link {
   display: inline-flex;
@@ -1171,6 +1182,14 @@ button.busy {
 .branches-link svg {
   width: 12px;
   height: 12px;
+}
+/* "Last refreshed: <time>" sits just left of Refresh GitHub. Secondary text;
+   the time itself is what the user scans, so keep it legible (>=11px). */
+.branches-lastrefresh {
+  flex: 0 0 auto;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
 }
 .branches-refresh {
   flex: 0 0 auto;

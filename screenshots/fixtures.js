@@ -200,6 +200,9 @@ function branchesData() {
     prEnabled: true,
     github: { hasToken: true, connected: true, login: you, tokenType: "fine-grained" },
     viewerLogin: you,
+    // Stamp the "Last refreshed" label as a couple of minutes ago, so the
+    // listing shows the populated PR view rather than the "Never" empty state.
+    lastGithubRefresh: ago(2 * 60 * 1000),
     branches: [
       {
         name: "feat/search-filters",

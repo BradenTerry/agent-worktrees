@@ -69,9 +69,13 @@ don't get a **Create worktree & start agent** button that builds the worktree
 right there in your current window and starts a Claude agent in it. Picking a
 remote-only branch checks it out as a new local tracking branch.
 
-When the GitHub integration is connected, each branch row also shows its open
+When the GitHub integration is connected, each branch row can also show its open
 PR's status — the same title, state badge, CI checks, review and comment summary
-you see on the worktree cards. A filter and sort bar across the top lets you slice the
+you see on the worktree cards. To keep the view fast and put you in control of
+when it calls GitHub, opening it does **not** fetch PR status: the header reads
+**Last refreshed: Never** until you click **Refresh GitHub** (see below), after
+which the rows fill in and the label shows when you last refreshed. A filter and
+sort bar across the top lets you slice the
 list without any extra loading. Nothing is filtered by default — every branch is
 listed until you make a selection:
 
@@ -82,7 +86,7 @@ listed until you make a selection:
   review from you. Pick one to filter; choose **Any** to clear it.
 - **Sort** — Newest, Oldest, Most or Least commented, Recently or Least recently
   updated.
-- **Open PR** / **Auto merge** — toggle chips to show only branches whose PR is
+- **Open PRs** / **Auto merge** — toggle chips to show only branches whose PR is
   open, or whose PR has auto-merge enabled.
 
 While a PR filter or sort is active, branches with no open PR are hidden. Without
@@ -97,10 +101,13 @@ reflects what actually landed. A **Prune** checkbox next to it (on by default)
 also removes tracking refs for branches deleted on the remote, so merged-and-
 deleted branches stop lingering as **remote only** rows.
 
-**Refresh GitHub.** When you have connected a GitHub token, a separate **Refresh
-GitHub** button appears next to Fetch. It re-queries the GitHub API for current
-PR and CI status on its own, without running a git fetch — so you can refresh
-just the PR view, or just your local branch state, independently.
+**Refresh GitHub.** When you have connected a GitHub token, a **Refresh GitHub**
+button appears in the header beside a **Last refreshed** label. It is the only
+thing that calls the GitHub API for this view: the label reads **Never** until
+your first refresh, then shows the time of the most recent one. Each click
+re-queries the GitHub API for current PR and CI status on its own, without
+running a git fetch — so you can refresh just the PR view, or just your local
+branch state, independently.
 
 **Delete branches.** Every branch that exists on your machine shows a **Delete
 Local** button that removes the local branch only. The branch on the remote is
@@ -128,10 +135,11 @@ time before force-deleting any branch that still has unmerged commits. Pair it w
 a **Branches on GitHub** link in the header opens the repository's full branches
 page.
 
-**Stay current.** Opening the view fetches from the remote and prunes branches
-that were deleted there, so it never shows phantom remote branches; the Fetch
-button does the same on demand, updating ahead/behind counts, while Refresh
-GitHub updates PR and CI status. Long branch lists are paged so they stay easy to scan, and
+**Stay current.** Opening the view reads your local branches right away without
+calling GitHub; the Fetch button pulls from the remote on demand, updating
+ahead/behind counts and pruning branches deleted there so phantom remote
+branches don't linger, while Refresh GitHub updates PR and CI status. Long
+branch lists are paged so they stay easy to scan, and
 the view only fetches branches for the repository you have open, never your other
 repositories.
 
@@ -167,7 +175,11 @@ by editing that settings file.
 
 ## Privacy
 
-Agent Worktrees runs entirely on your machine. It reads local git state and
-Claude Code hook output from files under `~/.claude/agent-worktrees/`. It makes
-no network requests and collects no telemetry.
+Agent Worktrees runs on your machine and collects no telemetry. It reads local
+git state and Claude Code hook output from files in the extension's own private
+storage (nothing of the extension's lives in your `~/.claude` tree apart from the
+hook entries it adds to `settings.json` once you consent). The only network
+requests it makes are to the GitHub API, and only when you connect a GitHub token
+to show pull request and CI status; with no token connected, it makes no network
+requests.
 </content>
