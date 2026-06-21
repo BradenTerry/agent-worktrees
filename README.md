@@ -181,8 +181,11 @@ message carrying the branch name and which sides exist (`remoteOnly`,
 `origin/<name>` exist the user picks **Local + remote / Local only / Remote
 only**; otherwise a single confirm. `git.deleteBranch` runs `git branch -d`
 (local) and/or `git push origin --delete` (remote); an unmerged local branch is
-refused by `-d` and the provider offers a force delete (`-D`). Both views refresh
-afterward so the row drops or flips to remote-only.
+refused by `-d` and the provider offers a force delete (`-D`). A remote delete
+whose `origin/<name>` is already gone (a stale tracking ref) is treated as done:
+instead of erroring with "remote ref does not exist", the stale
+`refs/remotes/origin/<name>` is pruned. Both views refresh afterward so the row
+drops or flips to remote-only.
 
 **GitHub links.** When `origin` is a github.com remote the provider attaches
 `repoUrl` (`https://github.com/<owner>/<repo>`) to the payload. Each row links its
@@ -191,9 +194,14 @@ survive), and the header carries a **Branches on GitHub** link to `/branches`.
 These are plain `<a target="_blank">` anchors that VS Code opens externally — no
 round-trip.
 
-**Refresh.** A refresh button in the header posts `refreshBranches`, which runs a
-forced `refresh(true)`: a `git fetch` for fresh ahead/behind and remote branches
-plus a re-fetch of PR data, re-posted to both views.
+**Refresh and fetch.** `fetchRemotes` runs `git fetch --all --prune`, so stale
+`refs/remotes/origin/*` (branches deleted on the remote) are dropped and no
+longer surface as phantom "remote only" / "local + remote" rows. Opening the tab
+(`loadBranches`) posts the local list immediately, then runs a forced
+`refresh(true)` in the background to reconcile with the remote. The header
+refresh button posts `refreshBranches`, the same forced `refresh(true)`: a
+`git fetch --prune` for fresh ahead/behind and pruned remote refs plus a re-fetch
+of PR data, re-posted to both views.
 
 **Performance.** The webview only rebuilds the DOM when the posted payload
 actually changed (it compares a JSON signature, mirroring the settings view's

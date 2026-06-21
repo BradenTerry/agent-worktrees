@@ -87,16 +87,20 @@ choose what to remove — local, remote, or both; otherwise it deletes whichever
 side exists after a single confirm. If a local branch has unmerged commits you
 get a second prompt before it is force-deleted, so nothing disappears by
 accident. (Deletion is offered only for branches you authored — git itself
-records no branch owner, so PR authorship is what identifies yours.)
+records no branch owner, so PR authorship is what identifies yours.) If a branch
+was already deleted on the remote, removing it just cleans up locally instead of
+erroring.
 
 **Jump to GitHub.** Each branch name links straight to that branch on GitHub, and
 a **Branches on GitHub** link in the header opens the repository's full branches
 page.
 
-**Stay current.** A refresh button in the top right reloads the list — fetching
-the latest remote branches, ahead/behind counts, and PR status. Long branch lists
-are paged so they stay easy to scan, and the view only fetches branches for the
-repository you have open, never your other repositories.
+**Stay current.** Opening the view fetches from the remote and prunes branches
+that were deleted there, so it never shows phantom remote branches; a refresh
+button in the top right does the same on demand, also updating ahead/behind
+counts and PR status. Long branch lists are paged so they stay easy to scan, and
+the view only fetches branches for the repository you have open, never your other
+repositories.
 
 ## How agent status works
 

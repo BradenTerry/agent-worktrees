@@ -1417,7 +1417,7 @@
       "</span>" +
       '<div class="branches-head-actions">' +
       repoLink +
-      '<button class="branches-refresh" data-action="refreshBranches" title="Reload branches">' +
+      '<button class="branches-refresh" data-action="refreshBranches" title="Fetch and reload branches (prunes branches deleted on the remote)">' +
       icons.refresh +
       "</button>" +
       "</div>" +

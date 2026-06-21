@@ -2,6 +2,21 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.2.1
+
+- **Branches view prunes deleted remote branches** - fetches now run with
+  `--prune`, and opening the Branches view fetches and prunes automatically, so
+  branches deleted on the remote stop showing as **remote only** / **local +
+  remote**. The refresh button does the same on demand.
+- **Deleting a branch tolerates an already-deleted remote** - removing a branch
+  whose remote was already gone no longer errors with "remote ref does not
+  exist"; the stale remote-tracking ref is pruned instead.
+- **"Show only this worktree" in Source Control now reliably switches** - scoping
+  closes the other open repositories so the Source Control view shows just the
+  selected worktree, even when more than one repo was open, and closes them via a
+  more reliable call so the view actually changes (not only the button
+  highlight).
+
 ## 2.2.0
 
 - **Delete branches you authored** - branches whose pull request you authored

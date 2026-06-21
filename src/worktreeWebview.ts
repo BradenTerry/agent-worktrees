@@ -419,11 +419,10 @@ export class WorktreeWebviewProvider
   }
 
   /**
-   * Scope the Source Control view to the selected worktree by opening its
-   * repository if needed, then: when more than one repo is currently listed,
-   * leave the others (non-destructive); when a single repo is listed, swap it
-   * out (close the previous one) so only this worktree's diffs remain. Does not
-   * switch the user to the Source Control view.
+   * Scope the Source Control view to the selected worktree: open its repository
+   * if needed, then close every other open repo so only this worktree's diffs
+   * remain (the button is "show only this worktree"). Does not switch the user
+   * to the Source Control view.
    */
   private async scopeScm(fsPath?: string): Promise<void> {
     if (!fsPath || !this.isScmEnabled()) return;
@@ -454,7 +453,15 @@ export class WorktreeWebviewProvider
         await api.openRepository(vscode.Uri.file(p)).catch(() => {});
       },
       close: async (p) => {
-        await vscode.commands.executeCommand("git.close", vscode.Uri.file(p));
+        // Pass the Repository object, not a Uri: `git.close` resolves a repo
+        // reliably, whereas a bare Uri can silently no-op and leave the previous
+        // scope open (the "color changes but the view doesn't switch" bug).
+        const repo = api.repositories.find(
+          (r) => normalize(r.rootUri.fsPath) === p
+        );
+        await vscode.commands
+          .executeCommand("git.close", repo ?? vscode.Uri.file(p))
+          .then(undefined, () => {});
       },
     };
     await applyScopeScm(model, target);
@@ -984,10 +991,16 @@ export class WorktreeWebviewProvider
     if (msg.type !== "action") return;
     switch (msg.action) {
       case "loadBranches":
-        return this.postBranches();
+        // Post the current (local, fast) list right away so the tab paints, then
+        // fetch + prune in the background and re-post: opening the panel always
+        // reconciles with the remote, dropping branches deleted on origin.
+        await this.postBranches();
+        void this.refresh(true);
+        return;
       case "refreshBranches":
-        // A forced refresh: git fetch (fresh ahead/behind + remote branches)
-        // and a re-fetch of PR data, then re-post to both views.
+        // A forced refresh: git fetch --prune (fresh ahead/behind, new remote
+        // branches, and stale remote-tracking refs removed) plus a re-fetch of
+        // PR data, then re-post to both views.
         return this.refresh(true);
       case "worktreeFromBranch":
         return this.worktreeFromBranch(msg.branch, msg.remoteOnly);

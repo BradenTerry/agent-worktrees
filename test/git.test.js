@@ -196,6 +196,28 @@ test("deleteBranch removes the branch on origin when remote is requested", async
   );
 });
 
+test("deleteBranch tolerates a stale remote ref (already gone on origin)", async () => {
+  // Simulate the stale-tracking-ref case: origin/topic exists locally but the
+  // branch was already deleted on the remote. A plain push --delete would fail
+  // with "remote ref does not exist"; deleteBranch should instead prune the
+  // local mirror and not throw.
+  const work = makeCloneWithRemote("del-stale");
+  git(work, ["push", "origin", "main:topic"]);
+  git(work, ["fetch", "origin"]);
+  // Delete on the remote behind our back, leaving our origin/topic stale.
+  const remote = path.join(dir, "del-stale-remote.git");
+  git(remote, ["branch", "-D", "topic"]);
+  assert.ok(remoteBranches(work).includes("origin/topic"), "stale ref present");
+
+  await assert.doesNotReject(() =>
+    deleteBranch(work, "topic", { remote: true })
+  );
+  assert.ok(
+    !remoteBranches(work).includes("origin/topic"),
+    "stale remote-tracking ref pruned"
+  );
+});
+
 test("deleteBranch local+remote in one call clears both sides", async () => {
   const work = makeCloneWithRemote("del-both");
   git(work, ["push", "origin", "main:topic"]);
