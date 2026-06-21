@@ -53,13 +53,21 @@ export interface GitStatus {
  * refreshes every worktree's behind/ahead distance. Never throws — offline or a
  * missing remote simply leaves the refs (and counts) as they were.
  *
- * `--prune` drops `refs/remotes/origin/*` refs for branches deleted on the
- * remote, so the Branches view stops showing phantom "remote only" / "local +
- * remote" branches that no longer exist (and that a remote delete would fail on).
+ * `--prune` (on by default) drops `refs/remotes/origin/*` refs for branches
+ * deleted on the remote, so the Branches view stops showing phantom "remote
+ * only" / "local + remote" branches that no longer exist (and that a remote
+ * delete would fail on). Pass `prune: false` to keep stale tracking refs.
  */
-export async function fetchRemotes(cwd: string): Promise<void> {
+export async function fetchRemotes(
+  cwd: string,
+  opts: { prune?: boolean } = {}
+): Promise<void> {
+  const prune = opts.prune !== false;
   try {
-    await execAsync("git fetch --all --prune --quiet", { cwd, timeout: 15_000 });
+    await execAsync(`git fetch --all${prune ? " --prune" : ""} --quiet`, {
+      cwd,
+      timeout: 15_000,
+    });
   } catch {
     /* offline / no remote / timeout: keep stale refs */
   }
@@ -169,10 +177,15 @@ export interface BranchInfo {
   hasWorktree: boolean;
   /** That worktree's path, when hasWorktree. */
   worktreePath?: string;
-  /** Commits ahead of the upstream branch (0 when no upstream / not local). */
+  /** Commits ahead of the compare base (upstream, or the default branch when the
+   *  branch has no upstream). */
   ahead: number;
-  /** Commits behind the upstream branch (0 when no upstream / not local). */
+  /** Commits behind the compare base. */
   behind: number;
+  /** Lines added vs the compare base across the branch's own commits. */
+  insertions: number;
+  /** Lines removed vs the compare base. */
+  deletions: number;
 }
 
 /**
@@ -181,26 +194,34 @@ export interface BranchInfo {
  * origin/HEAD. Never returns the same short name twice (local wins).
  *
  * Local branches come from `git for-each-ref refs/heads` with `%(worktreepath)`
- * (empty unless a worktree holds the ref) and `%(upstream:track)` for the
- * ahead/behind distance. A second pass over refs/remotes/origin supplies the
- * origin name set (so a local branch can be flagged "local + remote") and adds
- * the remote-only names. Ahead/behind is read from local refs, so it reflects
- * the last fetch. Genuine git failures propagate the way `listWorktrees` does.
+ * (empty unless a worktree holds the ref), `%(upstream:track)` for the
+ * ahead/behind distance, and `%(upstream:short)` for the compare base. A second
+ * pass over refs/remotes/origin supplies the origin name set (so a local branch
+ * can be flagged "local + remote") and adds the remote-only names.
+ *
+ * Each branch is then enriched with ahead/behind and a +/- line diff against its
+ * compare base: its upstream when it has one, otherwise the repo's default branch
+ * (origin/HEAD). Counts are read from local refs, so they reflect the last fetch.
+ * Genuine git failures propagate the way `listWorktrees` does.
  */
 export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   // A NUL between fields and a newline between records, so branch names that
   // contain odd characters never confuse the parse.
   const { stdout: localOut } = await execAsync(
-    "git for-each-ref --format='%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)' refs/heads",
+    "git for-each-ref --format='%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)' refs/heads",
     { cwd }
   );
   const branches: BranchInfo[] = [];
+  // Configured upstream short-ref per local branch (e.g. "origin/feature"), used
+  // as the diff/ahead-behind base. Empty when the branch tracks nothing.
+  const upstreamOf = new Map<string, string>();
   for (const raw of localOut.split("\n")) {
     const line = raw.replace(/^'/, "").replace(/'$/, "").trimEnd();
     if (line === "") continue;
-    const [name, worktreePath, track] = line.split("\0");
+    const [name, worktreePath, track, upstream] = line.split("\0");
     if (!name) continue;
     const { ahead, behind } = parseTrack(track || "");
+    if (upstream) upstreamOf.set(name, upstream);
     branches.push({
       name,
       remoteOnly: false,
@@ -209,6 +230,8 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       worktreePath: worktreePath || undefined,
       ahead,
       behind,
+      insertions: 0,
+      deletions: 0,
     });
   }
 
@@ -240,9 +263,164 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       hasWorktree: false,
       ahead: 0,
       behind: 0,
+      insertions: 0,
+      deletions: 0,
     });
   }
+
+  // Enrich each branch with its diff vs the compare base (and ahead/behind for
+  // the branches whose count did not come from %(upstream:track)). Bounded
+  // concurrency keeps a many-branch repo from spawning a git process per branch
+  // all at once. Any per-branch failure leaves that branch's counts at zero.
+  const defaultRef = await resolveDefaultBranchRef(cwd);
+  await mapLimit(branches, 8, async (b) => {
+    const tip = b.remoteOnly ? `origin/${b.name}` : b.name;
+    const base = b.remoteOnly
+      ? defaultRef
+      : upstreamOf.get(b.name) || (b.hasRemote ? `origin/${b.name}` : defaultRef);
+    if (!base || base === tip) return;
+    const diff = await diffStat(cwd, base, tip);
+    b.insertions = diff.insertions;
+    b.deletions = diff.deletions;
+    // A configured upstream already gave authoritative ahead/behind via :track;
+    // everything else (no upstream, or remote-only) is counted against the base.
+    if (!upstreamOf.has(b.name)) {
+      const ab = await aheadBehind(cwd, base, tip);
+      b.ahead = ab.ahead;
+      b.behind = ab.behind;
+    }
+  });
   return branches;
+}
+
+/**
+ * The repo's default branch ref (e.g. "origin/main"), resolved from
+ * origin/HEAD. Falls back to the first of origin/main, origin/master, main,
+ * master that exists, or undefined when none do (a fresh repo with no commits).
+ */
+async function resolveDefaultBranchRef(
+  cwd: string
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execAsync(
+      "git symbolic-ref --quiet refs/remotes/origin/HEAD",
+      { cwd }
+    );
+    const ref = stdout.trim().replace(/^refs\/remotes\//, "");
+    if (ref) return ref;
+  } catch {
+    /* no origin/HEAD: fall through to the candidate list */
+  }
+  for (const cand of ["origin/main", "origin/master", "main", "master"]) {
+    try {
+      await execAsync(`git rev-parse --verify --quiet ${cand}`, { cwd });
+      return cand;
+    } catch {
+      /* not this one */
+    }
+  }
+  return undefined;
+}
+
+/** Lines added/removed introduced by `tip` since it diverged from `base`
+ *  (`git diff --numstat base...tip`). Binary files are skipped; zero on error. */
+async function diffStat(
+  cwd: string,
+  base: string,
+  tip: string
+): Promise<{ insertions: number; deletions: number }> {
+  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
+  let insertions = 0;
+  let deletions = 0;
+  try {
+    const { stdout } = await execAsync(
+      `git diff --numstat ${q(base)}...${q(tip)}`,
+      { cwd }
+    );
+    for (const line of stdout.split("\n")) {
+      const m = line.match(/^(\d+)\t(\d+)\t/);
+      if (m) {
+        insertions += Number(m[1]);
+        deletions += Number(m[2]);
+      }
+    }
+  } catch {
+    /* missing ref / unrelated histories: leave zeros */
+  }
+  return { insertions, deletions };
+}
+
+/** Commits `tip` is ahead/behind `base` (`git rev-list --left-right --count
+ *  base...tip` => "<behind>\t<ahead>"). Zero on error. */
+async function aheadBehind(
+  cwd: string,
+  base: string,
+  tip: string
+): Promise<{ ahead: number; behind: number }> {
+  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
+  try {
+    const { stdout } = await execAsync(
+      `git rev-list --left-right --count ${q(base)}...${q(tip)}`,
+      { cwd }
+    );
+    const m = stdout.trim().match(/(\d+)\s+(\d+)/);
+    if (m) return { behind: Number(m[1]), ahead: Number(m[2]) };
+  } catch {
+    /* missing ref / unrelated histories */
+  }
+  return { ahead: 0, behind: 0 };
+}
+
+/**
+ * Count of a local branch's commits that are not on its push target: its
+ * upstream when configured, otherwise the repo's default branch. Used to warn
+ * before deleting a branch whose work would be lost. Zero on error or when the
+ * branch is fully contained in its base.
+ */
+export async function unpushedCommitCount(
+  repoRoot: string,
+  name: string
+): Promise<number> {
+  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
+  let base: string | undefined;
+  try {
+    const { stdout } = await execAsync(
+      `git rev-parse --abbrev-ref --symbolic-full-name ${q(`${name}@{upstream}`)}`,
+      { cwd: repoRoot }
+    );
+    base = stdout.trim() || undefined;
+  } catch {
+    base = await resolveDefaultBranchRef(repoRoot);
+  }
+  if (!base) return 0;
+  try {
+    const { stdout } = await execAsync(
+      `git rev-list --count ${q(base)}..${q(name)}`,
+      { cwd: repoRoot }
+    );
+    return Number(stdout.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Run `fn` over `items` with at most `limit` in flight at once. */
+async function mapLimit<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  let i = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (i < items.length) {
+        const idx = i++;
+        await fn(items[idx]);
+      }
+    }
+  );
+  await Promise.all(workers);
 }
 
 /** Parse `%(upstream:track,nobracket)` (e.g. "ahead 2, behind 1") into counts. */

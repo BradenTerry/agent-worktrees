@@ -183,9 +183,13 @@ export interface BranchVM {
   hasWorktree: boolean;
   /** That worktree's path, when hasWorktree. */
   worktreePath?: string;
-  /** Commits ahead of / behind upstream (0 when no upstream or not local). */
+  /** Commits ahead of / behind the compare base (upstream, or the default
+   *  branch when there is no upstream). */
   ahead: number;
   behind: number;
+  /** Lines added / removed vs the compare base across the branch's commits. */
+  insertions: number;
+  deletions: number;
   /** PR rollup attached by the webview; null = looked up, no PR;
    *  undefined = not looked up (integration off or no token). */
   pr?: BranchPrInfo | null;
@@ -231,6 +235,8 @@ export async function gatherBranches(): Promise<BranchData> {
     worktreePath: b.worktreePath,
     ahead: b.ahead,
     behind: b.behind,
+    insertions: b.insertions,
+    deletions: b.deletions,
   }));
 
   vms.sort((a, b) =>

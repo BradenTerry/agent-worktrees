@@ -52,9 +52,11 @@ The **Branches view** opens as a full editor tab listing every branch with its P
 A **Branches** button in the panel toolbar opens a dedicated editor tab listing
 every branch in the repository — your local branches plus branches that exist
 only on `origin`. Each row is tagged by where it lives — **local only**, **local
-+ remote**, or **remote only** — and, when it tracks a remote, shows how far
-ahead or behind upstream it is (↑ to push, ↓ to pull). Each row also tells you
-whether a worktree already exists for that branch:
++ remote**, or **remote only** — and shows how far ahead or behind its compare
+base it is (↑ to push, ↓ to pull) along with the **+/- line diff** that branch
+introduces, the same summary the worktree cards show. The base is the branch's
+upstream, or the repo's default branch when it has no upstream. Each row also
+tells you whether a worktree already exists for that branch:
 the ones that do show a **Worktree exists** marker alongside a **Start agent**
 button that launches a Claude agent in that existing worktree, and the ones that
 don't get a **Create worktree & start agent** button that builds the worktree
@@ -66,6 +68,10 @@ PR's status — the same state badge, CI checks, review and comment summary you 
 on the worktree cards. A filter and sort bar across the top lets you slice the
 list without any extra loading:
 
+- **Mine + to review** (on by default) — scopes the list to branches you created
+  (any local branch, or a remote-only branch whose PR you authored) plus any
+  whose review involved you (review was requested from you at some point, or you
+  already reviewed it). Click the chip to clear it and see every branch.
 - **Author** (multi-select) — narrow to PRs by one or more authors; you are
   pinned to the top of the list.
 - **Reviews** — No reviews, Review required, Approved, Changes requested,
@@ -75,21 +81,30 @@ list without any extra loading:
 - **Preset chips** — one click for **Your PRs**, **Awaiting your review**, or
   **Assigned to you**.
 
-While a PR filter or sort is active, branches with no open PR are hidden. Without
-the GitHub integration connected, the view still lists every branch and lets you
-create worktrees; only the branch-name sort is offered and the PR-based controls
-are hidden. Your filter and sort choices are remembered the next time you open
-the view. Close it like any editor tab; the Branches button reopens it.
+The **Mine + to review** scope keeps the view focused on the branches you work
+with by default; clearing it restores the full repository list. While a PR filter
+or sort is active, branches with no open PR are hidden. Without
+the GitHub integration connected, the **Mine + to review** scope falls back to
+your local branches (the PR-based controls and PR sorts are hidden); clear it to
+list every branch and create worktrees as usual. Your filter and sort choices are
+remembered the next time you open the view. Close it like any editor tab; the
+Branches button reopens it.
 
-**Delete branches you created.** Branches whose pull request you authored show a
-**Delete** button. When the branch exists both locally and on the remote, you
+**Fetch and prune.** A **Fetch** button in the header refreshes everything from
+the remote — ahead/behind counts, line diffs, and PR merge state — so the view
+reflects what actually landed. A **Prune** checkbox next to it (on by default)
+also removes tracking refs for branches deleted on the remote, so merged-and-
+deleted branches stop lingering as **remote only** rows.
+
+**Delete branches.** Every local branch shows a **Delete** button (a local branch
+is yours by virtue of living on your machine); remote-only branches show one when
+you authored their PR. When a branch exists both locally and on the remote, you
 choose what to remove — local, remote, or both; otherwise it deletes whichever
-side exists after a single confirm. If a local branch has unmerged commits you
-get a second prompt before it is force-deleted, so nothing disappears by
-accident. (Deletion is offered only for branches you authored — git itself
-records no branch owner, so PR authorship is what identifies yours.) If a branch
-was already deleted on the remote, removing it just cleans up locally instead of
-erroring.
+side exists after a single confirm. If the branch has commits that were never
+pushed, the confirm tells you how many would be lost. A branch whose PR was
+merged deletes cleanly without a false "not fully merged" warning — even after a
+squash-merge, where git would otherwise refuse. If a branch was already deleted
+on the remote, removing it just cleans up locally instead of erroring.
 
 **Jump to GitHub.** Each branch name links straight to that branch on GitHub, and
 a **Branches on GitHub** link in the header opens the repository's full branches

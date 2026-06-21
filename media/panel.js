@@ -69,6 +69,13 @@
   // one of the SORT_OPTIONS keys.
   const savedState = vscode.getState() || {};
   const branchFilters = {
+    // Default scope: show only branches you created (any local branch, or a
+    // remote-only branch whose PR you authored) plus any whose review involved
+    // you (review requested from you at some point, or already reviewed by you).
+    // On by default; clear it to see every branch. Persisted like the rest.
+    mine: savedState.branchMine !== false,
+    // Prune on fetch. On by default; persisted so the checkbox stays set.
+    prune: savedState.branchPrune !== false,
     authors: Array.isArray(savedState.branchAuthors)
       ? savedState.branchAuthors.slice()
       : [],
@@ -83,6 +90,8 @@
   function persist() {
     vscode.setState({
       expanded: Array.from(expanded),
+      branchMine: branchFilters.mine,
+      branchPrune: branchFilters.prune,
       branchAuthors: branchFilters.authors.slice(),
       branchReviews: branchFilters.reviews,
       branchAssignedToYou: branchFilters.assignedToYou,
@@ -1010,6 +1019,21 @@
     return isNaN(t) ? 0 : t;
   }
 
+  // The "Mine + to review" scope: a branch you created (any local branch, or a
+  // remote-only branch whose PR you authored) plus any whose review involved you
+  // (review was requested from you at some point, or you already reviewed it).
+  // Local branches always qualify since you made them on this machine; remote-
+  // only branches need PR data to decide, so without it they are excluded.
+  function relevantToMe(b, viewer) {
+    if (!b.remoteOnly) return true;
+    const p = b.pr;
+    if (!p) return false;
+    if (viewer && p.author === viewer) return true;
+    if (p.reviewRequestedFromViewer) return true;
+    if (p.reviewedByViewer) return true;
+    return false;
+  }
+
   /** Apply the active filters + sort to the branch list, client-side. */
   function visibleBranches(data) {
     const all = (data && data.branches) || [];
@@ -1023,6 +1047,13 @@
     const viewer = (data && data.viewerLogin) || "";
 
     let rows = all.slice();
+
+    // Default scope, applied before the PR-based narrowing. Independent of the
+    // GitHub connection: with no PR data it keeps local branches (yours) and
+    // drops remote-only ones, which is the closest "yours" we can know.
+    if (branchFilters.mine) {
+      rows = rows.filter((b) => relevantToMe(b, viewer));
+    }
 
     if (pr) {
       // While any PR-based filter is active, drop rows with no PR (R16).
@@ -1123,6 +1154,16 @@
     const sortOpt =
       SORT_OPTIONS.find((s) => s.id === branchFilters.sort) || SORT_OPTIONS[0];
 
+    // Always available, even without a GitHub connection (it still scopes to
+    // local branches). On by default; click to widen to every branch.
+    const scope =
+      '<div class="bpresets">' +
+      '<button class="bchip' +
+      (branchFilters.mine ? " on" : "") +
+      '" data-preset="mine" title="Branches you created plus any whose review involved you">' +
+      "Mine + to review</button>" +
+      "</div>";
+
     let controls = "";
 
     if (pr) {
@@ -1209,6 +1250,7 @@
 
     return (
       '<div class="bfilter-bar">' +
+      scope +
       controls +
       menu("sort", "Sort", sortOpt.label, sortItems) +
       "</div>"
@@ -1257,17 +1299,35 @@
       esc(k.label) +
       "</span>";
 
-    // Ahead/behind vs upstream, shown only for branches that track a remote and
-    // are actually diverged (an in-sync row stays uncluttered).
+    // Commit/diff summary vs the compare base (upstream, or the default branch
+    // when the branch has no upstream): ahead/behind and the +/- line diff, like
+    // the worktree cards' git line. Each piece shows only when non-zero so an
+    // in-sync row stays uncluttered.
     const segs = [];
-    if (b.hasRemote && b.ahead)
+    if (b.ahead)
       segs.push(
-        '<span class="bseg ahead" title="Commits to push">↑' + b.ahead + "</span>"
+        '<span class="bseg ahead" title="Commits ahead of its base (to push)">↑' +
+          b.ahead +
+          "</span>"
       );
-    if (b.hasRemote && b.behind)
+    if (b.behind)
       segs.push(
-        '<span class="bseg behind" title="Commits to pull">↓' + b.behind + "</span>"
+        '<span class="bseg behind" title="Commits behind its base (to pull)">↓' +
+          b.behind +
+          "</span>"
       );
+    if (b.insertions || b.deletions) {
+      segs.push(
+        '<span class="bseg ins" title="Lines added vs base">+' +
+          (b.insertions || 0) +
+          "</span>"
+      );
+      segs.push(
+        '<span class="bseg del" title="Lines removed vs base">−' +
+          (b.deletions || 0) +
+          "</span>"
+      );
+    }
     const remoteMark =
       tag + (segs.length ? '<span class="bsync">' + segs.join("") + "</span>" : "");
     // A worktree already exists: show the marker, and (when we know its path)
@@ -1293,18 +1353,22 @@
         icons.agentMark +
         "Create worktree &amp; start agent</button>";
 
-    // Only branches the signed-in user authored (their PR's author) can be
-    // deleted, since git itself carries no branch ownership. When both a local
-    // ref and origin/<branch> exist the extension prompts for the scope.
-    const mine =
+    // A local branch is always yours to delete (it lives on this machine); a
+    // remote-only branch is offered for delete only when you authored its PR,
+    // since git itself carries no branch ownership. When both a local ref and
+    // origin/<branch> exist the extension prompts for the scope.
+    const authoredByYou =
       pr && data && data.viewerLogin && pr.author === data.viewerLogin;
-    const deleteBtn = mine
+    const canDelete = !b.remoteOnly || authoredByYou;
+    const deleteBtn = canDelete
       ? '<button class="bdelete danger" data-action="deleteBranch" data-branch="' +
         esc(b.name) +
         '" data-remote="' +
         (b.remoteOnly ? "1" : "0") +
         '" data-hasremote="' +
         (b.hasRemote ? "1" : "0") +
+        '" data-merged="' +
+        (pr && pr.state === "merged" ? "1" : "0") +
         '" title="Delete this branch (local and/or remote)">' +
         icons.trash +
         "Delete</button>"
@@ -1417,9 +1481,13 @@
       "</span>" +
       '<div class="branches-head-actions">' +
       repoLink +
-      '<button class="branches-refresh" data-action="refreshBranches" title="Fetch and reload branches (prunes branches deleted on the remote)">' +
+      '<label class="branches-prune" title="Also remove remote-tracking refs for branches deleted on the remote">' +
+      '<input type="checkbox" id="branches-prune"' +
+      (branchFilters.prune ? " checked" : "") +
+      " /> Prune</label>" +
+      '<button class="branches-refresh" data-action="fetchBranches" title="Fetch from the remote to refresh branch and PR state">' +
       icons.refresh +
-      "</button>" +
+      " Fetch</button>" +
       "</div>" +
       "</div>" +
       '<div class="branches-body">' +
@@ -1520,7 +1588,9 @@
       if (preset) {
         const kind = preset.getAttribute("data-preset");
         const viewer = (branchData && branchData.viewerLogin) || "";
-        if (kind === "yourPrs") {
+        if (kind === "mine") {
+          branchFilters.mine = !branchFilters.mine;
+        } else if (kind === "yourPrs") {
           const on =
             branchFilters.authors.length === 1 &&
             branchFilters.authors[0] === viewer;
@@ -1584,7 +1654,15 @@
           branch: btn.getAttribute("data-branch") || undefined,
           remoteOnly: btn.getAttribute("data-remote") === "1",
           hasRemote: btn.getAttribute("data-hasremote") === "1",
+          merged: btn.getAttribute("data-merged") === "1",
         });
+        return;
+      }
+      // Explicit Fetch button: carry the Prune checkbox state so the extension
+      // fetches with (or without) --prune.
+      if (action === "fetchBranches") {
+        const prune = root.querySelector("#branches-prune");
+        send("fetchBranches", { value: prune ? !!prune.checked : true });
         return;
       }
       send(action, {
@@ -1602,6 +1680,11 @@
       send("togglePr", { value: !!e.target.checked });
     } else if (e.target && e.target.id === "scm-enable") {
       send("toggleScm", { value: !!e.target.checked });
+    } else if (e.target && e.target.id === "branches-prune") {
+      // Remember the Prune choice for the next fetch; the value is read live when
+      // Fetch is clicked, so no re-render is needed here.
+      branchFilters.prune = !!e.target.checked;
+      persist();
     }
   });
 

@@ -1121,7 +1121,10 @@ button svg {
 }
 .branches-refresh {
   flex: 0 0 auto;
-  padding: 3px 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
   background: transparent;
   border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
   color: var(--vscode-descriptionForeground);
@@ -1133,6 +1136,21 @@ button svg {
 .branches-refresh svg {
   width: 14px;
   height: 14px;
+}
+/* Prune checkbox beside the Fetch button. */
+.branches-prune {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.branches-prune input {
+  margin: 0;
+  cursor: pointer;
 }
 /* External-link glyph beside a branch name, linking to its GitHub tree. */
 .brow-link {
@@ -1373,6 +1391,13 @@ button svg {
 .bseg {
   display: inline-flex;
   align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.bseg.ins {
+  color: var(--vscode-charts-green, #89d185);
+}
+.bseg.del {
+  color: var(--vscode-charts-red, #f14c4c);
 }
 .brow-control {
   margin-left: auto;
