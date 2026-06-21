@@ -196,6 +196,7 @@ function branchesData() {
   return {
     repoRoot: REPO,
     repoName: "acme-web",
+    repoUrl: "https://github.com/acme/acme-web",
     prEnabled: true,
     github: { hasToken: true, connected: true, login: you, tokenType: "fine-grained" },
     viewerLogin: you,

@@ -10,10 +10,15 @@ const {
   getStatus,
   findRepoRoot,
   listBranches,
+  deleteBranch,
 } = require("../out/git.js");
 
 function git(cwd, args) {
   execFileSync("git", args, { cwd, stdio: "ignore" });
+}
+
+function gitOut(cwd, args) {
+  return execFileSync("git", args, { cwd }).toString().trim();
 }
 
 let dir;
@@ -115,8 +120,108 @@ test("listBranches annotates worktree association and remote-only branches", asy
   assert.ok(!branches.some((b) => b.name === "HEAD"));
 });
 
+test("listBranches never surfaces a phantom 'origin' from origin/HEAD", async () => {
+  // origin/HEAD shortens to the bare name "origin" via %(refname:short); make
+  // sure that symbolic alias does not leak in as a branch.
+  git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+
+  const branches = await listBranches(repo);
+  assert.ok(
+    !branches.some((b) => b.name === "origin"),
+    "no phantom 'origin' branch"
+  );
+  assert.ok(!branches.some((b) => b.name === "HEAD"));
+});
+
 test("findRepoRoot resolves a worktree to a git top-level", async () => {
   const root = await findRepoRoot(repo);
   assert.ok(root);
   assert.ok(fs.existsSync(path.join(root, ".git")));
+});
+
+// A fresh clone with a real bare "origin" so remote deletion is exercised end
+// to end, not faked with update-ref.
+function makeCloneWithRemote(name) {
+  const remote = path.join(dir, name + "-remote.git");
+  const work = path.join(dir, name + "-work");
+  git(dir, ["init", "--bare", "-b", "main", remote]);
+  git(dir, ["clone", remote, work]);
+  git(work, ["config", "user.email", "t@example.com"]);
+  git(work, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(work, "a.txt"), "hi\n");
+  git(work, ["add", "."]);
+  git(work, ["commit", "-m", "init"]);
+  git(work, ["push", "-u", "origin", "main"]);
+  return work;
+}
+
+function localBranches(cwd) {
+  return gitOut(cwd, ["branch", "--format=%(refname:short)"])
+    .split("\n")
+    .filter(Boolean);
+}
+
+function remoteBranches(cwd) {
+  return gitOut(cwd, ["branch", "-r", "--format=%(refname:short)"])
+    .split("\n")
+    .filter(Boolean);
+}
+
+test("deleteBranch removes only the local ref when remote is not requested", async () => {
+  const work = makeCloneWithRemote("del-local");
+  git(work, ["push", "origin", "main:topic"]); // remote topic exists
+  git(work, ["branch", "topic", "main"]); // local topic (merged into main)
+
+  await deleteBranch(work, "topic", { local: true });
+
+  assert.ok(!localBranches(work).includes("topic"), "local topic gone");
+  assert.ok(
+    remoteBranches(work).includes("origin/topic"),
+    "remote topic untouched"
+  );
+});
+
+test("deleteBranch removes the branch on origin when remote is requested", async () => {
+  const work = makeCloneWithRemote("del-remote");
+  git(work, ["push", "origin", "main:topic"]);
+  git(work, ["fetch", "origin"]);
+  assert.ok(remoteBranches(work).includes("origin/topic"));
+
+  await deleteBranch(work, "topic", { remote: true });
+
+  git(work, ["fetch", "origin", "--prune"]);
+  assert.ok(
+    !remoteBranches(work).includes("origin/topic"),
+    "remote topic deleted"
+  );
+});
+
+test("deleteBranch local+remote in one call clears both sides", async () => {
+  const work = makeCloneWithRemote("del-both");
+  git(work, ["push", "origin", "main:topic"]);
+  git(work, ["branch", "topic", "main"]);
+
+  await deleteBranch(work, "topic", { local: true, remote: true });
+
+  assert.ok(!localBranches(work).includes("topic"));
+  git(work, ["fetch", "origin", "--prune"]);
+  assert.ok(!remoteBranches(work).includes("origin/topic"));
+});
+
+test("deleteBranch refuses an unmerged local branch unless forced", async () => {
+  const work = makeCloneWithRemote("del-unmerged");
+  git(work, ["checkout", "-b", "topic"]);
+  fs.writeFileSync(path.join(work, "b.txt"), "only here\n");
+  git(work, ["add", "."]);
+  git(work, ["commit", "-m", "unmerged work"]);
+  git(work, ["checkout", "main"]);
+
+  await assert.rejects(
+    () => deleteBranch(work, "topic", { local: true }),
+    /not fully merged/i
+  );
+  assert.ok(localBranches(work).includes("topic"), "still present after refusal");
+
+  await deleteBranch(work, "topic", { local: true, force: true });
+  assert.ok(!localBranches(work).includes("topic"), "force deletes it");
 });

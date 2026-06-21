@@ -1096,6 +1096,79 @@ button svg {
   font-weight: 400;
   color: var(--vscode-descriptionForeground);
 }
+/* Right-aligned header controls: the "Branches on GitHub" link + refresh. */
+.branches-head-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.branches-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.branches-link:hover {
+  text-decoration: underline;
+}
+.branches-link svg {
+  width: 12px;
+  height: 12px;
+}
+.branches-refresh {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+  background: transparent;
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  color: var(--vscode-descriptionForeground);
+}
+.branches-refresh:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+  color: var(--vscode-foreground);
+}
+.branches-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+/* External-link glyph beside a branch name, linking to its GitHub tree. */
+.brow-link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--vscode-descriptionForeground);
+  text-decoration: none;
+}
+.brow-link:hover {
+  color: var(--vscode-textLink-foreground);
+}
+.brow-link svg {
+  width: 13px;
+  height: 13px;
+}
+/* Prev/Next pager under the branch list. */
+.bpager {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 4px 14px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.bpager-btn {
+  padding: 3px 12px;
+  background: transparent;
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  color: var(--vscode-foreground);
+}
+.bpager-btn:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+}
 .branches-body {
   flex: 1;
   min-height: 0;
@@ -1331,6 +1404,23 @@ button svg {
 .bworktree svg {
   width: 12px;
   height: 12px;
+}
+/* Delete-branch button: subtle ghost until hovered, then danger-red. Shown only
+   on branches the signed-in user authored. */
+.bdelete {
+  white-space: nowrap;
+  background: transparent;
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  color: var(--vscode-descriptionForeground);
+}
+.bdelete:hover {
+  color: var(--vscode-errorForeground, #f14c4c);
+  border-color: var(--vscode-errorForeground, #f14c4c);
+  background: transparent;
+}
+.bdelete svg {
+  width: 13px;
+  height: 13px;
 }
 /* PR line inside a branch row: top margin only when it follows the name row. */
 .brow .prline {

@@ -15,6 +15,7 @@ import {
   addWorktree,
   addBranchWorktree,
   removeWorktree,
+  deleteBranch,
   listWorktrees,
   getRemoteInfo,
   RemoteInfo,
@@ -61,17 +62,21 @@ interface ActionMessage {
     | "scopeScm"
     | "openBranches"
     | "loadBranches"
-    | "worktreeFromBranch";
+    | "refreshBranches"
+    | "worktreeFromBranch"
+    | "deleteBranch";
   path?: string;
   sessionId?: string;
   /** GitHub PAT, for setGithubToken. */
   token?: string;
   /** New on/off state, for togglePr. */
   value?: boolean;
-  /** Branch name, for worktreeFromBranch. */
+  /** Branch name, for worktreeFromBranch / deleteBranch. */
   branch?: string;
-  /** Whether the branch is remote-only, for worktreeFromBranch. */
+  /** Whether the branch is remote-only, for worktreeFromBranch / deleteBranch. */
   remoteOnly?: boolean;
+  /** Whether a matching origin/<branch> exists, for deleteBranch. */
+  hasRemote?: boolean;
 }
 
 export class WorktreeWebviewProvider
@@ -980,8 +985,18 @@ export class WorktreeWebviewProvider
     switch (msg.action) {
       case "loadBranches":
         return this.postBranches();
+      case "refreshBranches":
+        // A forced refresh: git fetch (fresh ahead/behind + remote branches)
+        // and a re-fetch of PR data, then re-post to both views.
+        return this.refresh(true);
       case "worktreeFromBranch":
         return this.worktreeFromBranch(msg.branch, msg.remoteOnly);
+      case "deleteBranch":
+        return this.deleteBranchAction(
+          msg.branch,
+          msg.remoteOnly,
+          msg.hasRemote
+        );
       case "agent":
         // Start a Claude agent in an existing worktree (its path is on the row).
         return this.agent(msg.path);
@@ -1006,9 +1021,16 @@ export class WorktreeWebviewProvider
     data.github = github;
     data.prEnabled = this.prService.isEnabled();
 
+    // Resolve the github.com origin once for both the web links and PR fetch.
+    // Branches themselves come from local git (gatherBranches -> listBranches),
+    // so the list is always scoped to this repo, never the user's other repos.
+    const repo = data.repoRoot
+      ? await this.remoteFor(data.repoRoot)
+      : undefined;
+    if (repo) data.repoUrl = `https://github.com/${repo.owner}/${repo.repo}`;
+
     if (data.prEnabled && github.hasToken && data.repoRoot) {
       try {
-        const repo = await this.remoteFor(data.repoRoot);
         if (repo) {
           const token = await getToken();
           if (token) {
@@ -1062,6 +1084,89 @@ export class WorktreeWebviewProvider
       return;
     }
     await this.agent(dir);
+    await this.refresh();
+    await this.postBranches();
+  }
+
+  /**
+   * Delete a branch the user owns, locally and/or on origin. When both a local
+   * ref and an origin/<branch> exist the user picks the scope (local, remote, or
+   * both); otherwise it deletes whichever side exists after a single confirm. An
+   * unmerged local branch prompts for a force delete (git's `-d` refusal). Both
+   * views refresh so the row drops or flips to remote-only.
+   */
+  private async deleteBranchAction(
+    branch?: string,
+    remoteOnly?: boolean,
+    hasRemote?: boolean
+  ): Promise<void> {
+    const name = branch?.trim();
+    if (!name) return;
+    const repoRoot = await this.primaryWorktree();
+    if (!repoRoot) {
+      vscode.window.showErrorMessage("No git repository in this window.");
+      return;
+    }
+    const hasLocal = !remoteOnly;
+    const hasRemoteRef = !!hasRemote;
+
+    let local = false;
+    let remote = false;
+    if (hasLocal && hasRemoteRef) {
+      const pick = await vscode.window.showWarningMessage(
+        `Delete branch "${name}"? Choose what to remove. The remote deletion cannot be undone.`,
+        { modal: true },
+        "Local + remote",
+        "Local only",
+        "Remote only"
+      );
+      if (!pick) return;
+      local = pick !== "Remote only";
+      remote = pick !== "Local only";
+    } else if (hasLocal) {
+      const ok = await vscode.window.showWarningMessage(
+        `Delete local branch "${name}"?`,
+        { modal: true },
+        "Delete"
+      );
+      if (ok !== "Delete") return;
+      local = true;
+    } else {
+      const ok = await vscode.window.showWarningMessage(
+        `Delete remote branch "origin/${name}"? This removes it on the remote and cannot be undone.`,
+        { modal: true },
+        "Delete"
+      );
+      if (ok !== "Delete") return;
+      remote = true;
+    }
+
+    try {
+      await deleteBranch(repoRoot, name, { local, remote });
+    } catch (err) {
+      const msg = (err as Error).message;
+      // `git branch -d` refuses an unmerged branch; the remote step never ran,
+      // so a force retry can safely redo local then proceed to the remote.
+      if (local && /not fully merged/i.test(msg)) {
+        const force = await vscode.window.showWarningMessage(
+          `Local branch "${name}" is not fully merged. Force delete it?`,
+          { modal: true },
+          "Force Delete"
+        );
+        if (force !== "Force Delete") return;
+        try {
+          await deleteBranch(repoRoot, name, { local, remote, force: true });
+        } catch (err2) {
+          vscode.window.showErrorMessage(
+            `Could not delete branch: ${(err2 as Error).message}`
+          );
+          return;
+        }
+      } else {
+        vscode.window.showErrorMessage(`Could not delete branch: ${msg}`);
+        return;
+      }
+    }
     await this.refresh();
     await this.postBranches();
   }

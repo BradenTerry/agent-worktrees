@@ -2,6 +2,29 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.2.0
+
+- **Delete branches you authored** - branches whose pull request you authored
+  now show a **Delete** action in the Branches view. When the branch exists both
+  locally and on the remote you choose what to remove (local, remote, or both);
+  otherwise it deletes whichever side exists after a single confirm. An unmerged
+  local branch prompts before force-deleting so nothing is lost by accident.
+  Deletion is offered only for branches you authored, since git records no branch
+  owner and PR authorship is what identifies yours.
+- **Jump to GitHub from a branch** - each branch name links to that branch on
+  GitHub, and a **Branches on GitHub** link in the header opens the repository's
+  full branches page.
+- **Refresh button** - the Branches view header has a refresh control that
+  fetches the latest remote branches, ahead/behind counts, and PR status.
+- **Paged branch list** - long branch lists are paginated (25 per page) so they
+  stay easy to scan.
+- **Steadier Branches view** - the view only rebuilds when its data actually
+  changed and now preserves your scroll position, so a background refresh no
+  longer jumps you back to the top.
+- **Fix: phantom "origin" branch** - the remote default-branch alias
+  (`origin/HEAD`) was being listed as a branch named `origin`; it is now filtered
+  out.
+
 ## 2.1.0
 
 - **Merge-readiness pills on the PR view** - the PR summary now flags two

@@ -210,17 +210,19 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
 
   // origin/<name> set: marks which locals also live on the remote, and supplies
   // the remote-only branches. origin/HEAD is a symbolic alias for the default
-  // branch, never a branch of its own.
+  // branch, never a branch of its own. Use the FULL refname here: `refname:short`
+  // collapses `refs/remotes/origin/HEAD` to the bare remote name `origin`, which
+  // would slip past a `origin/HEAD` guard and surface a phantom "origin" branch.
   const { stdout: remoteOut } = await execAsync(
-    "git for-each-ref --format='%(refname:short)' refs/remotes/origin",
+    "git for-each-ref --format='%(refname)' refs/remotes/origin",
     { cwd }
   );
   const originNames = new Set<string>();
   for (const raw of remoteOut.split("\n")) {
     const ref = raw.replace(/^'/, "").replace(/'$/, "").trimEnd();
-    if (ref === "" || ref === "origin/HEAD") continue;
-    const name = ref.replace(/^origin\//, "");
-    if (name) originNames.add(name);
+    if (ref === "") continue;
+    const name = ref.replace(/^refs\/remotes\/origin\//, "");
+    if (name && name !== "HEAD") originNames.add(name);
   }
 
   const localNames = new Set(branches.map((b) => b.name));
@@ -319,6 +321,34 @@ export function parseGitHubRemote(url: string): RemoteInfo | undefined {
   const repo = m[2];
   if (!owner || !repo) return undefined;
   return { owner, repo };
+}
+
+/**
+ * Delete a branch locally and/or on origin. `force` uses `git branch -D`
+ * (instead of -d) so an unmerged local branch is still removed. The local
+ * deletion runs before the remote push; each step throws with git's trimmed
+ * stderr on failure.
+ */
+export async function deleteBranch(
+  repoRoot: string,
+  name: string,
+  opts: { local?: boolean; remote?: boolean; force?: boolean }
+): Promise<void> {
+  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
+  const run = async (cmd: string) => {
+    try {
+      await execAsync(cmd, { cwd: repoRoot });
+    } catch (err) {
+      const msg = String((err as { stderr?: string }).stderr ?? err);
+      throw new Error(msg.trim());
+    }
+  };
+  if (opts.local) {
+    await run(`git branch ${opts.force ? "-D" : "-d"} ${q(name)}`);
+  }
+  if (opts.remote) {
+    await run(`git push origin --delete ${q(name)}`);
+  }
 }
 
 /** Remove a worktree. Passes `--force` only when explicitly requested. */

@@ -201,6 +201,10 @@ export interface BranchData {
   prEnabled?: boolean;
   /** Authenticated login, attached by the webview so the "you" filters work. */
   viewerLogin?: string;
+  /** GitHub web base for this repo (https://github.com/owner/repo), attached by
+   *  the webview when origin is a github.com remote. Used to link branch rows
+   *  and the repo's branches page. */
+  repoUrl?: string;
 }
 
 /**

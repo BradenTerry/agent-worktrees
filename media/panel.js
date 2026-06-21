@@ -597,6 +597,10 @@
         '<div class="empty">No git repository in this window.<br/>Open a folder that is a git repository to see its worktrees.</div>';
       return;
     }
+    // Preserve the cards scroll offset across the innerHTML swap so a routine
+    // refresh doesn't bounce the user back to the top (see renderBranches).
+    const prevCards = root.querySelector(".cards");
+    const y = prevCards ? prevCards.scrollTop : 0;
     const wts = data.worktrees || [];
     const cards = wts.map(card).join("");
     root.innerHTML =
@@ -604,6 +608,8 @@
       '<div class="cards">' +
       (cards || '<div class="empty">No worktrees found.</div>') +
       "</div>";
+    const nextCards = root.querySelector(".cards");
+    if (nextCards) nextCards.scrollTop = y;
   }
 
   function toggle(path) {
@@ -932,6 +938,13 @@
   // "Branches" toolbar button just asks the extension to open this tab.
   let branchesLoading = false;
   let branchData = null;
+  // Signature of the last branch payload we rendered, so an unchanged poll push
+  // is dropped instead of rebuilding the DOM (and resetting scroll).
+  let lastBranchSig = "";
+  // Client-side pagination over the filtered branch list, so a repo with many
+  // branches stays scannable. Reset to 0 whenever the filtered set changes.
+  let branchPage = 0;
+  const BRANCH_PAGE_SIZE = 25;
   // Tracks which filter/sort dropdown is open (webview-only UI state).
   let openMenu = "";
 
@@ -1223,6 +1236,14 @@
     return b.hasRemote ? "both" : "local";
   }
 
+  // GitHub web URL for a branch's tree. Branch names can contain slashes, which
+  // GitHub keeps as path separators, so encode each segment but not the slashes.
+  function branchUrl(data, name) {
+    if (!data || !data.repoUrl) return "";
+    const seg = String(name).split("/").map(encodeURIComponent).join("/");
+    return data.repoUrl + "/tree/" + seg;
+  }
+
   function branchRow(b, data) {
     const pr = prAvailable(data) ? b.pr : null;
     const kind = branchKind(b);
@@ -1272,18 +1293,78 @@
         icons.agentMark +
         "Create worktree &amp; start agent</button>";
 
+    // Only branches the signed-in user authored (their PR's author) can be
+    // deleted, since git itself carries no branch ownership. When both a local
+    // ref and origin/<branch> exist the extension prompts for the scope.
+    const mine =
+      pr && data && data.viewerLogin && pr.author === data.viewerLogin;
+    const deleteBtn = mine
+      ? '<button class="bdelete danger" data-action="deleteBranch" data-branch="' +
+        esc(b.name) +
+        '" data-remote="' +
+        (b.remoteOnly ? "1" : "0") +
+        '" data-hasremote="' +
+        (b.hasRemote ? "1" : "0") +
+        '" title="Delete this branch (local and/or remote)">' +
+        icons.trash +
+        "Delete</button>"
+      : "";
+
+    const url = branchUrl(data, b.name);
+    const nameLink = url
+      ? '<a class="brow-link" href="' +
+        esc(url) +
+        '" title="View this branch on GitHub" target="_blank" rel="noopener noreferrer">' +
+        icons.external +
+        "</a>"
+      : "";
+
     return (
       '<div class="brow">' +
       '<div class="brow-top">' +
       '<span class="brow-name">' +
       esc(b.name) +
       "</span>" +
+      nameLink +
       remoteMark +
       '<span class="brow-control">' +
       control +
+      deleteBtn +
       "</span>" +
       "</div>" +
       (pr ? prLine(pr) : "") +
+      "</div>"
+    );
+  }
+
+  // Prev/Next pager under the branch list. Hidden when everything fits on one
+  // page. Buttons are disabled (so their click never fires) at the ends.
+  function branchPager(total, start, shown, pageCount) {
+    if (total <= BRANCH_PAGE_SIZE) return "";
+    const from = total ? start + 1 : 0;
+    const to = start + shown;
+    const prevDis = branchPage <= 0 ? " disabled" : "";
+    const nextDis = branchPage >= pageCount - 1 ? " disabled" : "";
+    return (
+      '<div class="bpager">' +
+      '<span class="bpager-info">' +
+      from +
+      "–" +
+      to +
+      " of " +
+      total +
+      "</span>" +
+      '<button class="bpager-btn" data-page="prev"' +
+      prevDis +
+      ">Prev</button>" +
+      '<span class="bpager-pos">Page ' +
+      (branchPage + 1) +
+      " / " +
+      pageCount +
+      "</span>" +
+      '<button class="bpager-btn" data-page="next"' +
+      nextDis +
+      ">Next</button>" +
       "</div>"
     );
   }
@@ -1300,13 +1381,32 @@
       body = '<div class="empty">No branches found in this repository.</div>';
     } else {
       const rows = visibleBranches(data);
-      const list = rows.length
-        ? rows.map((b) => branchRow(b, data)).join("")
+      const total = rows.length;
+      const pageCount = Math.max(1, Math.ceil(total / BRANCH_PAGE_SIZE));
+      if (branchPage >= pageCount) branchPage = pageCount - 1;
+      if (branchPage < 0) branchPage = 0;
+      const start = branchPage * BRANCH_PAGE_SIZE;
+      const pageRows = rows.slice(start, start + BRANCH_PAGE_SIZE);
+      const list = pageRows.length
+        ? pageRows.map((b) => branchRow(b, data)).join("")
         : '<div class="empty">No branches match the current filters.</div>';
-      body = filterBar(data) + '<div class="brows">' + list + "</div>";
+      body =
+        filterBar(data) +
+        '<div class="brows">' +
+        list +
+        "</div>" +
+        branchPager(total, start, pageRows.length, pageCount);
     }
 
     const repoName = (data && data.repoName) || "";
+    const repoLink =
+      data && data.repoUrl
+        ? '<a class="branches-link" href="' +
+          esc(data.repoUrl) +
+          '/branches" title="View all branches for this repo on GitHub" target="_blank" rel="noopener noreferrer">' +
+          icons.external +
+          "Branches on GitHub</a>"
+        : "";
     return (
       '<div class="settings-view branches-view">' +
       '<div class="settings-head">' +
@@ -1315,6 +1415,12 @@
       "Branches" +
       (repoName ? ' <span class="branches-repo">' + esc(repoName) + "</span>" : "") +
       "</span>" +
+      '<div class="branches-head-actions">' +
+      repoLink +
+      '<button class="branches-refresh" data-action="refreshBranches" title="Reload branches">' +
+      icons.refresh +
+      "</button>" +
+      "</div>" +
       "</div>" +
       '<div class="branches-body">' +
       body +
@@ -1324,7 +1430,14 @@
   }
 
   function renderBranches() {
+    // The scroll region (.brows) is recreated by the innerHTML swap, so capture
+    // its offset and restore it onto the fresh node — a background poll re-render
+    // must not jerk the list back to the top while the user is scrolled down.
+    const prev = root.querySelector(".brows");
+    const y = prev ? prev.scrollTop : 0;
     root.innerHTML = branchesContent();
+    const next = root.querySelector(".brows");
+    if (next) next.scrollTop = y;
   }
 
   // Branches-tab mount: request the branch + PR payload, show the loading state
@@ -1358,6 +1471,15 @@
     }
     // Branches view: filter/sort dropdowns and selections (webview-only).
     if (VIEW === "branches") {
+      const pageBtn = e.target.closest("[data-page]");
+      if (pageBtn) {
+        const dir = pageBtn.getAttribute("data-page");
+        branchPage = dir === "prev" ? branchPage - 1 : branchPage + 1;
+        renderBranches(); // clamps the page; restores scroll, then jump to top
+        const brows = root.querySelector(".brows");
+        if (brows) brows.scrollTop = 0;
+        return;
+      }
       const menuToggle = e.target.closest("[data-menu-toggle]");
       if (menuToggle) {
         const id = menuToggle.getAttribute("data-menu-toggle");
@@ -1371,6 +1493,7 @@
         const i = branchFilters.authors.indexOf(name);
         if (i === -1) branchFilters.authors.push(name);
         else branchFilters.authors.splice(i, 1);
+        branchPage = 0;
         persist();
         renderBranches();
         return;
@@ -1379,6 +1502,7 @@
       if (review) {
         branchFilters.reviews = review.getAttribute("data-review") || "";
         openMenu = "";
+        branchPage = 0;
         persist();
         renderBranches();
         return;
@@ -1387,6 +1511,7 @@
       if (sort) {
         branchFilters.sort = sort.getAttribute("data-sort") || "newest";
         openMenu = "";
+        branchPage = 0;
         persist();
         renderBranches();
         return;
@@ -1406,6 +1531,7 @@
         } else if (kind === "assigned") {
           branchFilters.assignedToYou = !branchFilters.assignedToYou;
         }
+        branchPage = 0;
         persist();
         renderBranches();
         return;
@@ -1448,6 +1574,16 @@
         send("worktreeFromBranch", {
           branch: btn.getAttribute("data-branch") || undefined,
           remoteOnly: btn.getAttribute("data-remote") === "1",
+        });
+        return;
+      }
+      // Delete a user-owned branch; the extension prompts for local/remote/both
+      // when both refs exist. Carry which sides exist so it knows what to offer.
+      if (action === "deleteBranch") {
+        send("deleteBranch", {
+          branch: btn.getAttribute("data-branch") || undefined,
+          remoteOnly: btn.getAttribute("data-remote") === "1",
+          hasRemote: btn.getAttribute("data-hasremote") === "1",
         });
         return;
       }
@@ -1515,12 +1651,17 @@
       // The branches editor tab only consumes its own payload. A stray
       // {type:"update"} (it should never arrive here) is ignored, not rendered.
       if (msg.type === "branches") {
-        // Fresh branch + PR payload. Store and re-render in place; after a
-        // create the extension re-posts this, flipping the row to "Worktree
-        // exists".
+        // Fresh branch + PR payload. The extension re-posts this on every poll
+        // (worktree/git changes), so skip the re-render when nothing the view
+        // depends on actually changed — only a real change is worth rebuilding
+        // the DOM (mirrors the settings view's ghSig dedupe). This is what keeps
+        // a background poll from disturbing the user's scroll position.
+        const sig = JSON.stringify(msg.data);
+        const changed = sig !== lastBranchSig;
+        lastBranchSig = sig;
         branchData = msg.data;
         branchesLoading = false;
-        renderBranches();
+        if (changed) renderBranches();
       }
       return;
     }
