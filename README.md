@@ -172,6 +172,36 @@ local tracking branch for a remote-only branch), starts a Claude agent in it via
 the existing `agent(dir)` flow in the current window, then refreshes the sidebar
 and re-posts the branch data so the row flips to the marker.
 
+**Deleting branches.** A row for a branch the signed-in user authored (its PR
+author equals `viewer.login`) shows a **Delete** action. Git carries no branch
+ownership, so PR authorship is the only signal — branches with no PR, or when the
+GitHub integration is off, never show it. Clicking it posts a `deleteBranch`
+message carrying the branch name and which sides exist (`remoteOnly`,
+`hasRemote`). The provider then prompts via a modal: when both a local ref and
+`origin/<name>` exist the user picks **Local + remote / Local only / Remote
+only**; otherwise a single confirm. `git.deleteBranch` runs `git branch -d`
+(local) and/or `git push origin --delete` (remote); an unmerged local branch is
+refused by `-d` and the provider offers a force delete (`-D`). Both views refresh
+afterward so the row drops or flips to remote-only.
+
+**GitHub links.** When `origin` is a github.com remote the provider attaches
+`repoUrl` (`https://github.com/<owner>/<repo>`) to the payload. Each row links its
+name to the branch tree (`/tree/<branch>`, each path segment encoded so slashes
+survive), and the header carries a **Branches on GitHub** link to `/branches`.
+These are plain `<a target="_blank">` anchors that VS Code opens externally — no
+round-trip.
+
+**Refresh.** A refresh button in the header posts `refreshBranches`, which runs a
+forced `refresh(true)`: a `git fetch` for fresh ahead/behind and remote branches
+plus a re-fetch of PR data, re-posted to both views.
+
+**Performance.** The webview only rebuilds the DOM when the posted payload
+actually changed (it compares a JSON signature, mirroring the settings view's
+`ghSig` guard), so a routine poll no longer wipes the list or resets the user's
+scroll position; renders that do happen restore the `.brows` scroll offset. The
+filtered list is paginated client-side (25 per page) with a Prev/Next pager, and
+the page resets to the first whenever a filter or sort changes.
+
 ```mermaid
 flowchart TD
     TB["sidebar panel.js toolbar"] -->|openBranches| WV[WorktreeWebviewProvider]
@@ -182,11 +212,17 @@ flowchart TD
     WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
     BO --> FB["Filter / Sort bar<br/>Author · Reviews · Sort · presets"]
     FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]
-    CS --> ROWS[Branch rows]
+    CS --> PG["Client-side pagination<br/>25/page, Prev/Next"]
+    PG --> ROWS[Branch rows]
     ROWS -->|no worktree, worktreeFromBranch| WV
+    ROWS -->|"authored branch, deleteBranch"| DB["git.deleteBranch<br/>branch -d/-D and/or<br/>push origin --delete<br/>(modal: local/remote/both)"]
+    ROWS -->|"name / header links"| GH["github.com/owner/repo<br/>/tree/branch · /branches"]
+    EP -->|refreshBranches| RFB["refresh(true):<br/>git fetch + re-fetch PRs"]
     WV --> AW["git.addBranchWorktree<br/>+ remote-tracking path"]
     WV --> AG["agent(dir): Claude terminal<br/>in current window"]
     AW --> RF[refresh] --> BO
+    DB --> RF
+    RFB --> BO
     PRS["PrService REST fetchPr<br/>worktree cards, unchanged"] -. separate path .- FPB
 ```
 
