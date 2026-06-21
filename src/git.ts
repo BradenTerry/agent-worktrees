@@ -186,6 +186,8 @@ export interface BranchInfo {
   insertions: number;
   /** Lines removed vs the compare base. */
   deletions: number;
+  /** The repo's default branch (origin/HEAD, e.g. "main"). Never deletable. */
+  isDefault: boolean;
 }
 
 /**
@@ -232,6 +234,7 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       behind,
       insertions: 0,
       deletions: 0,
+      isDefault: false,
     });
   }
 
@@ -265,6 +268,7 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       behind: 0,
       insertions: 0,
       deletions: 0,
+      isDefault: false,
     });
   }
 
@@ -273,6 +277,13 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   // concurrency keeps a many-branch repo from spawning a git process per branch
   // all at once. Any per-branch failure leaves that branch's counts at zero.
   const defaultRef = await resolveDefaultBranchRef(cwd);
+  // Flag the default branch so the UI can protect it from deletion. This is
+  // authoritative (origin/HEAD only, no guessing) — distinct from defaultRef,
+  // which is just a reasonable base to diff against.
+  const defaultName = await defaultBranchName(cwd);
+  if (defaultName) {
+    for (const b of branches) if (b.name === defaultName) b.isDefault = true;
+  }
   await mapLimit(branches, 8, async (b) => {
     const tip = b.remoteOnly ? `origin/${b.name}` : b.name;
     const base = b.remoteOnly
@@ -294,9 +305,33 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
 }
 
 /**
- * The repo's default branch ref (e.g. "origin/main"), resolved from
- * origin/HEAD. Falls back to the first of origin/main, origin/master, main,
- * master that exists, or undefined when none do (a fresh repo with no commits).
+ * The repo's default branch short name from origin/HEAD (e.g. "main", "master",
+ * "trunk" — whatever git reports), or undefined when origin/HEAD is not set.
+ * Authoritative and used to protect the default branch from deletion, so it
+ * trusts git rather than guessing at a name.
+ */
+export async function defaultBranchName(
+  cwd: string
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execAsync(
+      "git symbolic-ref --quiet refs/remotes/origin/HEAD",
+      { cwd }
+    );
+    const ref = stdout.trim().replace(/^refs\/remotes\/origin\//, "");
+    return ref || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A reasonable base to diff a branch against when it has no upstream: the
+ * default branch ref (e.g. "origin/main"), resolved from origin/HEAD, falling
+ * back to the first of origin/main, origin/master, main, master that exists, or
+ * undefined when none do. This is a display heuristic for ahead/behind and the
+ * line diff, not the authoritative default-branch identity (see
+ * `defaultBranchName`).
  */
 async function resolveDefaultBranchRef(
   cwd: string

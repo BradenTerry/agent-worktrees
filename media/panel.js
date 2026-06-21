@@ -56,6 +56,11 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v7M5 6.5l3 3 3-3"/><path d="M3.5 13.5h9"/></svg>',
     autoMerge:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6"/><path d="M11.7 7.4C11 10 7 9.5 4 9.5"/></svg>',
+    // In-progress spinner: a faint full ring with a brighter arc that the .spin
+    // CSS animation rotates. Swapped in for a button's own icon while its action
+    // is running (see markBusy).
+    spinner:
+      '<svg class="spin" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="5.5" stroke-opacity="0.25"/><path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5"/></svg>',
   };
 
   // Worktree paths whose agent list is expanded, persisted so re-renders keep
@@ -108,6 +113,41 @@
 
   function send(action, extra) {
     vscode.postMessage(Object.assign({ type: "action", action }, extra || {}));
+  }
+
+  // Actions that kick off real (often network/git) work the user waits on. Their
+  // button gets an in-progress spinner on click; it clears when the next payload
+  // re-renders the view (or via a safety timeout if no re-render follows).
+  const BUSY_ACTIONS = new Set([
+    "agent",
+    "agentWorktree",
+    "openWindow",
+    "openBranches",
+    "worktreeFromBranch",
+    "fetchBranches",
+    "refreshGithub",
+  ]);
+
+  // Swap a button's own icon for the spinner and disable it while its action
+  // runs. The view rebuilds its DOM from data on the next render, which discards
+  // this transient state; the timeout only restores the icon in the rare case
+  // no re-render arrives (e.g. a fetch that returned identical data), so a
+  // spinner never sticks forever.
+  function markBusy(btn) {
+    if (!btn || btn.classList.contains("busy")) return;
+    const svg = btn.querySelector("svg");
+    if (!svg) return;
+    btn.classList.add("busy");
+    btn.disabled = true;
+    const original = svg.outerHTML;
+    svg.outerHTML = icons.spinner;
+    setTimeout(() => {
+      if (!btn.isConnected || !btn.classList.contains("busy")) return;
+      const cur = btn.querySelector("svg");
+      if (cur) cur.outerHTML = original;
+      btn.classList.remove("busy");
+      btn.disabled = false;
+    }, 15000);
   }
 
   // Status metadata. Colors come from VS Code chart variables in panel.css.
@@ -427,7 +467,12 @@
           "Auto-merge</span>"
       );
 
-    const rows = [
+    const rows = [];
+    if (pr.title)
+      rows.push(
+        '<div class="pr-row pr-title">' + esc(pr.title) + "</div>"
+      );
+    rows.push(
       '<div class="pr-row pr-head">' +
         '<span class="pr-ico">' +
         icons.pr +
@@ -443,8 +488,8 @@
         '<span class="pr-open">' +
         icons.external +
         "</span>" +
-        "</div>",
-    ];
+        "</div>"
+    );
     if (reviewSegs.length)
       rows.push(
         '<div class="pr-row"><span class="pr-row-label">Reviews</span>' +
@@ -1318,10 +1363,11 @@
     // A local branch is always yours to delete (it lives on this machine); a
     // remote-only branch is offered for delete only when you authored its PR,
     // since git itself carries no branch ownership. When both a local ref and
-    // origin/<branch> exist the extension prompts for the scope.
+    // origin/<branch> exist the extension prompts for the scope. The repo's
+    // default branch (e.g. main) is never deletable.
     const authoredByYou =
       pr && data && data.viewerLogin && pr.author === data.viewerLogin;
-    const canDelete = !b.remoteOnly || authoredByYou;
+    const canDelete = !b.isDefault && (!b.remoteOnly || authoredByYou);
     const deleteBtn = canDelete
       ? '<button class="bdelete danger" data-action="deleteBranch" data-branch="' +
         esc(b.name) +
@@ -1447,9 +1493,17 @@
       '<input type="checkbox" id="branches-prune"' +
       (branchFilters.prune ? " checked" : "") +
       " /> Prune</label>" +
-      '<button class="branches-refresh" data-action="fetchBranches" title="Fetch from the remote to refresh branch and PR state">' +
+      '<button class="branches-refresh" data-action="fetchBranches" title="Fetch from the remote to refresh local branch state (ahead/behind, diffs)">' +
       icons.refresh +
       " Fetch</button>" +
+      // Refresh GitHub is the API-only counterpart to the git-only Fetch: it
+      // re-polls PR/CI status without a git fetch. Only useful (and only shown)
+      // when a token is stored.
+      (data && data.github && data.github.hasToken
+        ? '<button class="branches-refresh" data-action="refreshGithub" title="Re-query the GitHub API to refresh PR and CI status">' +
+          icons.pr +
+          " Refresh GitHub</button>"
+        : "") +
       "</div>" +
       "</div>" +
       '<div class="branches-body">' +
@@ -1570,6 +1624,10 @@
     if (btn) {
       e.stopPropagation();
       const action = btn.getAttribute("data-action");
+      // Show an in-progress spinner for actions that do real work the user waits
+      // on (git/network/window). Webview-only actions below return early before
+      // this matters, so it is safe to mark here for any matching action.
+      if (BUSY_ACTIONS.has(action)) markBusy(btn);
       // Skills modal is handled entirely in the webview: the list is already
       // in the data, so there is no round-trip to the extension.
       if (action === "showSkills") {
@@ -1616,6 +1674,11 @@
       if (action === "fetchBranches") {
         const prune = root.querySelector("#branches-prune");
         send("fetchBranches", { value: prune ? !!prune.checked : true });
+        return;
+      }
+      // Refresh GitHub: API-only re-poll of PR/CI status, no git fetch.
+      if (action === "refreshGithub") {
+        send("refreshGithub");
         return;
       }
       send(action, {
@@ -1697,7 +1760,11 @@
         lastBranchSig = sig;
         branchData = msg.data;
         branchesLoading = false;
-        if (changed) renderBranches();
+        // A changed payload rebuilds the DOM (restoring real icons over any
+        // spinners). When it is unchanged (a no-op fetch/refresh) re-render only
+        // if a spinner is pending, so the button drops its spinner without making
+        // background polls churn the DOM; renderBranches preserves scroll.
+        if (changed || root.querySelector(".busy")) renderBranches();
       }
       return;
     }

@@ -190,6 +190,8 @@ export interface BranchVM {
   /** Lines added / removed vs the compare base across the branch's commits. */
   insertions: number;
   deletions: number;
+  /** The repo's default branch (e.g. main); never offered for deletion. */
+  isDefault: boolean;
   /** PR rollup attached by the webview; null = looked up, no PR;
    *  undefined = not looked up (integration off or no token). */
   pr?: BranchPrInfo | null;
@@ -237,6 +239,7 @@ export async function gatherBranches(): Promise<BranchData> {
     behind: b.behind,
     insertions: b.insertions,
     deletions: b.deletions,
+    isDefault: b.isDefault,
   }));
 
   vms.sort((a, b) =>
