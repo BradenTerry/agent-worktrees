@@ -545,13 +545,13 @@
       esc(data.repoName || "Repository") +
       "</span>" +
       '<span class="tools">' +
-      '<button class="tbtn icon" data-action="agentWorktree" title="New Agent &amp; Worktree: create a worktree with Claude (claude -w) and start an agent in it">' +
+      '<button class="tbtn icon" data-action="agentWorktree" data-tip="New Agent &amp; Worktree: create a worktree with Claude (claude -w) and start an agent in it">' +
       icons.agentWorktree +
       "</button>" +
-      '<button class="tbtn ghost" data-action="openBranches" title="Branches: list every branch and create a worktree from one">' +
+      '<button class="tbtn ghost" data-action="openBranches" data-tip="Branches: list every branch and create a worktree from one">' +
       icons.branch +
       "</button>" +
-      '<button class="tbtn ghost" data-tool="collapseAll" title="Collapse all">' +
+      '<button class="tbtn ghost" data-tool="collapseAll" data-tip="Collapse all">' +
       icons.collapse +
       "</button>" +
       "</span>" +
