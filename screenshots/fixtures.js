@@ -260,6 +260,7 @@ function branchesData() {
           assignees: [you],
           reviewedByViewer: false,
           reviewRequestedFromViewer: false,
+          autoMerge: true,
           createdAt: iso(26 * HOUR),
           updatedAt: iso(30 * MIN),
         },

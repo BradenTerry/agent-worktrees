@@ -58,11 +58,11 @@ state, and its running agents in one view.
   authored), and — for branches without a worktree — a **Create worktree & start
   agent** action that creates the worktree in the current window and launches a
   Claude agent. A header **Fetch** button with a **Prune** toggle refreshes from
-  the remote. By default a **Mine + to review** scope narrows the list to branches
-  you created (local branches, or remote-only branches whose PR you authored) plus
-  any whose review involved you; clear the chip to see every branch. When the PR
-  integration is connected, rows carry their open PR's rollup and the view offers
-  client-side author/reviews filters, sorting, and preset chips.
+  the remote. When the PR integration is connected, rows carry their open PR's
+  rollup and the view offers client-side filters with no default selection — an
+  **Author** select populated from the fetched PRs and a single-select **Reviews**
+  select (the GitHub review statuses) — plus sorting and **Open PR** / **Auto
+  merge** toggle chips.
 
 ## Agent status from hooks
 
@@ -167,16 +167,21 @@ This GraphQL path is used **only** by the branches view. The per-worktree PR
 badges on the cards keep the existing per-branch REST `fetchPr` path unchanged,
 so the two are separate code paths.
 
-Filtering and sorting (the **Mine + to review** scope, author, reviews, sort,
-preset chips) run entirely client-side over that single cached payload — changing
-a filter or sort issues no new network requests. The **Mine + to review** scope
-is on by default: it keeps a branch when it has a local ref, or (for a
-remote-only branch) when its PR author is the viewer, the viewer's review was
-requested, or the viewer already reviewed it; with no PR data it falls back to
-local branches. While any PR filter or PR sort is active, branches with no open PR
-are hidden. With the integration off or no token connected, only the branch-name
-sort is offered and the PR-based controls are hidden (the scope chip stays). The
-selected filters and sort persist across reopens via the webview state.
+Filtering and sorting (author, reviews, sort, the Open PR / Auto merge chips) run
+entirely client-side over that single cached payload — changing a filter or sort
+issues no new network requests. Nothing is selected by default: the view lists
+every branch until you pick a filter. The **Author** select is a multi-select
+populated from the fetched PRs' authors (`authorOptions`, with the viewer pinned
+first); the **Reviews** select is single-select over the GitHub review statuses
+(`No reviews`, `Review required`, `Approved`, `Changes requested`, `Reviewed by
+you`, `Not reviewed by you`, `Awaiting review from you`) with an `Any` entry that
+clears it. The **Open PR** chip keeps only branches whose PR is open or draft, and
+**Auto merge** keeps only those whose PR has auto-merge enabled (`autoMergeRequest`
+on the GraphQL node). While any PR filter or PR sort is active, branches with no
+open PR are hidden. With
+the integration off or no token connected, only the branch-name sort is offered and
+the PR-based controls are hidden. The selected filters and sort persist across
+reopens via the webview state.
 
 A branch with no worktree shows a **Create worktree & start agent** action; one
 that already has a worktree shows a **Worktree exists** marker plus a **Start
@@ -243,7 +248,7 @@ flowchart TD
     WV --> LB["git.listBranches<br/>local + remote-only,<br/>worktree association"]
     WV --> FPB["github.fetchPrsByBranch<br/>1 POST /graphql,<br/>all open PRs + rollups"]
     WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
-    BO --> FB["Filter / Sort bar<br/>Author · Reviews · Sort · presets"]
+    BO --> FB["Filter / Sort bar<br/>Author · Reviews · Open PR · Auto merge · Sort"]
     FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]
     CS --> PG["Client-side pagination<br/>25/page, Prev/Next"]
     PG --> ROWS[Branch rows]

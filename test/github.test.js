@@ -211,6 +211,7 @@ function samplePrBody() {
               createdAt: "2026-06-01T00:00:00Z",
               updatedAt: "2026-06-10T00:00:00Z",
               headRefName: "feat-a",
+              autoMergeRequest: { enabledAt: "2026-06-07T00:00:00Z" },
               author: { login: "alice" },
               assignees: { nodes: [{ login: "bob" }, { login: "you" }] },
               comments: { totalCount: 3 },
@@ -286,6 +287,7 @@ test("fetchPrsByBranch: maps a PR (state, checks, reviews, viewer, author, assig
 
       assert.strictEqual(pr.reviewedByViewer, true); // "you" submitted a review
       assert.strictEqual(pr.reviewRequestedFromViewer, true); // "you" is requested
+      assert.strictEqual(pr.autoMerge, true); // autoMergeRequest present
     }
   );
 });
@@ -327,6 +329,16 @@ test("fetchPrsByBranch: includes a merged PR (state=merged)", async () => {
       assert.ok(pr, "merged PR is mapped");
       assert.strictEqual(pr.state, "merged");
       assert.strictEqual(pr.number, 9);
+    }
+  );
+});
+
+test("fetchPrsByBranch: autoMerge is false when no autoMergeRequest is set", async () => {
+  await withFetch(
+    () => gqlResponse(200, gqlNodes([prNode({ headRefName: "feat-a" })])),
+    async () => {
+      const { prs } = await fetchPrsByBranch("tok", REPO);
+      assert.strictEqual(prs.get("feat-a").autoMerge, false);
     }
   );
 });

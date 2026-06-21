@@ -66,29 +66,24 @@ remote-only branch checks it out as a new local tracking branch.
 When the GitHub integration is connected, each branch row also shows its open
 PR's status — the same state badge, CI checks, review and comment summary you see
 on the worktree cards. A filter and sort bar across the top lets you slice the
-list without any extra loading:
+list without any extra loading. Nothing is filtered by default — every branch is
+listed until you make a selection:
 
-- **Mine + to review** (on by default) — scopes the list to branches you created
-  (any local branch, or a remote-only branch whose PR you authored) plus any
-  whose review involved you (review was requested from you at some point, or you
-  already reviewed it). Click the chip to clear it and see every branch.
-- **Author** (multi-select) — narrow to PRs by one or more authors; you are
-  pinned to the top of the list.
-- **Reviews** — No reviews, Review required, Approved, Changes requested,
-  Reviewed by you, Not reviewed by you, or Awaiting review from you.
+- **Author** — a select list of the authors found across the repo's PRs (pick one
+  or more; you are pinned to the top of the list).
+- **Reviews** — a select list of the review statuses: No reviews, Review required,
+  Approved, Changes requested, Reviewed by you, Not reviewed by you, or Awaiting
+  review from you. Pick one to filter; choose **Any** to clear it.
 - **Sort** — Newest, Oldest, Most or Least commented, Recently or Least recently
   updated.
-- **Preset chips** — one click for **Your PRs**, **Awaiting your review**, or
-  **Assigned to you**.
+- **Open PR** / **Auto merge** — toggle chips to show only branches whose PR is
+  open, or whose PR has auto-merge enabled.
 
-The **Mine + to review** scope keeps the view focused on the branches you work
-with by default; clearing it restores the full repository list. While a PR filter
-or sort is active, branches with no open PR are hidden. Without
-the GitHub integration connected, the **Mine + to review** scope falls back to
-your local branches (the PR-based controls and PR sorts are hidden); clear it to
-list every branch and create worktrees as usual. Your filter and sort choices are
-remembered the next time you open the view. Close it like any editor tab; the
-Branches button reopens it.
+While a PR filter or sort is active, branches with no open PR are hidden. Without
+the GitHub integration connected, the author/reviews selects and PR sorts are
+hidden, and the view simply lists every branch so you can create worktrees as
+usual. Your filter and sort choices are remembered the next time you open the
+view. Close it like any editor tab; the Branches button reopens it.
 
 **Fetch and prune.** A **Fetch** button in the header refreshes everything from
 the remote — ahead/behind counts, line diffs, and PR merge state — so the view

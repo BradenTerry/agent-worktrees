@@ -34,14 +34,13 @@ test("settings - GitHub PR integration", async ({ page }) => {
 test("branches - all branches with PR status and filters", async ({ page }) => {
   const data = branchesData();
   // The branches view opens as a full editor tab, so render it wide like one.
-  // The "Mine + to review" scope defaults on; clear it here so the listing shows
-  // the full variety of branches/PR states the view can display.
+  // No filter is selected by default, so the listing shows the full variety of
+  // branches/PR states the view can display.
   await mountPanel(page, {
     data,
     view: "branches",
     width: 1000,
     height: 760,
-    state: { branchMine: false },
   });
   await page.locator("#root").screenshot({ path: shot("branches.png") });
 });
