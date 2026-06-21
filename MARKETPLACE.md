@@ -102,16 +102,27 @@ GitHub** button appears next to Fetch. It re-queries the GitHub API for current
 PR and CI status on its own, without running a git fetch — so you can refresh
 just the PR view, or just your local branch state, independently.
 
-**Delete branches.** Every local branch shows a **Delete** button (a local branch
-is yours by virtue of living on your machine); remote-only branches show one when
-you authored their PR. The repository's default branch (such as `main`) is never
-deletable, so it shows no Delete button. When a branch exists both locally and on the remote, you
-choose what to remove — local, remote, or both; otherwise it deletes whichever
-side exists after a single confirm. If the branch has commits that were never
-pushed, the confirm tells you how many would be lost. A branch whose PR was
-merged deletes cleanly without a false "not fully merged" warning — even after a
-squash-merge, where git would otherwise refuse. If a branch was already deleted
-on the remote, removing it just cleans up locally instead of erroring.
+**Delete branches.** Every branch that exists on your machine shows a **Delete
+Local** button that removes the local branch only. The branch on the remote is
+left untouched, so there is nothing to undo on GitHub. (Remote-only branches have
+no local copy, so they show no button.) The repository's default branch (such as
+`main`) is never deletable, so it shows no Delete button. If the branch has
+commits that were never pushed, the confirm tells you how many would be lost. A
+branch whose PR was merged deletes cleanly without a false "not fully merged"
+warning, even after a squash-merge where git would otherwise refuse.
+
+If the branch is currently checked out in your main window, deleting it is blocked
+(switch to another branch first). If it is checked out in one of your other
+worktrees, you can still delete it: the panel warns you, frees that worktree (it
+is left on a detached snapshot, with its files intact), and then removes the
+branch.
+
+**Clean up merged branches in one click.** A header **Delete gone** button removes
+every local branch whose upstream branch is gone: the ones whose remote branch
+was merged and deleted (so they are just clutter now). It lists them and asks once
+before deleting, leaves anything checked out in a worktree alone, and asks a second
+time before force-deleting any branch that still has unmerged commits. Pair it with
+**Prune** so a branch deleted on the remote moments ago is recognized.
 
 **Jump to GitHub.** Each branch name links straight to that branch on GitHub, and
 a **Branches on GitHub** link in the header opens the repository's full branches

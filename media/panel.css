@@ -1190,6 +1190,13 @@ button.busy {
   width: 14px;
   height: 14px;
 }
+/* Destructive header action (Delete gone): red accent on hover so it reads as
+   distinct from the neutral Fetch / Refresh buttons. */
+.branches-danger:hover {
+  background: var(--vscode-inputValidation-errorBackground, rgba(241, 76, 76, 0.15));
+  color: var(--vscode-errorForeground, #f14c4c);
+  border-color: var(--vscode-errorForeground, #f14c4c);
+}
 /* Prune checkbox beside the Fetch button. */
 .branches-prune {
   flex: 0 0 auto;
