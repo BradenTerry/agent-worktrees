@@ -18,6 +18,7 @@ import {
   deleteBranch,
   defaultBranchName,
   unpushedCommitCount,
+  getStatus,
   fetchRemotes,
   listWorktrees,
   getRemoteInfo,
@@ -66,6 +67,7 @@ interface ActionMessage {
     | "openBranches"
     | "loadBranches"
     | "fetchBranches"
+    | "refreshGithub"
     | "worktreeFromBranch"
     | "deleteBranch";
   path?: string;
@@ -837,8 +839,26 @@ export class WorktreeWebviewProvider
     const primary = await this.primaryWorktree();
     if (!primary) return;
 
-    // Every agent whose worktree is this path (or nested under it).
+    // Capture the branch this worktree is on (and whether it has uncommitted
+    // changes) before removal, so we can offer to delete the now-orphaned branch
+    // afterward. Removing the worktree directory discards uncommitted changes, so
+    // the dirty count has to be read while the directory still exists.
     const target = normalize(fsPath);
+    const worktree = (await listWorktrees(primary)).find(
+      (w) => normalize(w.path) === target
+    );
+    const branch =
+      worktree && !worktree.detached ? worktree.branch : undefined;
+    let hadUncommitted = false;
+    if (branch) {
+      try {
+        hadUncommitted = (await getStatus(fsPath)).dirty > 0;
+      } catch {
+        /* directory unreadable: treat as clean */
+      }
+    }
+
+    // Every agent whose worktree is this path (or nested under it).
     const byPath = await readSessionsByWorktree(this.sessionsDir);
     const agents: AgentVM[] = [];
     for (const [key, list] of byPath) {
@@ -883,7 +903,79 @@ export class WorktreeWebviewProvider
         return;
       }
     }
+    // Removing a worktree leaves its branch behind; offer to delete it too.
+    await this.offerDeleteOrphanedBranch(primary, branch, hadUncommitted);
     await this.refresh();
+    await this.postBranches();
+  }
+
+  /**
+   * After a worktree is removed, ask whether to also delete the branch it was
+   * on. The default branch is never offered. When deleting would lose work (the
+   * branch has commits not pushed to its upstream, or the worktree had
+   * uncommitted changes discarded with it), confirm a second time before the
+   * force delete.
+   */
+  private async offerDeleteOrphanedBranch(
+    repoRoot: string,
+    branch: string | undefined,
+    hadUncommitted: boolean
+  ): Promise<void> {
+    if (!branch) return;
+    if (branch === (await defaultBranchName(repoRoot))) return;
+
+    const keep = await vscode.window.showInformationMessage(
+      `Also delete the branch "${branch}"? The worktree is gone but the branch remains.`,
+      { modal: true },
+      "Delete Branch"
+    );
+    if (keep !== "Delete Branch") return;
+
+    // Second prompt when the branch carries work the delete would discard.
+    const unpushed = await unpushedCommitCount(repoRoot, branch);
+    const lose: string[] = [];
+    if (unpushed > 0) {
+      lose.push(
+        `${unpushed === 1 ? "1 commit" : `${unpushed} commits`} not pushed to its upstream`
+      );
+    }
+    if (hadUncommitted) {
+      lose.push("uncommitted changes that were discarded with the worktree");
+    }
+    const force = unpushed > 0;
+    if (lose.length) {
+      const confirm = await vscode.window.showWarningMessage(
+        `"${branch}" has ${lose.join(" and ")}. Deleting the branch loses this work. Delete anyway?`,
+        { modal: true },
+        "Delete Branch"
+      );
+      if (confirm !== "Delete Branch") return;
+    }
+
+    try {
+      await deleteBranch(repoRoot, branch, { local: true, force });
+    } catch (err) {
+      const msg = (err as Error).message;
+      // git -d refused an unmerged branch we didn't already force; confirm once
+      // more, then force.
+      if (!force && /not fully merged/i.test(msg)) {
+        const retry = await vscode.window.showWarningMessage(
+          `Local branch "${branch}" is not fully merged. Force delete it?`,
+          { modal: true },
+          "Force Delete"
+        );
+        if (retry !== "Force Delete") return;
+        try {
+          await deleteBranch(repoRoot, branch, { local: true, force: true });
+        } catch (err2) {
+          vscode.window.showErrorMessage(
+            `Could not delete branch: ${(err2 as Error).message}`
+          );
+        }
+      } else {
+        vscode.window.showErrorMessage(`Could not delete branch: ${msg}`);
+      }
+    }
   }
 
   // --- HTML ------------------------------------------------------------------
@@ -1004,9 +1096,14 @@ export class WorktreeWebviewProvider
         void this.refresh(true);
         return;
       case "fetchBranches":
-        // The explicit Fetch button. `value` carries the Prune checkbox; refetch
-        // remotes then re-post so ahead/behind, diffs and merge state are current.
+        // The explicit Fetch button (git only). `value` carries the Prune
+        // checkbox; fetch remotes then re-post so ahead/behind, diffs and merge
+        // state are current. PR data is left untouched (Refresh GitHub owns that).
         return this.fetchBranchesAction(msg.value !== false);
+      case "refreshGithub":
+        // The explicit Refresh GitHub button. Re-hit the GitHub API for fresh PR
+        // and CI status without running a git fetch.
+        return this.refreshGithubAction();
       case "worktreeFromBranch":
         return this.worktreeFromBranch(msg.branch, msg.remoteOnly);
       case "deleteBranch":
@@ -1109,9 +1206,11 @@ export class WorktreeWebviewProvider
 
   /**
    * Fetch from the remote (the explicit Fetch button), optionally pruning stale
-   * remote-tracking refs, then re-read both views so ahead/behind, diffs and PR
-   * merge state are current. Pruning matters for the delete flow: a branch whose
-   * PR was merged and remote deleted otherwise lingers as a phantom origin ref.
+   * remote-tracking refs, then re-read both views so ahead/behind, diffs and
+   * merge state are current. This is git only: it reuses cached PR data and never
+   * hits the GitHub API (the separate Refresh GitHub button owns that). Pruning
+   * matters for the delete flow: a branch whose PR was merged and remote deleted
+   * otherwise lingers as a phantom origin ref.
    */
   private async fetchBranchesAction(prune: boolean): Promise<void> {
     const repoRoot = await this.primaryWorktree();
@@ -1120,10 +1219,18 @@ export class WorktreeWebviewProvider
       return;
     }
     await fetchRemotes(repoRoot, { prune });
-    // We already fetched, so re-read without a second fetch; refetch PR data so a
-    // newly-merged PR is reflected (which is what lets the delete skip the
-    // unmerged prompt).
+    // We already fetched, so re-read without a second fetch; reuse cached PR data
+    // (refetchPrs=false) to keep the git fetch decoupled from the GitHub API.
     await this.refresh();
+    await this.postBranches(false);
+  }
+
+  /**
+   * Re-hit the GitHub API for fresh per-branch PR/CI status (the explicit Refresh
+   * GitHub button), without running a git fetch. Only meaningful when a token is
+   * stored, which is also the only state in which the button is shown.
+   */
+  private async refreshGithubAction(): Promise<void> {
     await this.postBranches(true);
   }
 

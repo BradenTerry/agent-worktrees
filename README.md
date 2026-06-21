@@ -28,8 +28,9 @@ state, and its running agents in one view.
 - **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
   the ahead/behind distance from the upstream branch, refreshed as files change.
 - **GitHub PR status** — when a stored token resolves a PR for the branch, the
-  card shows its lifecycle state, CI check rollup, review decision and comment
-  counts (polled from the REST API in `src/github.ts` / `src/prs.ts`). Two
+  card shows the PR title (wrapping when long), then its lifecycle state, CI
+  check rollup, review decision and comment counts (polled from the REST API in
+  `src/github.ts` / `src/prs.ts`). Two
   merge-readiness pills sit beside the state badge: `Out of date` when GitHub's
   `mergeable_state` is `behind` ("This branch is out-of-date with the base
   branch"), and `Auto-merge` when auto-merge is enabled on the PR.
@@ -43,7 +44,10 @@ state, and its running agents in one view.
   instead of duplicating (the focus behavior uses the `code` CLI when it is on
   `PATH`; otherwise a fresh window is always opened).
 - **Delete Worktree** — `git worktree remove` (offers `--force` when dirty, and
-  stops any agents running in the worktree first).
+  stops any agents running in the worktree first). Removing a worktree leaves its
+  branch behind, so it then offers to delete that branch too (never the default
+  branch); when the branch has commits not pushed to its upstream or the worktree
+  had uncommitted changes, it confirms a second time before the force delete.
 - **Skills used** — each agent row shows a chip with the count of Claude skills
   it has invoked; click it for the full list.
 - **Subagents used** — a robot glyph with a count tracks how many subagents each
@@ -57,9 +61,11 @@ state, and its running agents in one view.
   **Delete** action (any local branch, or a remote-only branch whose PR you
   authored), and — for branches without a worktree — a **Create worktree & start
   agent** action that creates the worktree in the current window and launches a
-  Claude agent. A header **Fetch** button with a **Prune** toggle refreshes from
-  the remote. When the PR integration is connected, rows carry their open PR's
-  rollup and the view offers client-side filters with no default selection — an
+  Claude agent. A header **Fetch** button with a **Prune** toggle pulls from the
+  remote to refresh local branch state (git only). When a GitHub token is stored,
+  a separate **Refresh GitHub** button re-polls the GitHub API for PR/CI status,
+  decoupled from the git fetch. When the PR integration is connected, rows carry
+  their open PR's rollup and the view offers client-side filters with no default selection — an
   **Author** select populated from the fetched PRs and a single-select **Reviews**
   select (the GitHub review statuses) — plus sorting and **Open PR** / **Auto
   merge** toggle chips.
@@ -232,9 +238,16 @@ deleted on the remote) are dropped and no longer surface as phantom "remote only
 immediately, then runs a forced `refresh(true)` in the background to reconcile
 with the remote. The header **Fetch** button posts `fetchBranches` with the
 **Prune** checkbox state; the provider fetches with the chosen prune setting, then
-re-reads both views (without a second fetch) and re-fetches PR data so a
-newly-merged PR is reflected — which is what lets a subsequent delete skip the
-unmerged prompt. The Prune choice is persisted in the webview state.
+re-reads both views (without a second fetch) and re-posts the branches reusing the
+cached PR map (`postBranches(false)`) — so the git fetch never hits the GitHub
+API. The Prune choice is persisted in the webview state.
+
+**Refresh GitHub (decoupled).** PR/CI status is refreshed by its own **Refresh
+GitHub** button, shown only when a token is stored (`github.hasToken`). It posts
+`refreshGithub`, which calls `postBranches(true)` to re-run `fetchPrsByBranch`
+without any git fetch. This is the API-only counterpart to the git-only Fetch;
+the two are independent so refreshing PR state never triggers a fetch and vice
+versa. (Background watcher-driven refreshes still reuse the cached PR map.)
 
 **Performance.** The webview only rebuilds the DOM when the posted payload
 actually changed (it compares a JSON signature, mirroring the settings view's
@@ -242,6 +255,16 @@ actually changed (it compares a JSON signature, mirroring the settings view's
 scroll position; renders that do happen restore the `.brows` scroll offset. The
 filtered list is paginated client-side (25 per page) with a Prev/Next pager, and
 the page resets to the first whenever a filter or sort changes.
+
+**In-progress buttons.** Buttons that kick off real git/network/window work
+(`agent`, `agentWorktree`, `openWindow`, `openBranches`, `worktreeFromBranch`,
+`fetchBranches`, `refreshGithub` — see `BUSY_ACTIONS` in `panel.js`) swap their
+icon for a spinning ring and disable themselves on click (`markBusy`). The state
+is transient DOM: the next `update`/`branches` payload re-renders the view with
+the real icon restored, so it clears automatically when the work lands. A no-op
+fetch that returns an unchanged payload re-renders only when a spinner is pending
+(so background polls still skip the rebuild), and a 15s safety timeout restores
+any button that never sees a re-render.
 
 ```mermaid
 flowchart TD
@@ -258,12 +281,14 @@ flowchart TD
     ROWS -->|no worktree, worktreeFromBranch| WV
     ROWS -->|"authored branch, deleteBranch"| DB["git.deleteBranch<br/>branch -d/-D and/or<br/>push origin --delete<br/>(modal: local/remote/both)"]
     ROWS -->|"name / header links"| GH["github.com/owner/repo<br/>/tree/branch · /branches"]
-    EP -->|refreshBranches| RFB["refresh(true):<br/>git fetch + re-fetch PRs"]
+    EP -->|"fetchBranches (git only)"| FET["fetchRemotes(prune)<br/>then postBranches(false):<br/>reuse cached PR map"]
+    EP -->|"refreshGithub (API only)"| RGH["postBranches(true):<br/>re-run fetchPrsByBranch,<br/>no git fetch"]
     WV --> AW["git.addBranchWorktree<br/>+ remote-tracking path"]
     WV --> AG["agent(dir): Claude terminal<br/>in current window"]
     AW --> RF[refresh] --> BO
     DB --> RF
-    RFB --> BO
+    FET --> BO
+    RGH --> BO
     PRS["PrService REST fetchPr<br/>worktree cards, unchanged"] -. separate path .- FPB
 ```
 

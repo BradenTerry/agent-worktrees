@@ -565,6 +565,28 @@ button svg {
   height: 13px;
 }
 
+/* In-progress button: its icon was swapped for the spinner (icons.spinner) and
+   it was disabled while the action runs. Keep it legible rather than dimmed like
+   a normal disabled button, and show a wait cursor. */
+button.busy {
+  opacity: 1;
+  cursor: progress;
+}
+.spin {
+  transform-origin: 50% 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation-duration: 1.6s;
+  }
+}
+
 /* Per-agent skill counter; opens the skills modal on click. */
 .skill-chip {
   flex: 0 0 auto;
@@ -711,6 +733,15 @@ button svg {
   flex: 0 0 auto;
   min-width: 52px;
   color: var(--vscode-descriptionForeground);
+}
+/* PR title sits above the status row. It can wrap across lines when long, so it
+   stays on its own row (no flex-wrap onto the status badges). */
+.pr-title {
+  display: block;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--vscode-foreground);
+  overflow-wrap: anywhere;
 }
 .prline:hover {
   color: var(--vscode-foreground);

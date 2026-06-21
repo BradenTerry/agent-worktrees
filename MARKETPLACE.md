@@ -26,9 +26,9 @@ The **Branches view** opens as a full editor tab listing every branch with its P
 - **Live git status per worktree** — changed-file count, `+`/`−` line totals, and
   ahead/behind from upstream, updated as you work.
 - **PR status at a glance** — when a worktree's branch has a pull request, the
-  card shows its state, CI checks, reviews and comments, plus an **Out of date**
-  pill when the branch is behind its base branch and an **Auto-merge** pill when
-  auto-merge is enabled.
+  card shows its title, state, CI checks, reviews and comments, plus an **Out of
+  date** pill when the branch is behind its base branch and an **Auto-merge**
+  pill when auto-merge is enabled.
 - **Start agents in a click** — launch a Claude CLI session in any worktree, each
   in its own terminal. Reveal or stop it from the panel.
 - **Agent & Worktree in one step** — create a fresh worktree with `claude -w` and
@@ -42,10 +42,16 @@ The **Branches view** opens as a full editor tab listing every branch with its P
 - **Subagents used** — a robot count shows how many subagents each agent has
   spawned, plus the total across the worktree.
 - **Delete worktrees** — remove a worktree (`git worktree remove`, with a force
-  option) without leaving the panel.
+  option) without leaving the panel, then optionally delete its leftover branch
+  in the same step, with an extra confirmation when that would lose unpushed or
+  uncommitted work.
 - **Branches view** — a full-screen editor tab listing every branch in the repo,
   with each branch's open PR status and a one-click way to spin up a worktree and
   agent for any branch that does not have one yet.
+- **Buttons that show their work** — actions that take a moment (starting an
+  agent, creating a worktree, opening a window, fetching, refreshing GitHub) show
+  a spinner in place of their icon while they run, so you can see the click
+  landed instead of wondering if anything happened.
 
 ## Branches view
 
@@ -64,8 +70,8 @@ right there in your current window and starts a Claude agent in it. Picking a
 remote-only branch checks it out as a new local tracking branch.
 
 When the GitHub integration is connected, each branch row also shows its open
-PR's status — the same state badge, CI checks, review and comment summary you see
-on the worktree cards. A filter and sort bar across the top lets you slice the
+PR's status — the same title, state badge, CI checks, review and comment summary
+you see on the worktree cards. A filter and sort bar across the top lets you slice the
 list without any extra loading. Nothing is filtered by default — every branch is
 listed until you make a selection:
 
@@ -85,11 +91,16 @@ hidden, and the view simply lists every branch so you can create worktrees as
 usual. Your filter and sort choices are remembered the next time you open the
 view. Close it like any editor tab; the Branches button reopens it.
 
-**Fetch and prune.** A **Fetch** button in the header refreshes everything from
-the remote — ahead/behind counts, line diffs, and PR merge state — so the view
+**Fetch and prune.** A **Fetch** button in the header pulls from the remote to
+refresh local branch state — ahead/behind counts and line diffs — so the view
 reflects what actually landed. A **Prune** checkbox next to it (on by default)
 also removes tracking refs for branches deleted on the remote, so merged-and-
 deleted branches stop lingering as **remote only** rows.
+
+**Refresh GitHub.** When you have connected a GitHub token, a separate **Refresh
+GitHub** button appears next to Fetch. It re-queries the GitHub API for current
+PR and CI status on its own, without running a git fetch — so you can refresh
+just the PR view, or just your local branch state, independently.
 
 **Delete branches.** Every local branch shows a **Delete** button (a local branch
 is yours by virtue of living on your machine); remote-only branches show one when
@@ -107,9 +118,9 @@ a **Branches on GitHub** link in the header opens the repository's full branches
 page.
 
 **Stay current.** Opening the view fetches from the remote and prunes branches
-that were deleted there, so it never shows phantom remote branches; a refresh
-button in the top right does the same on demand, also updating ahead/behind
-counts and PR status. Long branch lists are paged so they stay easy to scan, and
+that were deleted there, so it never shows phantom remote branches; the Fetch
+button does the same on demand, updating ahead/behind counts, while Refresh
+GitHub updates PR and CI status. Long branch lists are paged so they stay easy to scan, and
 the view only fetches branches for the repository you have open, never your other
 repositories.
 
