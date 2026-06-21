@@ -2,6 +2,37 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.5.0
+
+- **Default branch is never deletable** - the repo's default branch (from
+  origin/HEAD) shows no Delete action and is refused server-side, so main/master
+  cannot be removed by accident.
+- **Branch delete is local-only** - the row action is now **Delete Local** and
+  only branches that exist on your machine show it; it removes the local branch
+  and never touches the branch on the remote. Remote-only branches show no delete.
+- **Delete is worktree-aware** - deleting a branch checked out in your main window
+  is blocked (switch away first); one checked out in another worktree is allowed
+  after a confirm, which leaves that worktree on a detached snapshot (files intact)
+  before removing the branch.
+- **Delete gone branches in one click** - a header **Delete gone** button deletes
+  every local branch whose upstream is gone (merged or deleted on the remote). It
+  skips the default branch and any branch checked out in a worktree, confirms once,
+  and force-deletes squash-merged leftovers only after a second confirm that names
+  them. Pair it with Prune so a just-deleted remote branch is recognized.
+- **Remove a worktree, drop its branch too** - removing a worktree now offers to
+  delete the branch it was on (never the default), with an extra confirmation when
+  that would lose unpushed or uncommitted work.
+- **Refresh GitHub, separate from Fetch** - PR and CI status has its own **Refresh
+  GitHub** button (shown when a token is stored) that re-queries the API without a
+  git fetch, so you can refresh the PR view and your local branch state
+  independently.
+- **Buttons show progress** - actions that do real work (start agent, create
+  worktree, open window, fetch, refresh) swap their icon for a spinner while they
+  run, and in-progress CI checks and active agents pulse so they read at a glance.
+- **No more delete flicker** - deleting a branch no longer briefly re-adds it
+  before removing it again; a stale background refresh can no longer clobber the
+  fresh list.
+
 ## 2.4.0
 
 - **Branches view filter bar reworked, nothing selected by default** - the
