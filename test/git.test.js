@@ -164,6 +164,9 @@ test("listBranches reports ahead/behind and diff vs the default branch", async (
   // main is its own base, so no divergence and no diff.
   assert.strictEqual(byName["main"].ahead, 0);
   assert.strictEqual(byName["main"].insertions, 0);
+  // The default branch is flagged so the UI can protect it from deletion.
+  assert.strictEqual(byName["main"].isDefault, true, "main is the default branch");
+  assert.strictEqual(topic.isDefault, false, "topic is not the default branch");
 });
 
 test("unpushedCommitCount counts commits not on the base branch", async () => {

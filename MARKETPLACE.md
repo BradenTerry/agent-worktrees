@@ -93,7 +93,8 @@ deleted branches stop lingering as **remote only** rows.
 
 **Delete branches.** Every local branch shows a **Delete** button (a local branch
 is yours by virtue of living on your machine); remote-only branches show one when
-you authored their PR. When a branch exists both locally and on the remote, you
+you authored their PR. The repository's default branch (such as `main`) is never
+deletable, so it shows no Delete button. When a branch exists both locally and on the remote, you
 choose what to remove — local, remote, or both; otherwise it deletes whichever
 side exists after a single confirm. If the branch has commits that were never
 pushed, the confirm tells you how many would be lost. A branch whose PR was

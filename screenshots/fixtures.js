@@ -369,6 +369,7 @@ function branchesData() {
         behind: 2,
         insertions: 0,
         deletions: 0,
+        isDefault: true,
         pr: null,
       },
       {

@@ -16,6 +16,7 @@ import {
   addBranchWorktree,
   removeWorktree,
   deleteBranch,
+  defaultBranchName,
   unpushedCommitCount,
   fetchRemotes,
   listWorktrees,
@@ -1148,6 +1149,13 @@ export class WorktreeWebviewProvider
     const repoRoot = await this.primaryWorktree();
     if (!repoRoot) {
       vscode.window.showErrorMessage("No git repository in this window.");
+      return;
+    }
+    // Never delete the repo's default branch (e.g. main), even if a message asks.
+    if (name === (await defaultBranchName(repoRoot))) {
+      vscode.window.showWarningMessage(
+        `"${name}" is the default branch and cannot be deleted.`
+      );
       return;
     }
     const hasLocal = !remoteOnly;

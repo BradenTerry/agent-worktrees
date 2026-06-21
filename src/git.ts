@@ -186,6 +186,8 @@ export interface BranchInfo {
   insertions: number;
   /** Lines removed vs the compare base. */
   deletions: number;
+  /** The repo's default branch (origin/HEAD, e.g. "main"). Never deletable. */
+  isDefault: boolean;
 }
 
 /**
@@ -232,6 +234,7 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       behind,
       insertions: 0,
       deletions: 0,
+      isDefault: false,
     });
   }
 
@@ -265,6 +268,7 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       behind: 0,
       insertions: 0,
       deletions: 0,
+      isDefault: false,
     });
   }
 
@@ -273,6 +277,14 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   // concurrency keeps a many-branch repo from spawning a git process per branch
   // all at once. Any per-branch failure leaves that branch's counts at zero.
   const defaultRef = await resolveDefaultBranchRef(cwd);
+  // Flag the default branch (origin/HEAD's short name, e.g. "main") so the UI can
+  // protect it from deletion. A remote-only default still counts.
+  const defaultName = defaultRef
+    ? defaultRef.replace(/^origin\//, "")
+    : undefined;
+  if (defaultName) {
+    for (const b of branches) if (b.name === defaultName) b.isDefault = true;
+  }
   await mapLimit(branches, 8, async (b) => {
     const tip = b.remoteOnly ? `origin/${b.name}` : b.name;
     const base = b.remoteOnly
@@ -298,6 +310,15 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
  * origin/HEAD. Falls back to the first of origin/main, origin/master, main,
  * master that exists, or undefined when none do (a fresh repo with no commits).
  */
+/** The default branch's short name (e.g. "main"), or undefined when none
+ *  resolves. Strips the `origin/` prefix from the resolved ref. */
+export async function defaultBranchName(
+  cwd: string
+): Promise<string | undefined> {
+  const ref = await resolveDefaultBranchRef(cwd);
+  return ref ? ref.replace(/^origin\//, "") : undefined;
+}
+
 async function resolveDefaultBranchRef(
   cwd: string
 ): Promise<string | undefined> {

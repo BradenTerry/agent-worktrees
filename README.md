@@ -196,7 +196,10 @@ and re-posts the branch data so the row flips to the marker.
 **Deleting branches.** Every local branch shows a **Delete** action (a local ref
 is the user's by virtue of existing on this machine); a remote-only branch shows
 one only when the signed-in user authored its PR (`pr.author === viewer.login`),
-since git carries no branch ownership for remote refs. Clicking it posts a
+since git carries no branch ownership for remote refs. The repo's default branch
+(origin/HEAD's short name, carried on each row as `isDefault`) is never deletable:
+the row shows no Delete action and `deleteBranchAction` refuses it server-side
+(via `defaultBranchName`) even if a crafted message asks. Clicking it posts a
 `deleteBranch` message carrying the branch name, which sides exist (`remoteOnly`,
 `hasRemote`), and whether its PR is `merged`. The provider then prompts via a
 modal: when both a local ref and `origin/<name>` exist the user picks **Local +

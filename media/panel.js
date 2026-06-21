@@ -1318,10 +1318,11 @@
     // A local branch is always yours to delete (it lives on this machine); a
     // remote-only branch is offered for delete only when you authored its PR,
     // since git itself carries no branch ownership. When both a local ref and
-    // origin/<branch> exist the extension prompts for the scope.
+    // origin/<branch> exist the extension prompts for the scope. The repo's
+    // default branch (e.g. main) is never deletable.
     const authoredByYou =
       pr && data && data.viewerLogin && pr.author === data.viewerLogin;
-    const canDelete = !b.remoteOnly || authoredByYou;
+    const canDelete = !b.isDefault && (!b.remoteOnly || authoredByYou);
     const deleteBtn = canDelete
       ? '<button class="bdelete danger" data-action="deleteBranch" data-branch="' +
         esc(b.name) +
