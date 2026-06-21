@@ -336,30 +336,42 @@ button.accept {
 }
 .status-dot.active {
   background: var(--c-active);
-  box-shadow: 0 0 0 0 var(--c-active);
-  animation: pulse 1.8s ease-out infinite;
+  --pulse: var(--c-active);
 }
 .status-dot.waiting {
   background: var(--c-waiting);
+  --pulse: var(--c-waiting);
 }
 .status-dot.idle {
   background: transparent;
   border: 1px solid var(--c-idle);
 }
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-active) 55%, transparent);
-  }
-  70% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--c-active) 0%, transparent);
-  }
+/* Active (green) and waiting (yellow) agent dots pulse so in-progress and
+   needs-attention agents read at a glance. Scoped to the agent rows and the
+   non-zero agents-bar stats: the settings connection dots stay static, and a
+   zero-count stat (already dimmed) does not pulse. Animates the dot's own
+   opacity plus an expanding glow ring so the pulse is clearly visible (the old
+   box-shadow-only ring faded out before it ever became perceptible). */
+.agent-row .status-dot.active,
+.agent-row .status-dot.waiting,
+.agents-bar .stat.active:not(.zero) .status-dot,
+.agents-bar .stat.waiting:not(.zero) .status-dot {
+  animation: status-pulse 1.4s ease-in-out infinite;
+}
+@keyframes status-pulse {
+  0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-active) 0%, transparent);
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse) 55%, transparent);
+  }
+  50% {
+    opacity: 0.5;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--pulse) 0%, transparent);
   }
 }
 /* Honor reduced-motion: keep the dots colored, just stop them pulsing. */
 @media (prefers-reduced-motion: reduce) {
-  .status-dot.active,
+  .status-dot,
   .pr-seg.pending svg {
     animation: none;
   }
