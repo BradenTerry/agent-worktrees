@@ -1360,26 +1360,19 @@
         icons.agentMark +
         "Create worktree &amp; start agent</button>";
 
-    // A local branch is always yours to delete (it lives on this machine); a
-    // remote-only branch is offered for delete only when you authored its PR,
-    // since git itself carries no branch ownership. When both a local ref and
-    // origin/<branch> exist the extension prompts for the scope. The repo's
-    // default branch (e.g. main) is never deletable.
-    const authoredByYou =
-      pr && data && data.viewerLogin && pr.author === data.viewerLogin;
-    const canDelete = !b.isDefault && (!b.remoteOnly || authoredByYou);
+    // Delete is local-only: it removes the local branch and never touches the
+    // remote. A remote-only branch has no local ref to delete, so the button is
+    // shown only for branches that exist on this machine (and never for the
+    // repo's default branch, e.g. main).
+    const canDelete = !b.isDefault && !b.remoteOnly;
     const deleteBtn = canDelete
       ? '<button class="bdelete danger" data-action="deleteBranch" data-branch="' +
         esc(b.name) +
-        '" data-remote="' +
-        (b.remoteOnly ? "1" : "0") +
-        '" data-hasremote="' +
-        (b.hasRemote ? "1" : "0") +
         '" data-merged="' +
         (pr && pr.state === "merged" ? "1" : "0") +
-        '" title="Delete this branch (local and/or remote)">' +
+        '" title="Delete this local branch (the remote branch is left untouched)">' +
         icons.trash +
-        "Delete</button>"
+        "Delete Local</button>"
       : "";
 
     const url = branchUrl(data, b.name);
@@ -1496,6 +1489,11 @@
       '<button class="branches-refresh" data-action="fetchBranches" title="Fetch from the remote to refresh local branch state (ahead/behind, diffs)">' +
       icons.refresh +
       " Fetch</button>" +
+      // Bulk-delete local branches whose upstream is gone (merged or deleted on
+      // the remote). Prompts before deleting; never touches the remote.
+      '<button class="branches-refresh branches-danger" data-action="deleteGoneBranches" title="Delete every local branch whose upstream branch is gone (merged or deleted on the remote). The remote is left untouched.">' +
+      icons.trash +
+      " Delete gone</button>" +
       // Refresh GitHub is the API-only counterpart to the git-only Fetch: it
       // re-polls PR/CI status without a git fetch. Only useful (and only shown)
       // when a token is stored.
@@ -1658,13 +1656,12 @@
         });
         return;
       }
-      // Delete a user-owned branch; the extension prompts for local/remote/both
-      // when both refs exist. Carry which sides exist so it knows what to offer.
+      // Delete the local branch only (the remote ref is left untouched). Carry
+      // whether the PR merged so the extension knows it can force-delete a branch
+      // whose squash-merge left it looking unmerged.
       if (action === "deleteBranch") {
         send("deleteBranch", {
           branch: btn.getAttribute("data-branch") || undefined,
-          remoteOnly: btn.getAttribute("data-remote") === "1",
-          hasRemote: btn.getAttribute("data-hasremote") === "1",
           merged: btn.getAttribute("data-merged") === "1",
         });
         return;

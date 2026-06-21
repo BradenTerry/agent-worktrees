@@ -58,11 +58,14 @@ state, and its running agents in one view.
 - **Branches view** — a toolbar button opens a dedicated editor tab listing every
   branch (local plus remote-only `origin/*`). Each row shows whether a worktree
   already exists, ahead/behind and the +/- line diff vs the branch's base, a
-  **Delete** action (any local branch, or a remote-only branch whose PR you
-  authored), and — for branches without a worktree — a **Create worktree & start
+  **Delete Local** action (any local branch; it removes the local ref only and
+  never touches the remote), and — for branches without a worktree — a **Create
+  worktree & start
   agent** action that creates the worktree in the current window and launches a
   Claude agent. A header **Fetch** button with a **Prune** toggle pulls from the
-  remote to refresh local branch state (git only). When a GitHub token is stored,
+  remote to refresh local branch state (git only), and a **Delete gone** button
+  bulk-deletes every local branch whose upstream is gone (merged or deleted on
+  the remote). When a GitHub token is stored,
   a separate **Refresh GitHub** button re-polls the GitHub API for PR/CI status,
   decoupled from the git fetch. When the PR integration is connected, rows carry
   their open PR's rollup and the view offers client-side filters with no default selection — an
@@ -199,30 +202,50 @@ local tracking branch for a remote-only branch), starts a Claude agent in it via
 the existing `agent(dir)` flow in the current window, then refreshes the sidebar
 and re-posts the branch data so the row flips to the marker.
 
-**Deleting branches.** Every local branch shows a **Delete** action (a local ref
-is the user's by virtue of existing on this machine); a remote-only branch shows
-one only when the signed-in user authored its PR (`pr.author === viewer.login`),
-since git carries no branch ownership for remote refs. The repo's default branch
-(origin/HEAD's short name, carried on each row as `isDefault`) is never deletable:
-the row shows no Delete action and `deleteBranchAction` refuses it server-side
-(via `defaultBranchName`) even if a crafted message asks. Clicking it posts a
-`deleteBranch` message carrying the branch name, which sides exist (`remoteOnly`,
-`hasRemote`), and whether its PR is `merged`. The provider then prompts via a
-modal: when both a local ref and `origin/<name>` exist the user picks **Local +
-remote / Local only / Remote only**; otherwise a single confirm.
+**Deleting branches.** Delete is local-only: every branch with a local ref shows
+a **Delete Local** action that removes the local branch and never touches the
+remote. A remote-only branch has no local ref, so it shows no action. The repo's
+default branch (origin/HEAD's short name, carried on each row as `isDefault`) is
+never deletable: the row shows no Delete action and `deleteBranchAction` refuses
+it server-side (via `defaultBranchName`) even if a crafted message asks. Clicking
+it posts a `deleteBranch` message carrying the branch name and whether its PR is
+`merged`.
 
-Before a local delete it computes `unpushedCommitCount` — commits not on the
-branch's upstream, or (with no upstream) not on the default branch — and, when
-non-zero and the PR is not merged, surfaces the count in the confirm and
-force-deletes on consent. A merged PR also force-deletes without the "not fully
-merged" prompt: a squash-merge leaves the branch's commits unreachable from the
-base, so `git branch -d` would refuse even though the work landed. `git.deleteBranch`
-runs `git branch -d`/`-D` (local) and/or `git push origin --delete` (remote); a
-residual unmerged refusal still falls back to an explicit force prompt. A remote
-delete whose `origin/<name>` is already gone (a stale tracking ref) is treated as
-done: instead of erroring with "remote ref does not exist", the stale
-`refs/remotes/origin/<name>` is pruned. Both views refresh afterward so the row
-drops or flips to remote-only.
+Git refuses to delete a branch that is checked out in a worktree, so
+`deleteBranchAction` inspects `listWorktrees` first. If the **primary** worktree
+(this repo dir) is on the branch, the delete is blocked with a "switch away
+first" message. If a **linked** worktree is on it, the delete is allowed but
+guarded: a modal warns it will leave that worktree on a detached HEAD, and the
+provider runs `detachWorktreeHead` (a `git checkout --detach` in that worktree)
+to free the ref before deleting.
+
+Before the delete it computes `unpushedCommitCount` — commits not on the branch's
+upstream, or (with no upstream) not on the default branch — and, when non-zero
+and the PR is not merged, surfaces the count in a confirm (a second modal in the
+linked-worktree path) and force-deletes on consent. A merged PR also
+force-deletes without the "not fully merged" prompt: a squash-merge leaves the
+branch's commits unreachable from the base, so `git branch -d` would refuse even
+though the work landed. `git.deleteBranch` runs `git branch -d`/`-D`; a residual
+unmerged refusal still falls back to an explicit force prompt. Both views refresh
+afterward so the row drops.
+
+**Bulk "Delete gone".** The header **Delete gone** button posts `deleteGoneBranches`.
+`git.goneBranches` reads `git for-each-ref ... %(upstream:track,nobracket)` and
+returns the local branches whose track is `gone` (the upstream was deleted, what
+`git branch -vv` shows as `[gone]`), so it reflects the last fetch; pair it with
+**Prune** to register a just-deleted remote. `deleteGoneBranchesAction` drops the
+default branch, skips any branch checked out in a worktree (it never bulk-detaches,
+and reports the skipped count), lists the rest in one confirm, then deletes with
+`-d`. Branches that refuse as "not fully merged" (squash-merges) are collected and
+force-deleted only after a second, explicit confirm naming them.
+
+**No delete flicker.** A delete triggers a refresh, but a routine refresh already
+in flight may have started its `gatherBranches()` before the delete and resolve
+*after* it, re-posting the deleted branch, which the next refresh then removes
+again (the "branch flickers back, then gone" report). `postBranches` guards against
+this with a monotonic `branchPostSeq`: each call claims the latest token before
+awaiting git/GitHub and only posts if it is still the latest when it resolves, so a
+stale gather can't clobber a newer render.
 
 **GitHub links.** When `origin` is a github.com remote the provider attaches
 `repoUrl` (`https://github.com/<owner>/<repo>`) to the payload. Each row links its

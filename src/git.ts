@@ -305,6 +305,27 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
 }
 
 /**
+ * Local branches whose configured upstream is gone — the remote branch was
+ * deleted (typically after the PR merged). These are what `git branch -vv` marks
+ * "[gone]". Reads local refs only, so the result reflects the last fetch/prune;
+ * run a `git fetch --prune` first to make a recently-deleted remote register.
+ */
+export async function goneBranches(cwd: string): Promise<string[]> {
+  const { stdout } = await execAsync(
+    "git for-each-ref --format='%(refname:short)%00%(upstream:track,nobracket)' refs/heads",
+    { cwd }
+  );
+  const gone: string[] = [];
+  for (const raw of stdout.split("\n")) {
+    const line = raw.replace(/^'/, "").replace(/'$/, "").trimEnd();
+    if (!line) continue;
+    const [name, track] = line.split("\0");
+    if (name && /\bgone\b/.test(track || "")) gone.push(name);
+  }
+  return gone;
+}
+
+/**
  * The repo's default branch short name from origin/HEAD (e.g. "main", "master",
  * "trunk" — whatever git reports), or undefined when origin/HEAD is not set.
  * Authoritative and used to protect the default branch from deletion, so it
@@ -595,6 +616,20 @@ export async function removeWorktree(
       `git worktree remove ${force ? "--force " : ""}${q(dir)}`,
       { cwd: repoRoot }
     );
+  } catch (err) {
+    const msg = String((err as { stderr?: string }).stderr ?? err);
+    throw new Error(msg.trim());
+  }
+}
+
+/**
+ * Detach a worktree's HEAD (point it at its current commit, off any branch).
+ * Used to free the branch a linked worktree is on so the branch can be deleted;
+ * the worktree's files and commit are left in place.
+ */
+export async function detachWorktreeHead(worktreePath: string): Promise<void> {
+  try {
+    await execAsync("git checkout --detach", { cwd: worktreePath });
   } catch (err) {
     const msg = String((err as { stderr?: string }).stderr ?? err);
     throw new Error(msg.trim());
