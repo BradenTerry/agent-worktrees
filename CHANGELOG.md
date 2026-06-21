@@ -2,6 +2,20 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.4.0
+
+- **Branches view filter bar reworked, nothing selected by default** - the
+  **Mine + to review** scope and the **Your PRs** / **Awaiting your review** /
+  **Assigned to you** preset chips are gone. The view now lists every branch
+  until you pick a filter.
+- **Author select** - a multi-select populated from the authors found across the
+  fetched PRs (you pinned to the top), to narrow the list to one or more authors.
+- **Reviews select** - a single-select of the GitHub review statuses (No reviews,
+  Review required, Approved, Changes requested, Reviewed by you, Not reviewed by
+  you, Awaiting review from you); pick **Any** to clear it.
+- **Open PR and Auto merge chips** - toggle chips to show only branches whose PR
+  is open, or whose PR has auto-merge enabled.
+
 ## 2.3.0
 
 - **Branches view defaults to your branches** - a new **Mine + to review** scope
