@@ -98,7 +98,15 @@ read the extension's context).
 
 Each hook event runs the emitter, which derives the session's worktree from git
 and writes one small state file per session into the extension's **global
-storage** (`<globalStorage>/sessions/`, e.g.
+storage**. When the extension launched the agent it passes `claude
+--session-id <uuid>` and stamps that same uuid into the terminal env as
+`AGENT_WORKTREES_SID`; the emitter (a child of the Claude process) inherits it
+and keys the state file by it rather than by Claude's live `session_id`. That id
+is stable across `/resume` (Claude's own `session_id` changes, but the launch id
+in the terminal env and the process argv does not), so the panel row, its
+terminal handle, and `pkill -f <id>` stay linked after a resume instead of
+orphaning the row. Sessions not launched by the extension fall back to the live
+`session_id`. The files land in `<globalStorage>/sessions/` (e.g.
 `~/Library/Application Support/Code/User/globalStorage/bradenterry.agent-worktrees/`
 on macOS). The extension watches that directory and groups the sessions by
 worktree. **Nothing is sent over the network** — status flows entirely through

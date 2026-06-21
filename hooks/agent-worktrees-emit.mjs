@@ -13,7 +13,9 @@
  *   $AGENT_WORKTREES_DIR
  *   ~/.claude/agent-worktrees/sessions  (legacy fallback)
  *
- * Per-session file: <dir>/<session_id>.json
+ * Per-session file: <dir>/<id>.json where <id> is the extension's launch id
+ *   ($AGENT_WORKTREES_SID, stable across /resume) when present, else the live
+ *   session_id.
  *   = { sessionId, worktree, branch, state, task, skills, subagents, model,
  *       startedAt, ts }
  * SessionEnd removes the file so the agent disappears when its session exits.
@@ -163,9 +165,18 @@ function main() {
   const top = git(cwd, ["rev-parse", "--show-toplevel"]) || cwd;
   const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]) || "HEAD";
 
-  // session id keys the file; fall back to a sanitized worktree name so a bare
-  // session that named no id still tracks (one agent per worktree in that case).
+  // The file is keyed by a STABLE launch id so the panel row stays tied to its
+  // terminal across `/resume`. The VS Code extension launches Claude with
+  // `--session-id <uuid>` and stamps that same uuid into the terminal env as
+  // AGENT_WORKTREES_SID, which the hook process inherits. Claude's own
+  // `session_id` changes on `/resume`, but AGENT_WORKTREES_SID does not — and it
+  // still matches the `--session-id` in the live process argv, so the
+  // extension's terminal lookup, `pkill -f <id>`, and state-file path all keep
+  // working after a resume. For sessions NOT launched by the extension (no env
+  // marker) we key by the live session id, falling back to a sanitized worktree
+  // name so a bare session that named no id still tracks.
   const id =
+    safeId(process.env.AGENT_WORKTREES_SID) ||
     safeId(payload.session_id) ||
     safeId(basename(top).replace(/[^A-Za-z0-9._-]/g, "_")) ||
     "session";
