@@ -2,6 +2,22 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.6.0
+
+- **Branches view no longer calls GitHub on open** - opening the tab reads your
+  local branches instantly and never hits the GitHub API. PR and CI status is
+  fetched only when you click **Refresh GitHub**; every other action (open, git
+  Fetch, background refreshes, creating a worktree) reuses the cached data.
+- **Last refreshed time** - a **Last refreshed** label sits under the Refresh
+  GitHub button, reading **Never** until your first refresh and then the time of
+  the most recent one, so it is clear when the PR view was last updated.
+- **Header layout tidy-up** - the **Prune** checkbox now sits under **Fetch** and
+  the Last refreshed time under Refresh GitHub, and the open-PR filter chip reads
+  **Open PRs**.
+- **Active and waiting agent dots pulse** - the green (active) and yellow
+  (waiting) status dots now visibly pulse in the agent rows and the Agents bar,
+  so in-progress and needs-attention agents read at a glance.
+
 ## 2.5.0
 
 - **Default branch is never deletable** - the repo's default branch (from
