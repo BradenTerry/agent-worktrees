@@ -2,6 +2,31 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.7.2
+
+- **Branches view loads fast on Windows** - listing branches enriches each one
+  with ahead/behind and a line diff, and every git call used to run through a
+  shell (`child_process.exec`), which on Windows spawns a `cmd.exe` per call. On
+  a repo with many branches that meant hundreds of `cmd.exe` + `git.exe` spawns
+  per load, pegging the CPU and leaving the view stuck on "Loading branches".
+  Two fixes: all git calls now run via `execFile` with argument arrays (no
+  shell), which roughly halves the process count, speeds each spawn, suppresses
+  the console window flashes, and removes the fragile `--format='...'` quoting
+  that differed between cmd.exe and POSIX shells; and the per-branch line diff
+  now runs only for branches that are actually ahead of their base (a merged or
+  in-sync branch's diff is always empty), so a repo full of merged branches no
+  longer runs a tree diff per branch.
+- **Source Control scope button now works on Windows** - the button matched
+  worktree paths by exact string, but git reports an uppercase drive letter
+  ("C:\\repo") while VS Code reports it lowercased ("c:\\repo"), so the paths
+  never compared equal. The button now neither failed to highlight nor failed to
+  reduce Source Control to the single worktree. Paths are now canonicalized
+  (drive letter lowercased) so scoping applies and the active button highlights.
+- **Switching tabs no longer reloads the panel** - the worktree view now retains
+  its state while hidden, so leaving for Source Control (or any other view) and
+  coming back no longer tears down and rebuilds the panel, which had made the
+  list flash and reload, most visibly on Windows.
+
 ## 2.7.1
 
 - **Clicking an agent from another window no longer does nothing** - the agent

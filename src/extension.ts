@@ -13,7 +13,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.window.registerWebviewViewProvider(
       WorktreeWebviewProvider.viewType,
-      provider
+      provider,
+      // Keep the webview alive while it is hidden so switching to another view
+      // (e.g. Source Control) and back does not tear down and rebuild the panel,
+      // which made the worktree list flash and reload. The view keeps its
+      // rendered state; we still refresh on re-show to pick up changes.
+      { webviewOptions: { retainContextWhenHidden: true } }
     ),
 
     vscode.commands.registerCommand("worktreeView.refresh", () =>
