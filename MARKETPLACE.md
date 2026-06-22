@@ -61,8 +61,7 @@ A **Branches** button in the panel toolbar opens a dedicated editor tab listing
 every branch in the repository — your local branches plus branches that exist
 only on `origin`. Each row is tagged by where it lives — **local only**, **local
 + remote**, or **remote only** — and shows how far ahead or behind its compare
-base it is (↑ to push, ↓ to pull) along with the **+/- line diff** that branch
-introduces, the same summary the worktree cards show. The base is the branch's
+base it is (↑ to push, ↓ to pull). The base is the branch's
 upstream, or the repo's default branch when it has no upstream. Each row also
 tells you whether a worktree already exists for that branch:
 the ones that do show a **Worktree exists** marker alongside a **Start agent**
@@ -99,7 +98,7 @@ usual. Your filter and sort choices are remembered the next time you open the
 view. Close it like any editor tab; the Branches button reopens it.
 
 **Fetch and prune.** A **Fetch** button in the header pulls from the remote to
-refresh local branch state — ahead/behind counts and line diffs — so the view
+refresh local branch state — ahead/behind counts — so the view
 reflects what actually landed. A **Prune** checkbox next to it (on by default)
 also removes tracking refs for branches deleted on the remote, so merged-and-
 deleted branches stop lingering as **remote only** rows.
