@@ -2,6 +2,19 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## Unreleased
+
+- **Source Control scope button now works on Windows** - the button matched
+  worktree paths by exact string, but git reports an uppercase drive letter
+  ("C:\\repo") while VS Code reports it lowercased ("c:\\repo"), so the paths
+  never compared equal. The button now neither failed to highlight nor failed to
+  reduce Source Control to the single worktree. Paths are now canonicalized
+  (drive letter lowercased) so scoping applies and the active button highlights.
+- **Switching tabs no longer reloads the panel** - the worktree view now retains
+  its state while hidden, so leaving for Source Control (or any other view) and
+  coming back no longer tears down and rebuilds the panel, which had made the
+  list flash and reload, most visibly on Windows.
+
 ## 2.7.1
 
 - **Clicking an agent from another window no longer does nothing** - the agent

@@ -15,3 +15,12 @@ test("normalizePath strips trailing slashes", () => {
   assert.ok(!/[\\/]$/.test(canonical), "no trailing separator remains");
   assert.strictEqual(normalizePath(canonical), canonical, "idempotent");
 });
+
+// Windows-only: git emits an uppercase drive letter ("C:\\repo") while VS Code's
+// Uri.fsPath lowercases it ("c:\\repo"). normalizePath must canonicalize the
+// drive so the two compare equal, otherwise the Source Control scope button
+// never matches (won't highlight, won't reduce to the single worktree).
+test("normalizePath lowercases the drive letter (Windows)", { skip: process.platform !== "win32" }, () => {
+  assert.strictEqual(normalizePath("C:\\repo\\feature"), "c:\\repo\\feature");
+  assert.strictEqual(normalizePath("C:\\repo"), normalizePath("c:\\repo"));
+});
