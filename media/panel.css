@@ -163,6 +163,16 @@ button.accept {
   margin-bottom: var(--gap);
   background: var(--vscode-editorWidget-background, transparent);
 }
+/* Alternating row tint so adjacent rows read as distinct. A translucent gray
+   layered over the base widget background, so it works in light and dark themes
+   without a second hardcoded color. */
+.card:nth-child(even) {
+  background-color: var(--vscode-editorWidget-background, transparent);
+  background-image: linear-gradient(
+    rgba(127, 127, 127, 0.16),
+    rgba(127, 127, 127, 0.16)
+  );
+}
 .card.open {
   border-color: var(--vscode-focusBorder);
 }
@@ -1435,6 +1445,14 @@ button.busy {
   border-radius: 6px;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
   background: var(--vscode-editorWidget-background, transparent);
+}
+/* Alternating row tint, matching the worktree cards (see .card:nth-child). */
+.brow:nth-child(even) {
+  background-color: var(--vscode-editorWidget-background, transparent);
+  background-image: linear-gradient(
+    rgba(127, 127, 127, 0.16),
+    rgba(127, 127, 127, 0.16)
+  );
 }
 .brow-top {
   display: flex;
