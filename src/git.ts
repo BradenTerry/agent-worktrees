@@ -1,7 +1,33 @@
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/**
+ * Run git with an argument array and no shell.
+ *
+ * Using execFile instead of a shell `exec` avoids spawning a cmd.exe/sh wrapper
+ * per call. On Windows that roughly halves the process count when the Branches
+ * view enriches each branch (one git per call instead of a cmd.exe + git pair),
+ * which is the difference between the view loading promptly and pegging the CPU
+ * on a repo with many branches. It also passes arguments literally, so there is
+ * no shell quoting and no Windows-vs-POSIX quoting differences (the reason the
+ * old `--format='...'` strings needed per-line single-quote stripping).
+ *
+ * `windowsHide` suppresses the console window flash each git spawn would
+ * otherwise cause on Windows; `maxBuffer` is raised so a large `for-each-ref`
+ * or diff output never truncates.
+ */
+function git(
+  args: string[],
+  opts: { cwd?: string; timeout?: number } = {}
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync("git", args, {
+    ...opts,
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
 
 export interface Worktree {
   /** Absolute path to the worktree directory. */
@@ -24,9 +50,7 @@ export interface Worktree {
  */
 export async function findRepoRoot(cwd: string): Promise<string | undefined> {
   try {
-    const { stdout } = await execAsync("git rev-parse --show-toplevel", {
-      cwd,
-    });
+    const { stdout } = await git(["rev-parse", "--show-toplevel"], { cwd });
     return stdout.trim() || undefined;
   } catch {
     return undefined;
@@ -64,7 +88,7 @@ export async function fetchRemotes(
 ): Promise<void> {
   const prune = opts.prune !== false;
   try {
-    await execAsync(`git fetch --all${prune ? " --prune" : ""} --quiet`, {
+    await git(["fetch", "--all", ...(prune ? ["--prune"] : []), "--quiet"], {
       cwd,
       timeout: 15_000,
     });
@@ -84,9 +108,10 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
   let ahead = 0;
   let behind = 0;
   try {
-    const { stdout } = await execAsync("git status --porcelain=v2 --branch", {
-      cwd,
-    });
+    const { stdout } = await git(
+      ["status", "--porcelain=v2", "--branch"],
+      { cwd }
+    );
     for (const raw of stdout.split("\n")) {
       const line = raw.trimEnd();
       if (line === "") continue;
@@ -120,7 +145,7 @@ async function getDiffStat(
   let insertions = 0;
   let deletions = 0;
   try {
-    const { stdout } = await execAsync("git diff --numstat HEAD", { cwd });
+    const { stdout } = await git(["diff", "--numstat", "HEAD"], { cwd });
     for (const line of stdout.split("\n")) {
       const m = line.match(/^(\d+)\t(\d+)\t/);
       if (m) {
@@ -145,19 +170,13 @@ export async function addWorktree(
   branch: string,
   base = "HEAD"
 ): Promise<void> {
-  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
   try {
-    await execAsync(
-      `git worktree add -b ${q(branch)} ${q(dir)} ${q(base)}`,
-      { cwd: repoRoot }
-    );
+    await git(["worktree", "add", "-b", branch, dir, base], { cwd: repoRoot });
   } catch (err) {
     // Branch may already exist; fall back to checking it out into the worktree.
     const msg = String((err as { stderr?: string }).stderr ?? err);
     if (/already exists/i.test(msg)) {
-      await execAsync(`git worktree add ${q(dir)} ${q(branch)}`, {
-        cwd: repoRoot,
-      });
+      await git(["worktree", "add", dir, branch], { cwd: repoRoot });
     } else {
       throw new Error(msg.trim());
     }
@@ -209,8 +228,12 @@ export interface BranchInfo {
 export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   // A NUL between fields and a newline between records, so branch names that
   // contain odd characters never confuse the parse.
-  const { stdout: localOut } = await execAsync(
-    "git for-each-ref --format='%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)' refs/heads",
+  const { stdout: localOut } = await git(
+    [
+      "for-each-ref",
+      "--format=%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)",
+      "refs/heads",
+    ],
     { cwd }
   );
   const branches: BranchInfo[] = [];
@@ -218,7 +241,7 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   // as the diff/ahead-behind base. Empty when the branch tracks nothing.
   const upstreamOf = new Map<string, string>();
   for (const raw of localOut.split("\n")) {
-    const line = raw.replace(/^'/, "").replace(/'$/, "").trimEnd();
+    const line = raw.trimEnd();
     if (line === "") continue;
     const [name, worktreePath, track, upstream] = line.split("\0");
     if (!name) continue;
@@ -243,13 +266,13 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   // branch, never a branch of its own. Use the FULL refname here: `refname:short`
   // collapses `refs/remotes/origin/HEAD` to the bare remote name `origin`, which
   // would slip past a `origin/HEAD` guard and surface a phantom "origin" branch.
-  const { stdout: remoteOut } = await execAsync(
-    "git for-each-ref --format='%(refname)' refs/remotes/origin",
+  const { stdout: remoteOut } = await git(
+    ["for-each-ref", "--format=%(refname)", "refs/remotes/origin"],
     { cwd }
   );
   const originNames = new Set<string>();
   for (const raw of remoteOut.split("\n")) {
-    const ref = raw.replace(/^'/, "").replace(/'$/, "").trimEnd();
+    const ref = raw.trimEnd();
     if (ref === "") continue;
     const name = ref.replace(/^refs\/remotes\/origin\//, "");
     if (name && name !== "HEAD") originNames.add(name);
@@ -311,13 +334,17 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
  * run a `git fetch --prune` first to make a recently-deleted remote register.
  */
 export async function goneBranches(cwd: string): Promise<string[]> {
-  const { stdout } = await execAsync(
-    "git for-each-ref --format='%(refname:short)%00%(upstream:track,nobracket)' refs/heads",
+  const { stdout } = await git(
+    [
+      "for-each-ref",
+      "--format=%(refname:short)%00%(upstream:track,nobracket)",
+      "refs/heads",
+    ],
     { cwd }
   );
   const gone: string[] = [];
   for (const raw of stdout.split("\n")) {
-    const line = raw.replace(/^'/, "").replace(/'$/, "").trimEnd();
+    const line = raw.trimEnd();
     if (!line) continue;
     const [name, track] = line.split("\0");
     if (name && /\bgone\b/.test(track || "")) gone.push(name);
@@ -335,8 +362,8 @@ export async function defaultBranchName(
   cwd: string
 ): Promise<string | undefined> {
   try {
-    const { stdout } = await execAsync(
-      "git symbolic-ref --quiet refs/remotes/origin/HEAD",
+    const { stdout } = await git(
+      ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
       { cwd }
     );
     const ref = stdout.trim().replace(/^refs\/remotes\/origin\//, "");
@@ -358,8 +385,8 @@ async function resolveDefaultBranchRef(
   cwd: string
 ): Promise<string | undefined> {
   try {
-    const { stdout } = await execAsync(
-      "git symbolic-ref --quiet refs/remotes/origin/HEAD",
+    const { stdout } = await git(
+      ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
       { cwd }
     );
     const ref = stdout.trim().replace(/^refs\/remotes\//, "");
@@ -369,7 +396,7 @@ async function resolveDefaultBranchRef(
   }
   for (const cand of ["origin/main", "origin/master", "main", "master"]) {
     try {
-      await execAsync(`git rev-parse --verify --quiet ${cand}`, { cwd });
+      await git(["rev-parse", "--verify", "--quiet", cand], { cwd });
       return cand;
     } catch {
       /* not this one */
@@ -385,12 +412,11 @@ async function diffStat(
   base: string,
   tip: string
 ): Promise<{ insertions: number; deletions: number }> {
-  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
   let insertions = 0;
   let deletions = 0;
   try {
-    const { stdout } = await execAsync(
-      `git diff --numstat ${q(base)}...${q(tip)}`,
+    const { stdout } = await git(
+      ["diff", "--numstat", `${base}...${tip}`],
       { cwd }
     );
     for (const line of stdout.split("\n")) {
@@ -413,10 +439,9 @@ async function aheadBehind(
   base: string,
   tip: string
 ): Promise<{ ahead: number; behind: number }> {
-  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
   try {
-    const { stdout } = await execAsync(
-      `git rev-list --left-right --count ${q(base)}...${q(tip)}`,
+    const { stdout } = await git(
+      ["rev-list", "--left-right", "--count", `${base}...${tip}`],
       { cwd }
     );
     const m = stdout.trim().match(/(\d+)\s+(\d+)/);
@@ -437,11 +462,10 @@ export async function unpushedCommitCount(
   repoRoot: string,
   name: string
 ): Promise<number> {
-  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
   let base: string | undefined;
   try {
-    const { stdout } = await execAsync(
-      `git rev-parse --abbrev-ref --symbolic-full-name ${q(`${name}@{upstream}`)}`,
+    const { stdout } = await git(
+      ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${name}@{upstream}`],
       { cwd: repoRoot }
     );
     base = stdout.trim() || undefined;
@@ -450,8 +474,8 @@ export async function unpushedCommitCount(
   }
   if (!base) return 0;
   try {
-    const { stdout } = await execAsync(
-      `git rev-list --count ${q(base)}..${q(name)}`,
+    const { stdout } = await git(
+      ["rev-list", "--count", `${base}..${name}`],
       { cwd: repoRoot }
     );
     return Number(stdout.trim()) || 0;
@@ -498,19 +522,14 @@ export async function addBranchWorktree(
   branch: string,
   remoteOnly: boolean
 ): Promise<void> {
-  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
   try {
     if (remoteOnly) {
-      await execAsync(
-        `git worktree add --track -b ${q(branch)} ${q(dir)} ${q(
-          `origin/${branch}`
-        )}`,
+      await git(
+        ["worktree", "add", "--track", "-b", branch, dir, `origin/${branch}`],
         { cwd: repoRoot }
       );
     } else {
-      await execAsync(`git worktree add ${q(dir)} ${q(branch)}`, {
-        cwd: repoRoot,
-      });
+      await git(["worktree", "add", dir, branch], { cwd: repoRoot });
     }
   } catch (err) {
     const msg = String((err as { stderr?: string }).stderr ?? err);
@@ -535,7 +554,7 @@ export async function getRemoteInfo(
 ): Promise<RemoteInfo | undefined> {
   let url: string;
   try {
-    const { stdout } = await execAsync("git remote get-url origin", { cwd });
+    const { stdout } = await git(["remote", "get-url", "origin"], { cwd });
     url = stdout.trim();
   } catch {
     return undefined;
@@ -577,26 +596,25 @@ export async function deleteBranch(
   name: string,
   opts: { local?: boolean; remote?: boolean; force?: boolean }
 ): Promise<void> {
-  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
-  const run = async (cmd: string) => {
+  const run = async (args: string[]) => {
     try {
-      await execAsync(cmd, { cwd: repoRoot });
+      await git(args, { cwd: repoRoot });
     } catch (err) {
       const msg = String((err as { stderr?: string }).stderr ?? err);
       throw new Error(msg.trim());
     }
   };
   if (opts.local) {
-    await run(`git branch ${opts.force ? "-D" : "-d"} ${q(name)}`);
+    await run(["branch", opts.force ? "-D" : "-d", name]);
   }
   if (opts.remote) {
     try {
-      await run(`git push origin --delete ${q(name)}`);
+      await run(["push", "origin", "--delete", name]);
     } catch (err) {
       // Already gone on the remote (stale tracking ref): drop the local mirror
       // so the UI updates, and treat the delete as done rather than erroring.
       if (/remote ref does not exist/i.test((err as Error).message)) {
-        await run(`git branch -dr ${q(`origin/${name}`)}`).catch(() => {});
+        await run(["branch", "-dr", `origin/${name}`]).catch(() => {});
       } else {
         throw err;
       }
@@ -610,10 +628,9 @@ export async function removeWorktree(
   dir: string,
   force = false
 ): Promise<void> {
-  const q = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
   try {
-    await execAsync(
-      `git worktree remove ${force ? "--force " : ""}${q(dir)}`,
+    await git(
+      ["worktree", "remove", ...(force ? ["--force"] : []), dir],
       { cwd: repoRoot }
     );
   } catch (err) {
@@ -629,7 +646,7 @@ export async function removeWorktree(
  */
 export async function detachWorktreeHead(worktreePath: string): Promise<void> {
   try {
-    await execAsync("git checkout --detach", { cwd: worktreePath });
+    await git(["checkout", "--detach"], { cwd: worktreePath });
   } catch (err) {
     const msg = String((err as { stderr?: string }).stderr ?? err);
     throw new Error(msg.trim());
@@ -641,7 +658,7 @@ export async function detachWorktreeHead(worktreePath: string): Promise<void> {
  * `git worktree list --porcelain`. The first entry is the primary worktree.
  */
 export async function listWorktrees(cwd: string): Promise<Worktree[]> {
-  const { stdout } = await execAsync("git worktree list --porcelain", { cwd });
+  const { stdout } = await git(["worktree", "list", "--porcelain"], { cwd });
   const worktrees: Worktree[] = [];
   let current: Partial<Worktree> | undefined;
 

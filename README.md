@@ -170,7 +170,10 @@ panel as a `{ type: "branches" }` payload:
   upstream and from `git rev-list --left-right --count base...tip` otherwise; the
   diff from `git diff --numstat base...tip`. The per-branch git calls run with
   bounded concurrency so a many-branch repo doesn't spawn a process per branch at
-  once, and any per-branch failure leaves that branch's counts at zero.
+  once, and any per-branch failure leaves that branch's counts at zero. Every git
+  call goes through `execFile` (argument arrays, no shell), so there is no
+  per-call `cmd.exe`/`sh` wrapper — on Windows that roughly halves the process
+  count for a branch listing and avoids shell-specific `--format` quoting.
 - The git-only branch list paints first, so the tab is responsive immediately,
   then PR data is fetched in the background: when the PR integration is enabled
   with a token connected, opening the tab kicks off a GitHub refresh on load (the

@@ -4,6 +4,15 @@ All notable changes to the Agent Worktrees extension are documented here.
 
 ## Unreleased
 
+- **Branches view loads fast on Windows** - listing branches enriches each one
+  with ahead/behind and a line diff, and every git call used to run through a
+  shell (`child_process.exec`), which on Windows spawns a `cmd.exe` per call. On
+  a repo with many branches that meant hundreds of `cmd.exe` + `git.exe` spawns
+  per load, pegging the CPU and leaving the view stuck on "Loading branches".
+  All git calls now run via `execFile` with argument arrays (no shell), which
+  roughly halves the process count, speeds each spawn, suppresses the console
+  window flashes, and removes the fragile `--format='...'` quoting that differed
+  between cmd.exe and POSIX shells.
 - **Source Control scope button now works on Windows** - the button matched
   worktree paths by exact string, but git reports an uppercase drive letter
   ("C:\\repo") while VS Code reports it lowercased ("c:\\repo"), so the paths
