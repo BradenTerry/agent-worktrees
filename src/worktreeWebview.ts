@@ -611,10 +611,20 @@ export class WorktreeWebviewProvider
     await this.refresh();
   }
 
-  /** Reveal the terminal backing an agent (if we launched it). */
+  /** Reveal the terminal backing an agent (if this window launched it). */
   private focusAgent(sessionId?: string): void {
     if (!sessionId) return;
-    this.terminals.get(sessionId)?.show();
+    const terminal = this.terminals.get(sessionId);
+    if (terminal) {
+      terminal.show();
+      return;
+    }
+    // The agent list comes from global storage shared across every VS Code
+    // window, but terminal handles are per-window. A terminal started in another
+    // window (or manually, outside the extension) can't be revealed from here.
+    void vscode.window.showInformationMessage(
+      "This agent's terminal isn't in this window — it was started in another window or outside Agent Worktrees, so it can't be revealed here."
+    );
   }
 
   /** Stop an agent and remove its row. */

@@ -30,7 +30,9 @@ The **Branches view** opens as a full editor tab listing every branch with its P
   date** pill when the branch is behind its base branch and an **Auto-merge**
   pill when auto-merge is enabled.
 - **Start agents in a click** — launch a Claude CLI session in any worktree, each
-  in its own terminal. Reveal or stop it from the panel.
+  in its own terminal. Reveal or stop it from the panel. Reveal works in the
+  window that started the agent; another window can still see and stop it, and
+  now tells you when its terminal lives elsewhere instead of doing nothing.
 - **Agent & Worktree in one step** — create a fresh worktree with `claude -w` and
   start an agent in it together.
 - **Open in a new window** — open any worktree in its own VS Code window in a

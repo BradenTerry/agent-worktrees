@@ -346,6 +346,10 @@ flowchart TD
 - Agent terminals are tracked in memory; after an extension-host reload the panel
   can still show and stop agents (by session id / working directory) but loses
   the terminal handle used to reveal them.
+- The session list lives in global storage shared by every VS Code window, but
+  terminal handles are per-window. So a window can show (and stop) an agent that
+  another window launched, yet clicking it cannot reveal a terminal it does not
+  own; the panel says so instead of silently doing nothing.
 - A terminal closed without `/exit` never fires `SessionEnd`; its state file is
   pruned automatically once it is older than 24 hours.
 </content>
