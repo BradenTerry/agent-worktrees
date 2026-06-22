@@ -12,6 +12,7 @@ const {
   listBranches,
   deleteBranch,
   unpushedCommitCount,
+  setGitTracer,
 } = require("../out/git.js");
 
 function git(cwd, args) {
@@ -262,6 +263,27 @@ test("unpushedCommitCount counts commits not on the base branch", async () => {
   assert.strictEqual(await unpushedCommitCount(r, "work"), 2);
   // main has nothing beyond itself.
   assert.strictEqual(await unpushedCommitCount(r, "main"), 0);
+});
+
+test("setGitTracer records each git call (command, result, timing)", async () => {
+  const lines = [];
+  setGitTracer((m) => lines.push(m));
+  try {
+    await listWorktrees(repo);
+  } finally {
+    setGitTracer(null); // disabling stops further tracing
+  }
+
+  // The worktree listing ran `git worktree list --porcelain`; the trace line
+  // carries the command and an "ok <ms>ms" result.
+  const wt = lines.find((l) => l.startsWith("git worktree list"));
+  assert.ok(wt, `expected a traced 'git worktree list' call, got: ${lines.join(" | ")}`);
+  assert.match(wt, /-> ok \d+ms/);
+
+  // After setGitTracer(null), nothing more is recorded.
+  const before = lines.length;
+  await listWorktrees(repo);
+  assert.strictEqual(lines.length, before, "tracer disabled -> no new lines");
 });
 
 test("findRepoRoot resolves a worktree to a git top-level", async () => {

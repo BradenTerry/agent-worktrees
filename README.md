@@ -211,6 +211,15 @@ panel as a `{ type: "branches" }` payload:
   `parseLocalBranchRefs` / `parseOriginNames` helpers (unit-tested, CRLF-safe).
   If listing fails the error is surfaced in the view, not swallowed into an empty
   list.
+- The optional `Agent Worktrees: Trace` setting turns on verbose tracing of every
+  external call. `git.ts` and `github.ts` each take an injected tracer
+  (`setGitTracer` / `setGithubTracer`) wired by the extension host to the
+  diagnostics channel, so both modules stay free of a *runtime* vscode dependency
+  (their `vscode` imports are type-only and elided, which is what lets the unit
+  tests load them without a vscode stub). Each git invocation and each GitHub
+  `fetch` is logged with its command/URL, duration, and result; request headers
+  (which carry the token) are never logged. Off by default, zero overhead when
+  off (the tracer is null, so no trace strings are built).
 - The git-only branch list paints first, so the tab is responsive immediately,
   then PR data is fetched in the background: when the PR integration is enabled
   with a token connected, opening the tab kicks off a GitHub refresh on load (the

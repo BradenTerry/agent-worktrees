@@ -16,6 +16,44 @@ const PAT_KEY = "agentWorktrees.githubPat";
 const API = "https://api.github.com";
 const UA = "agent-worktrees";
 
+/**
+ * Optional debug tracer, injected by the extension host (see `setGithubTracer`)
+ * when the user enables tracing. Kept as injection — rather than importing the
+ * diagnostics module — so github.ts stays free of any *runtime* vscode
+ * dependency (its `vscode` import is type-only and elided), which is what lets
+ * the unit tests load this module without a vscode stub. Null when tracing off.
+ */
+let traceSink: ((msg: string) => void) | null = null;
+
+/** Enable/disable GitHub request tracing (pass null to disable). */
+export function setGithubTracer(fn: ((msg: string) => void) | null): void {
+  traceSink = fn;
+}
+
+/**
+ * `fetch` wrapper that records each GitHub API call to the debug trace: method,
+ * URL, response status, and duration. Request headers (which carry the token)
+ * are never logged. Identical to `fetch` otherwise, and zero overhead when
+ * tracing is off.
+ */
+async function tracedFetch(
+  url: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  if (!traceSink) return fetch(url, init);
+  const method = init.method ?? "GET";
+  const started = Date.now();
+  try {
+    const res = await fetch(url, init);
+    traceSink(`github ${method} ${url} -> ${res.status} ${Date.now() - started}ms`);
+    return res;
+  } catch (e) {
+    const first = (e instanceof Error ? e.message : String(e)).split("\n")[0];
+    traceSink(`github ${method} ${url} -> ERROR ${Date.now() - started}ms: ${first}`);
+    throw e;
+  }
+}
+
 let ctx: vscode.ExtensionContext | undefined;
 /** Cached /user probe, invalidated when the token changes. */
 let probeCache: Promise<GithubConnection> | undefined;
@@ -111,7 +149,7 @@ export async function connection(): Promise<GithubConnection> {
 
 async function probe(token: string): Promise<GithubConnection> {
   try {
-    const res = await fetch(`${API}/user`, { headers: authHeaders(token) });
+    const res = await tracedFetch(`${API}/user`, { headers: authHeaders(token) });
     if (!res.ok) {
       const error =
         res.status === 401
@@ -197,7 +235,7 @@ export async function getJson<T>(
   const headers = authHeaders(token);
   if (cached) headers["If-None-Match"] = cached.etag;
   try {
-    const res = await fetch(url, { headers });
+    const res = await tracedFetch(url, { headers });
     // Unchanged since last fetch: reuse the cached body (free of rate limit).
     if (res.status === 304 && cached) return cached.value as T;
     if (!res.ok) {
@@ -534,7 +572,7 @@ export async function fetchPrsByBranch(
   for (let page = 0; page < MAX_PR_PAGES; page++) {
     let body: GqlResponse | undefined;
     try {
-      const res = await fetch(`${API}/graphql`, {
+      const res = await tracedFetch(`${API}/graphql`, {
         method: "POST",
         headers: { ...authHeaders(token), "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -59,6 +59,16 @@
         "title": "Settings",
         "category": "Worktrees",
         "icon": "$(gear)"
+      },
+      {
+        "command": "worktreeView.toggleTrace",
+        "title": "Toggle Debug Tracing",
+        "category": "Worktrees"
+      },
+      {
+        "command": "worktreeView.showLog",
+        "title": "Show Log",
+        "category": "Worktrees"
       }
     ],
     "menus": {
@@ -74,6 +84,16 @@
           "group": "navigation@3"
         }
       ]
+    },
+    "configuration": {
+      "title": "Agent Worktrees",
+      "properties": {
+        "agentWorktrees.trace": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log every external call (each git command and GitHub API request, with its duration and result) to the \"Agent Worktrees\" output channel. Turn this on to diagnose slow or failing git/GitHub activity, then open View: Output and pick \"Agent Worktrees\". Off by default."
+        }
+      }
     }
   },
   "scripts": {
