@@ -2,6 +2,22 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.7.4
+
+- **Panel is much less of a CPU hog on Windows** - the sidebar refreshes when
+  files change, when an agent fires a hook, and when the window regains focus,
+  and each refresh spawns `git status` + `git diff` for every worktree. The
+  session-state watcher used to refresh on every single hook event with no
+  batching, so an active agent (which fires many hooks a second) triggered a
+  storm of git processes - and process spawning plus file watching are both far
+  more expensive on Windows than on macOS, which is what made the panel feel
+  sluggish. All three signals now funnel through a debouncing coalescer: a burst
+  of events collapses into one refresh, a continuous stream (a build writing
+  files, an agent streaming tool output) still flushes at a bounded rate instead
+  of either spamming or stalling, and an in-flight refresh never overlaps itself.
+  The behavior is unchanged - the panel shows the same up-to-date state - it just
+  does the expensive work far less often.
+
 ## 2.7.3
 
 - **Branches view is much faster on big repos** - ahead/behind for every branch
