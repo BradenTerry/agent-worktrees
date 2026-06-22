@@ -687,7 +687,14 @@ export class WorktreeWebviewProvider
   private stopSession(sessionId: string): void {
     if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return;
     this.terminals.get(sessionId)?.dispose();
-    if (process.platform !== "win32") {
+    if (process.platform === "win32") {
+      // Windows has no `pkill -f`. Find the process whose command line carries
+      // the session id and tear down its whole tree with `taskkill /T`. The tree
+      // kill is what reaches a `claude -w` child (a descendant of the
+      // `--session-id` process that drops the id from its own argv), so Windows
+      // does not need the cwd-based killClaudeInDir fallback.
+      this.killTreeByCommandLine(sessionId);
+    } else {
       // pkill -f matches the session id in the process's full command line.
       cp.execFile("pkill", ["-f", sessionId], () => {
         /* no match / pkill missing -> nothing to kill */
@@ -711,6 +718,11 @@ export class WorktreeWebviewProvider
    * for a shared dir like the main repo, which would also kill unrelated agents.
    */
   private killClaudeInDir(dir: string): void {
+    // Windows: there is no portable way to read another process's cwd, but it
+    // does not need one. stopSession already tree-kills each tracked agent by
+    // session id (taskkill /T), which reaches the `claude -w` child this method
+    // exists to catch on Unix. So the worktree's agents are already gone by the
+    // time this runs on Windows.
     if (process.platform === "win32") return;
     const norm = normalize(dir);
     let out = "";
@@ -739,6 +751,37 @@ export class WorktreeWebviewProvider
       } catch {
         /* already gone, or not killable */
       }
+    }
+  }
+
+  /**
+   * Windows force-kill of every process whose command line contains `needle`,
+   * along with its child process tree (`taskkill /T`). This is our `pkill -f`
+   * stand-in: PowerShell's CIM query is the only portable way to read other
+   * processes' command lines. The match is case-insensitive and literal (no
+   * `-like` wildcards, so a path with `[`/`]` can't misfire), and our own
+   * PowerShell is excluded by `$PID` because the needle is embedded in its
+   * command line. Best-effort: a missing PowerShell or no match is a no-op.
+   */
+  private killTreeByCommandLine(needle: string): void {
+    if (process.platform !== "win32") return;
+    // Single-quote escape for the PowerShell string literal.
+    const lit = needle.toLowerCase().replace(/'/g, "''");
+    const script =
+      "Get-CimInstance Win32_Process | Where-Object { " +
+      `$_.ProcessId -ne $PID -and $_.CommandLine -and ` +
+      `$_.CommandLine.ToLower().Contains('${lit}') } | ` +
+      "ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null }";
+    try {
+      cp.execFile(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", script],
+        () => {
+          /* powershell missing / nothing to kill -> best effort */
+        }
+      );
+    } catch {
+      /* spawn failed -> nothing we can do */
     }
   }
 
