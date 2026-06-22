@@ -82,6 +82,8 @@ listed until you make a selection:
   to show only the branches they last touched. You are pinned to the top of the
   list.
 - **Sort** — Recently updated, Least recently updated, or Name (A–Z).
+- **Open PRs** — a one-click toggle (shown only once a GitHub token is connected)
+  that narrows the list to just the branches with an open pull request.
 
 Your filter and sort choices are remembered the next time you open the view. Close
 it like any editor tab; the Branches button reopens it.
@@ -89,10 +91,10 @@ it like any editor tab; the Branches button reopens it.
 When the GitHub integration is connected, a branch that has an **open** (or draft)
 pull request also shows it inline — its title, state badge, author, assignees and
 whether you are a requested reviewer — as a hint on the branch row. (The branches
-view pulls every PR in one bulk call, which doesn't include CI-check or
+view fetches your open PRs in one bulk call, which doesn't include CI-check or
 review-approval detail; for the full checks-and-reviews rollup, see the PR on its
 worktree card.) The branch list paints instantly from local git; PR status loads in
-the background: opening the view starts a **Refresh GitHub** of PR status on its own
+the background: opening the view starts a **Fetch Open PRs** of PR status on its own
 (the button spins until it lands, and the **Last refreshed** label fills in with the
 time), and you can re-run it anytime from that button (see below). Without a token
 the view simply lists every branch, with no PR info. (A dedicated PR view may come
@@ -104,12 +106,12 @@ reflects what actually landed. A **Prune** checkbox next to it (on by default)
 also removes tracking refs for branches deleted on the remote, so merged-and-
 deleted branches stop lingering as **remote only** rows.
 
-**Refresh GitHub.** When you have connected a GitHub token, a **Refresh GitHub**
+**Fetch Open PRs.** When you have connected a GitHub token, a **Fetch Open PRs**
 button appears in the header beside a **Last refreshed** label. The view refreshes
-PR and CI status automatically when it opens, and this button re-queries on demand
-afterwards. The label reads **Never** only until that first on-open refresh lands,
-then shows the time of the most recent one. The GitHub refresh runs without a git
-fetch — so you can refresh just the PR view, or just your local branch state,
+open PR and CI status automatically when it opens, and this button re-queries on
+demand afterwards. The label reads **Never** only until that first on-open refresh
+lands, then shows the time of the most recent one. The GitHub refresh runs without
+a git fetch — so you can refresh just the PR view, or just your local branch state,
 independently.
 
 **Delete branches.** Every branch that exists on your machine shows a **Delete

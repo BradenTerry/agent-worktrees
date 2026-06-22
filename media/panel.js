@@ -76,7 +76,9 @@
   // reopening the overlay restores the last view. This view is git-first: `users`
   // is a list of committer names (the people who last updated each branch,
   // multi-select); `sort` is one of the SORT_OPTIONS keys (all git-based, no
-  // GitHub needed). A branch's open PR is shown when present but is not a filter.
+  // GitHub needed). `openPrsOnly` is the one PR-aware filter: an opt-in toggle
+  // (only shown when GitHub PR data is available) narrowing the list to branches
+  // with an open/draft PR.
   const savedState = vscode.getState() || {};
   const branchFilters = {
     // Prune on fetch. On by default; persisted so the checkbox stays set.
@@ -88,6 +90,8 @@
       typeof savedState.branchSort === "string"
         ? savedState.branchSort
         : "recentlyUpdated",
+    // Off by default so the branch list is complete until the user opts in.
+    openPrsOnly: savedState.branchOpenPrsOnly === true,
   };
   function persist() {
     vscode.setState({
@@ -95,6 +99,7 @@
       branchPrune: branchFilters.prune,
       branchUsers: branchFilters.users.slice(),
       branchSort: branchFilters.sort,
+      branchOpenPrsOnly: branchFilters.openPrsOnly,
     });
   }
 
@@ -1051,7 +1056,7 @@
   }
 
   // "Last refreshed" label for the GitHub PR data. The branches view fetches on
-  // open (when a token is connected) and on each Refresh GitHub click; this reads
+  // open (when a token is connected) and on each Fetch Open PRs click; this reads
   // "Never" only until that first on-open fetch lands.
   function lastRefreshedText(data) {
     const t = data && data.lastGithubRefresh;
@@ -1062,8 +1067,15 @@
     });
   }
 
-  /** Apply the active user filter + sort to the branch list, client-side. All
-   *  git-based: the list is never narrowed or reordered by PR data. */
+  /** A branch has an open PR when PR data is available and it carries one. The
+   *  fetch is open-only, so any attached PR is open/draft. */
+  function hasOpenPr(data, b) {
+    return !!(prAvailable(data) && b && b.pr);
+  }
+
+  /** Apply the active user + open-PR filters and sort to the branch list,
+   *  client-side. Sorting and the user filter are git-based; the open-PR filter
+   *  is the only one that consults GitHub data and is gated by prAvailable. */
   function visibleBranches(data) {
     const all = (data && data.branches) || [];
     const sortOpt =
@@ -1076,6 +1088,12 @@
     // known committer is dropped only while a filter is active.
     if (userSet.size) {
       rows = rows.filter((b) => b.lastUser && userSet.has(b.lastUser));
+    }
+
+    // Open-PR filter: only honored when PR data is actually available, so a
+    // stale toggle can never hide every branch when the integration is off.
+    if (branchFilters.openPrsOnly && prAvailable(data)) {
+      rows = rows.filter((b) => hasOpenPr(data, b));
     }
 
     const byName = (a, b) =>
@@ -1185,10 +1203,25 @@
         "</button>"
     ).join("");
 
+    // Open-PRs toggle: a one-click filter, only shown when GitHub PR data is
+    // available (no point offering it when no PRs can be matched). Pressed state
+    // is reflected with aria-pressed + the "on" class for styling.
+    const on = branchFilters.openPrsOnly;
+    const openPrsToggle = prAvailable(data)
+      ? '<button class="bfilter-toggle' +
+        (on ? " on" : "") +
+        '" data-action="toggleOpenPrs" aria-pressed="' +
+        on +
+        '" title="Show only branches with an open pull request">' +
+        icons.pr +
+        "<span>Open PRs</span></button>"
+      : "";
+
     return (
       '<div class="bfilter-bar">' +
       controls +
       menu("sort", "Sort", sortOpt.label, sortItems) +
+      openPrsToggle +
       "</div>"
     );
   }
@@ -1447,21 +1480,21 @@
       '<button class="branches-refresh branches-danger" data-action="deleteGoneBranches" title="Delete every local branch whose upstream branch is gone (merged or deleted on the remote). The remote is left untouched.">' +
       icons.trash +
       " Delete gone</button>" +
-      // Refresh GitHub is the API-only counterpart to the git-only Fetch: it
-      // re-polls PR/CI status without a git fetch. Only useful (and only shown)
-      // when a token is stored. PR/CI status is fetched on open and on each click;
-      // it spins (data.githubRefreshing) while the on-open fetch is in flight. The
-      // "Last refreshed" time sits directly below it.
+      // Fetch Open PRs is the API-only counterpart to the git-only Fetch: it
+      // re-polls open PR/CI status without a git fetch. Only useful (and only
+      // shown) when a token is stored. PR/CI status is fetched on open and on
+      // each click; it spins (data.githubRefreshing) while the on-open fetch is
+      // in flight. The "Last refreshed" time sits directly below it.
       (data && data.github && data.github.hasToken
         ? '<div class="branches-action-stack">' +
           '<button class="branches-refresh' +
           (data.githubRefreshing ? " busy" : "") +
           '" data-action="refreshGithub"' +
           (data.githubRefreshing ? " disabled" : "") +
-          ' title="Re-query the GitHub API to refresh PR and CI status">' +
+          ' title="Re-query the GitHub API to refresh open PR and CI status">' +
           (data.githubRefreshing ? icons.spinner : icons.pr) +
-          " Refresh GitHub</button>" +
-          '<span class="branches-lastrefresh" title="When the GitHub PR and CI status was last refreshed. PR/CI status is refreshed when the view opens and whenever you click Refresh GitHub.">Last refreshed: ' +
+          " Fetch Open PRs</button>" +
+          '<span class="branches-lastrefresh" title="When the open PR and CI status was last refreshed. Status is refreshed when the view opens and whenever you click Fetch Open PRs.">Last refreshed: ' +
           esc(lastRefreshedText(data)) +
           "</span>" +
           "</div>"
@@ -1554,6 +1587,15 @@
         renderBranches();
         return;
       }
+      // Open-PRs toggle: webview-only filter, no message to the extension.
+      const openPrs = e.target.closest("[data-action='toggleOpenPrs']");
+      if (openPrs) {
+        branchFilters.openPrsOnly = !branchFilters.openPrsOnly;
+        branchPage = 0;
+        persist();
+        renderBranches();
+        return;
+      }
       // Click outside any open menu closes it (but let real actions below run).
       if (openMenu && !e.target.closest(".bfilter")) {
         openMenu = "";
@@ -1616,7 +1658,7 @@
         send("fetchBranches", { value: prune ? !!prune.checked : true });
         return;
       }
-      // Refresh GitHub: API-only re-poll of PR/CI status, no git fetch.
+      // Fetch Open PRs: API-only re-poll of open PR/CI status, no git fetch.
       if (action === "refreshGithub") {
         send("refreshGithub");
         return;

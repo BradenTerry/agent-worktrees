@@ -73,10 +73,11 @@ state, and its running agents in one view.
   listed branches) and a **Sort** by most/least recently updated or name — all
   derived from git, so they work with or without a token. When a GitHub token is
   stored, PR/CI status is refreshed automatically when the tab opens (the
-  **Refresh GitHub** button spins until it lands) and can be re-polled on demand
-  from that button, decoupled from the git fetch, which stays manual. A branch's
-  **open** (or draft) PR rollup is shown when one exists, as a hint on the branch
-  row — a dedicated PR view may come later.
+  **Fetch Open PRs** button spins until it lands) and can be re-polled on demand
+  from that button, decoupled from the git fetch, which stays manual; an **Open
+  PRs** toggle then appears that narrows the list to branches with an open PR. A
+  branch's **open** (or draft) PR rollup is shown when one exists, as a hint on
+  the branch row — a dedicated PR view may come later.
 
 ## Agent status from hooks
 
@@ -256,15 +257,17 @@ panel as a `{ type: "branches" }` payload:
 - The git-only branch list paints first, so the tab is responsive immediately,
   then PR data is fetched in the background: when the PR integration is enabled
   with a token connected, opening the tab kicks off a GitHub refresh on load (the
-  **Refresh GitHub** button spins until it lands) and that button re-polls on
+  **Fetch Open PRs** button spins until it lands) and that button re-polls on
   demand afterwards. The git fetch is **not** run on open — it stays the manual
   **Fetch** button. With no token the view stays git-only and never calls the API.
 - When that fetch runs (on open or on demand) and the PR integration is enabled
-  with a token connected, `github.fetchPrsByBranch` lists the repo's PRs with a
-  single REST `GET /repos/{owner}/{repo}/pulls?state=all` (paged from
-  most-recently-updated, so one call for small repos and a bounded few for large
-  ones, no per-PR follow-ups). It returns the repo's PRs (open, merged and
-  closed) with the fields the list endpoint carries — state, author, assignees,
+  with a token connected, `github.fetchPrsByBranch` lists the repo's **open** PRs
+  with a single REST `GET /repos/{owner}/{repo}/pulls?state=open` (paged from
+  most-recently-updated, so one call for the common case, no per-PR follow-ups).
+  Open-only on purpose: the view only renders open/draft PRs, and a repo carries
+  far more closed/merged PRs than live branches, so `state=all` used to page
+  through up to ~1000 historical PRs to surface a handful of open ones. It returns
+  those PRs with the fields the list endpoint carries — state, author, assignees,
   requested reviewers and auto-merge. The list endpoint has **no** CI-check,
   review-decision or comment data, so those badges are left empty in the branches
   view; pulling them would require a per-PR follow-up the bulk path deliberately
@@ -284,17 +287,21 @@ fetch each PR's checks and reviews) unchanged, so the two are separate code
 paths — and the cards still show CI checks and review status that the branches
 view does not.
 
-The view is git-first, so its filter and sort are git-based and run entirely
-client-side over the cached payload — changing either issues no network request,
-and both work with no token at all. The **Updated by** filter is a multi-select
-of the branches' tip-commit committers (`userOptions`, viewer pinned first when a
-committer name matches the GitHub login); the **Sort** is single-select over
-`Recently updated` / `Least recently updated` (tip-commit `committerdate`) and
-`Name (A–Z)`. PR data never narrows or reorders the list. A branch's **open** (or
-draft) PR rollup is rendered as a hint on its row when one exists; merged/closed
-PRs are not shown (the row still uses a merged PR, when present, to skip the
-"not fully merged" prompt on delete). The selected filter and sort persist across
-reopens via the webview state.
+The view is git-first, so its **Updated by** filter and **Sort** are git-based
+and run entirely client-side over the cached payload — changing either issues no
+network request, and both work with no token at all. The **Updated by** filter is
+a multi-select of the branches' tip-commit committers (`userOptions`, viewer
+pinned first when a committer name matches the GitHub login); the **Sort** is
+single-select over `Recently updated` / `Least recently updated` (tip-commit
+`committerdate`) and `Name (A–Z)`. A third **Open PRs** toggle is the one
+PR-aware filter: it narrows the list to branches with an open/draft PR and is
+shown **only** when GitHub PR data is available (and ignored if its persisted
+state is stale while the integration is off, so it can never blank the list). A
+branch's open (or draft) PR rollup is rendered as a hint on its row when one
+exists; the fetch is open-only, so merged/closed PRs are not loaded. Deleting a
+squash-merged branch therefore falls back to git's "not fully merged" prompt
+(one extra confirmation) rather than skipping it. The selected filters and sort
+persist across reopens via the webview state.
 
 A branch with no worktree shows a **Create worktree & start agent** action; one
 that already has a worktree shows a **Worktree exists** marker plus a **Start
@@ -325,13 +332,14 @@ to free the ref before deleting.
 
 Before the delete it computes `unpushedCommitCount` — commits not on the branch's
 upstream, or (with no upstream) not on the default branch — and, when non-zero
-and the PR is not merged, surfaces the count in a confirm (a second modal in the
-linked-worktree path) and force-deletes on consent. A merged PR also
-force-deletes without the "not fully merged" prompt: a squash-merge leaves the
-branch's commits unreachable from the base, so `git branch -d` would refuse even
-though the work landed. `git.deleteBranch` runs `git branch -d`/`-D`; a residual
-unmerged refusal still falls back to an explicit force prompt. Both views refresh
-afterward so the row drops.
+and the PR is not flagged merged, surfaces the count in a confirm (a second modal
+in the linked-worktree path) and force-deletes on consent. When a branch still
+carries a known-merged PR the row passes a `merged` flag to skip the "not fully
+merged" prompt — but the branches view now fetches **open** PRs only, so a
+squash-merged branch usually arrives without that flag and instead hits the
+fallback below. `git.deleteBranch` runs `git branch -d`/`-D`; an unmerged refusal
+falls back to an explicit force prompt (one extra confirmation for the
+squash-merge case). Both views refresh afterward so the row drops.
 
 **Bulk "Delete gone".** The header **Delete gone** button posts `deleteGoneBranches`.
 `git.goneBranches` reads `git for-each-ref ... %(upstream:track,nobracket)` and
@@ -408,9 +416,9 @@ flowchart TD
     WV -->|create/reveal singleton| EP["Branches editor tab<br/>AWT_VIEW=branches<br/>same panel.js + panel.css"]
     EP -->|loadBranches on mount| WV
     WV --> LB["git.listBranches<br/>local + remote-only,<br/>worktree association"]
-    WV --> FPB["github.fetchPrsByBranch<br/>GET /pulls?state=all,<br/>all PRs (no checks/reviews)"]
+    WV --> FPB["github.fetchPrsByBranch<br/>GET /pulls?state=open,<br/>open PRs (no checks/reviews)"]
     WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
-    BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Sort (last commit / name)"]
+    BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Sort (last commit / name) · Open PRs toggle (when PR data available)"]
     FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]
     CS --> PG["Client-side pagination<br/>25/page, Prev/Next"]
     PG --> ROWS[Branch rows]
