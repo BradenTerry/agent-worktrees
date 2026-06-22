@@ -4,6 +4,34 @@ import { promisify } from "util";
 const execFileAsync = promisify(execFile);
 
 /**
+ * Optional diagnostics sink. The extension host wires this to an output channel
+ * (see `setGitLogger`) so a user can see what git is doing — which is the only
+ * window we have into Windows-only "the Branches view never loads" reports,
+ * where errors are otherwise swallowed. Defaults to a no-op so git.ts keeps no
+ * dependency on the vscode API and unit tests need no setup.
+ */
+let logSink: (msg: string) => void = () => {};
+
+/** Route git diagnostics to `fn` (e.g. an output channel). */
+export function setGitLogger(fn: (msg: string) => void): void {
+  logSink = fn;
+}
+
+/** Emit a diagnostics line; never throws (logging must not break git). */
+function log(msg: string): void {
+  try {
+    logSink(msg);
+  } catch {
+    /* a broken logger must never take git down */
+  }
+}
+
+/** Default per-call timeout. Long enough for a slow `for-each-ref` on a big
+ *  repo, short enough that a wedged git (auth prompt, network stall) surfaces as
+ *  an error instead of an infinite "Loading branches" spinner. */
+const GIT_TIMEOUT_MS = 60_000;
+
+/**
  * Run git with an argument array and no shell.
  *
  * Using execFile instead of a shell `exec` avoids spawning a cmd.exe/sh wrapper
@@ -16,13 +44,15 @@ const execFileAsync = promisify(execFile);
  *
  * `windowsHide` suppresses the console window flash each git spawn would
  * otherwise cause on Windows; `maxBuffer` is raised so a large `for-each-ref`
- * or diff output never truncates.
+ * or diff output never truncates; `timeout` keeps a wedged call from hanging the
+ * view forever.
  */
 function git(
   args: string[],
   opts: { cwd?: string; timeout?: number } = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync("git", args, {
+    timeout: GIT_TIMEOUT_MS,
     ...opts,
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
@@ -225,22 +255,32 @@ export interface BranchInfo {
  * (origin/HEAD). Counts are read from local refs, so they reflect the last fetch.
  * Genuine git failures propagate the way `listWorktrees` does.
  */
-export async function listBranches(cwd: string): Promise<BranchInfo[]> {
-  // A NUL between fields and a newline between records, so branch names that
-  // contain odd characters never confuse the parse.
-  const { stdout: localOut } = await git(
-    [
-      "for-each-ref",
-      "--format=%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)",
-      "refs/heads",
-    ],
-    { cwd }
-  );
+/**
+ * Field separator (NUL) and our local-branch for-each-ref format. NUL between
+ * fields and newline between records so a branch name with odd characters never
+ * confuses the parse.
+ */
+const LOCAL_REF_FORMAT =
+  "%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)";
+
+/**
+ * Parse `git for-each-ref refs/heads` output (LOCAL_REF_FORMAT) into branch
+ * seeds plus the upstream map. Pure and exported so the exact parse — NUL field
+ * splitting, CRLF tolerance, empty/optional fields — is unit-tested without
+ * spawning git. Ahead/behind here come from %(upstream:track); divergence vs the
+ * base is filled in later by listBranches.
+ */
+export function parseLocalBranchRefs(stdout: string): {
+  branches: BranchInfo[];
+  upstreamOf: Map<string, string>;
+} {
   const branches: BranchInfo[] = [];
   // Configured upstream short-ref per local branch (e.g. "origin/feature"), used
   // as the diff/ahead-behind base. Empty when the branch tracks nothing.
   const upstreamOf = new Map<string, string>();
-  for (const raw of localOut.split("\n")) {
+  // Tolerate CRLF: git emits LF, but a misconfigured core.autocrlf or a wrapper
+  // can introduce \r, which would otherwise cling to the last field.
+  for (const raw of stdout.split(/\r?\n/)) {
     const line = raw.trimEnd();
     if (line === "") continue;
     const [name, worktreePath, track, upstream] = line.split("\0");
@@ -250,7 +290,7 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
     branches.push({
       name,
       remoteOnly: false,
-      hasRemote: false, // set below once origin names are known
+      hasRemote: false, // set later once origin names are known
       hasWorktree: !!worktreePath,
       worktreePath: worktreePath || undefined,
       ahead,
@@ -260,23 +300,41 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       isDefault: false,
     });
   }
+  return { branches, upstreamOf };
+}
 
-  // origin/<name> set: marks which locals also live on the remote, and supplies
-  // the remote-only branches. origin/HEAD is a symbolic alias for the default
-  // branch, never a branch of its own. Use the FULL refname here: `refname:short`
-  // collapses `refs/remotes/origin/HEAD` to the bare remote name `origin`, which
-  // would slip past a `origin/HEAD` guard and surface a phantom "origin" branch.
+/**
+ * Parse `git for-each-ref refs/remotes/origin` (full refnames) into the set of
+ * origin branch short-names, excluding the origin/HEAD symbolic alias. Pure and
+ * exported for unit tests. Uses the FULL refname because `refname:short`
+ * collapses `refs/remotes/origin/HEAD` to the bare "origin", which would slip
+ * past a guard and surface a phantom "origin" branch.
+ */
+export function parseOriginNames(stdout: string): Set<string> {
+  const names = new Set<string>();
+  for (const raw of stdout.split(/\r?\n/)) {
+    const ref = raw.trimEnd();
+    if (ref === "") continue;
+    const name = ref.replace(/^refs\/remotes\/origin\//, "");
+    if (name && name !== "HEAD") names.add(name);
+  }
+  return names;
+}
+
+export async function listBranches(cwd: string): Promise<BranchInfo[]> {
+  const startedAt = Date.now();
+
+  const { stdout: localOut } = await git(
+    ["for-each-ref", `--format=${LOCAL_REF_FORMAT}`, "refs/heads"],
+    { cwd }
+  );
+  const { branches, upstreamOf } = parseLocalBranchRefs(localOut);
+
   const { stdout: remoteOut } = await git(
     ["for-each-ref", "--format=%(refname)", "refs/remotes/origin"],
     { cwd }
   );
-  const originNames = new Set<string>();
-  for (const raw of remoteOut.split("\n")) {
-    const ref = raw.trimEnd();
-    if (ref === "") continue;
-    const name = ref.replace(/^refs\/remotes\/origin\//, "");
-    if (name && name !== "HEAD") originNames.add(name);
-  }
+  const originNames = parseOriginNames(remoteOut);
 
   const localNames = new Set(branches.map((b) => b.name));
   for (const b of branches) b.hasRemote = originNames.has(b.name);
@@ -307,6 +365,10 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   if (defaultName) {
     for (const b of branches) if (b.name === defaultName) b.isDefault = true;
   }
+  // Count the per-branch git calls so the diagnostics summary shows how much
+  // work a big repo actually drove (the "branch list size vs Windows" question).
+  let aheadBehindCalls = 0;
+  let diffCalls = 0;
   await mapLimit(branches, 8, async (b) => {
     const tip = b.remoteOnly ? `origin/${b.name}` : b.name;
     const base = b.remoteOnly
@@ -317,6 +379,7 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
     // authoritative counts via %(upstream:track); everything else (no upstream,
     // or remote-only) is counted against the base.
     if (!upstreamOf.has(b.name)) {
+      aheadBehindCalls++;
       const ab = await aheadBehind(cwd, base, tip);
       b.ahead = ab.ahead;
       b.behind = ab.behind;
@@ -327,11 +390,17 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
     // always empty (0/0). Skip it then — that is what keeps a repo full of
     // merged/in-sync branches from running an expensive tree diff per branch.
     if (b.ahead > 0) {
+      diffCalls++;
       const diff = await diffStat(cwd, base, tip);
       b.insertions = diff.insertions;
       b.deletions = diff.deletions;
     }
   });
+  log(
+    `listBranches: ${branches.length} branches in ${
+      Date.now() - startedAt
+    }ms (${aheadBehindCalls} ahead/behind + ${diffCalls} diff calls)`
+  );
   return branches;
 }
 

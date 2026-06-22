@@ -10,6 +10,7 @@ import {
 } from "./git";
 import { normalizePath } from "./worktreeUtils";
 import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
+import { diag } from "./diagnostics";
 
 /**
  * Lifecycle status of an agent session, derived from Claude Code hooks.
@@ -218,6 +219,10 @@ export interface BranchData {
    *  Refresh GitHub button as busy until the follow-up post (with the fetched PR
    *  data) replaces it. */
   githubRefreshing?: boolean;
+  /** Set when listing branches threw (e.g. git missing/hung/timed out). The view
+   *  shows this instead of a misleading "No branches found", and it is logged to
+   *  the "Agent Worktrees" output channel. */
+  error?: string;
 }
 
 /**
@@ -232,8 +237,18 @@ export async function gatherBranches(): Promise<BranchData> {
   let branches;
   try {
     branches = await listBranches(repoRoot);
-  } catch {
-    return { repoRoot, repoName: path.basename(repoRoot), branches: [] };
+  } catch (err) {
+    // Surface the failure instead of silently showing an empty list: log it to
+    // the output channel and pass a message to the view. This is the breadcrumb
+    // for "the Branches view never loads" reports we cannot reproduce locally.
+    const msg = err instanceof Error ? err.message : String(err);
+    diag(`gatherBranches: listBranches failed for ${repoRoot}: ${msg}`);
+    return {
+      repoRoot,
+      repoName: path.basename(repoRoot),
+      branches: [],
+      error: msg,
+    };
   }
 
   const vms: BranchVM[] = branches.map((b) => ({

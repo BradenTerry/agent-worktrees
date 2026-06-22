@@ -1,14 +1,22 @@
 import * as vscode from "vscode";
 import { WorktreeWebviewProvider } from "./worktreeWebview";
 import { syncHooks } from "./hooks";
+import { setGitLogger } from "./git";
+import { diag, disposeDiagnostics } from "./diagnostics";
 
 export function activate(context: vscode.ExtensionContext) {
+  // Route git diagnostics to the "Agent Worktrees" output channel so a user can
+  // see why a view fails (the Windows "Branches never loads" reports otherwise
+  // leave no trace, since the panel swallows errors to stay resilient).
+  setGitLogger(diag);
+
   // Refresh/repair already-accepted hooks; never installs without consent.
   void syncHooks(context);
 
   const provider = new WorktreeWebviewProvider(context);
 
   context.subscriptions.push(
+    { dispose: disposeDiagnostics },
     provider,
 
     vscode.window.registerWebviewViewProvider(

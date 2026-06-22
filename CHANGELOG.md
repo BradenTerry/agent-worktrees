@@ -2,6 +2,19 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## Unreleased
+
+- **Branches view surfaces failures instead of a blank list** - when listing
+  branches fails (git missing, hung, or timed out) the view now shows the error
+  and points to the new "Agent Worktrees" output channel, rather than a
+  misleading "No branches found". This is aimed at the Windows reports where the
+  view never loaded and there was nothing to diagnose: git activity, per-load
+  timing (branch count and how many ahead/behind and diff calls ran), and any
+  failure are now logged to View -> Output -> "Agent Worktrees".
+- **Git calls no longer hang the view forever** - every git invocation now has a
+  timeout, so a wedged call (auth prompt, stalled network) surfaces as an error
+  instead of an endless "Loading branches" spinner.
+
 ## 2.7.2
 
 - **Branches view loads fast on Windows** - listing branches enriches each one
