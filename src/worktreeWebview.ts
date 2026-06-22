@@ -58,6 +58,7 @@ interface ActionMessage {
   type: "action";
   action:
     | "refresh"
+    | "refreshWorktree"
     | "agent"
     | "agentWorktree"
     | "focusAgent"
@@ -122,8 +123,6 @@ export class WorktreeWebviewProvider
   /** Watches the session-state dir so status changes refresh the panel without
    *  a polling loop. */
   private watcher?: vscode.FileSystemWatcher;
-  /** Watches workspace files so git status (dirty/ahead/behind) tracks edits. */
-  private fileWatcher?: vscode.FileSystemWatcher;
   /** Coalesces bursts of file/session/focus events into one refresh. Created in
    *  the constructor so the clock can be injected; see REFRESH_DEBOUNCE_MS. */
   private readonly refreshDebounce: Coalescer;
@@ -187,14 +186,13 @@ export class WorktreeWebviewProvider
     this.watcher.onDidChange(onChange);
     this.watcher.onDidDelete(onChange);
 
-    // Track working-tree edits so the git dirty/ahead/behind line stays current.
-    // Respects the user's files.watcherExclude (node_modules, etc.); debounced
-    // so a burst of saves triggers one refresh.
-    this.fileWatcher = vscode.workspace.createFileSystemWatcher("**/*");
-    const onFile = () => this.scheduleRefresh();
-    this.fileWatcher.onDidCreate(onFile);
-    this.fileWatcher.onDidChange(onFile);
-    this.fileWatcher.onDidDelete(onFile);
+    // No workspace-wide `**/*` file watcher: refreshing on every saved file (and,
+    // worse, on git's own `.git/index` writes) spun a perpetual refresh loop that
+    // spawned git for every worktree several times a second. The worktree/git
+    // panel only needs to update on a few discrete signals: extension load, the
+    // manual Refresh button, and Claude activity (the session-state watcher above,
+    // which also catches an agent creating a new worktree). The git line is
+    // recomputed on those refreshes rather than tracked keystroke-by-keystroke.
 
     // Re-link any agent terminals VS Code restored from before this host
     // started (e.g. an extension update or window reload), and keep claiming
@@ -218,13 +216,13 @@ export class WorktreeWebviewProvider
 
   dispose(): void {
     this.watcher?.dispose();
-    this.fileWatcher?.dispose();
     this.branchesPanel?.dispose();
     this.refreshDebounce.cancel();
     this.prNudge.cancel();
   }
 
-  /** Coalesce frequent file-change events into a single refresh. */
+  /** Coalesce bursts of discrete events (window focus, SCM scope changes) into a
+   *  single refresh. */
   private scheduleRefresh(): void {
     this.refreshDebounce.trigger();
   }
@@ -305,6 +303,27 @@ export class WorktreeWebviewProvider
   }
 
   /**
+   * On-demand refresh for a single worktree's card (the per-card refresh button):
+   * re-read its git working-tree state and, when the PR integration is on, make a
+   * fresh GitHub call for just that worktree's branch. Unlike the global Refresh
+   * it does not run a `git fetch` (that is the global button's job) — it picks up
+   * local working-tree changes and the latest PR/CI for the one card the user
+   * asked about. The whole payload is re-posted (git status is cheap and local),
+   * so other cards simply reflect their current state.
+   */
+  private async refreshWorktree(fsPath?: string): Promise<void> {
+    if (!fsPath || !this.view) return;
+    if (this.prService.isEnabled()) {
+      const github = await connection();
+      if (github.hasToken) await this.prService.refreshOne(normalize(fsPath));
+    }
+    // Force the re-post even if nothing else changed, so the user sees the click
+    // take effect.
+    this.lastPosted = "";
+    await this.refresh(false);
+  }
+
+  /**
    * Attach GitHub connection + per-worktree PR status onto the payload. This is
    * the only place PR work is kicked off, and it is fully optional: with no
    * token (or the integration toggled off) it sets an empty target list, does no
@@ -364,6 +383,8 @@ export class WorktreeWebviewProvider
     switch (msg.action) {
       case "refresh":
         return void this.refresh(true);
+      case "refreshWorktree":
+        return this.refreshWorktree(msg.path);
       case "agent":
         return this.agent(msg.path);
       case "agentWorktree":
@@ -666,7 +687,14 @@ export class WorktreeWebviewProvider
   private stopSession(sessionId: string): void {
     if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return;
     this.terminals.get(sessionId)?.dispose();
-    if (process.platform !== "win32") {
+    if (process.platform === "win32") {
+      // Windows has no `pkill -f`. Find the process whose command line carries
+      // the session id and tear down its whole tree with `taskkill /T`. The tree
+      // kill is what reaches a `claude -w` child (a descendant of the
+      // `--session-id` process that drops the id from its own argv), so Windows
+      // does not need the cwd-based killClaudeInDir fallback.
+      this.killTreeByCommandLine(sessionId);
+    } else {
       // pkill -f matches the session id in the process's full command line.
       cp.execFile("pkill", ["-f", sessionId], () => {
         /* no match / pkill missing -> nothing to kill */
@@ -690,6 +718,11 @@ export class WorktreeWebviewProvider
    * for a shared dir like the main repo, which would also kill unrelated agents.
    */
   private killClaudeInDir(dir: string): void {
+    // Windows: there is no portable way to read another process's cwd, but it
+    // does not need one. stopSession already tree-kills each tracked agent by
+    // session id (taskkill /T), which reaches the `claude -w` child this method
+    // exists to catch on Unix. So the worktree's agents are already gone by the
+    // time this runs on Windows.
     if (process.platform === "win32") return;
     const norm = normalize(dir);
     let out = "";
@@ -718,6 +751,37 @@ export class WorktreeWebviewProvider
       } catch {
         /* already gone, or not killable */
       }
+    }
+  }
+
+  /**
+   * Windows force-kill of every process whose command line contains `needle`,
+   * along with its child process tree (`taskkill /T`). This is our `pkill -f`
+   * stand-in: PowerShell's CIM query is the only portable way to read other
+   * processes' command lines. The match is case-insensitive and literal (no
+   * `-like` wildcards, so a path with `[`/`]` can't misfire), and our own
+   * PowerShell is excluded by `$PID` because the needle is embedded in its
+   * command line. Best-effort: a missing PowerShell or no match is a no-op.
+   */
+  private killTreeByCommandLine(needle: string): void {
+    if (process.platform !== "win32") return;
+    // Single-quote escape for the PowerShell string literal.
+    const lit = needle.toLowerCase().replace(/'/g, "''");
+    const script =
+      "Get-CimInstance Win32_Process | Where-Object { " +
+      `$_.ProcessId -ne $PID -and $_.CommandLine -and ` +
+      `$_.CommandLine.ToLower().Contains('${lit}') } | ` +
+      "ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null }";
+    try {
+      cp.execFile(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", script],
+        () => {
+          /* powershell missing / nothing to kill -> best effort */
+        }
+      );
+    } catch {
+      /* spawn failed -> nothing we can do */
     }
   }
 

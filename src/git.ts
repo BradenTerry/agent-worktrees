@@ -77,6 +77,12 @@ function git(
     ...opts,
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
+    // GIT_OPTIONAL_LOCKS=0 stops read-only commands (notably `git status`) from
+    // opportunistically rewriting the user's `.git/index` to refresh its stat
+    // cache. As a polling tool we must not churn the index: it fights the user's
+    // own git and, if anything ever watches `.git`, an index write would loop
+    // straight back into another status spawn.
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
   });
   // When tracing is off, traceSink is null and we add zero overhead.
   if (!traceSink) return run;

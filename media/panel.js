@@ -534,6 +534,17 @@
       icons.agentMark +
       "</button>";
 
+    // Refresh just this worktree's git status (and its PR/CI when the GitHub
+    // integration is on). Does not run a git fetch - that's the toolbar Refresh.
+    const refreshBtn =
+      '<button class="act ghost iconact" data-action="refreshWorktree" data-path="' +
+      esc(wt.path) +
+      '" title="Refresh this worktree' +
+      (lastData && lastData.prEnabled ? " (git and PR status)" : " (git status)") +
+      '">' +
+      icons.refresh +
+      "</button>";
+
     // Open this worktree in its own VS Code window (focuses an existing one if
     // already open). Available for every worktree, including the primary.
     const openWindowBtn =
@@ -564,6 +575,7 @@
       '<span class="badges">' +
       badges.join("") +
       "</span>" +
+      refreshBtn +
       openWindowBtn +
       deleteBtn +
       "</div>" +

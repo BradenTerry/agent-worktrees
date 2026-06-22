@@ -2,6 +2,28 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## Unreleased
+
+- **No more runaway refresh loop** - the panel watched the whole workspace for
+  file changes, but its own `git status` opportunistically rewrites
+  `.git/index`, so each refresh fed straight back into another refresh - a
+  self-sustaining loop that respawned git for every worktree several times a
+  second even while the editor sat idle. The workspace-wide watcher is gone; the
+  panel now refreshes on discrete signals (load, the Refresh button, Claude
+  agent activity, window focus, source-control scope changes). Read-only git
+  also runs with `GIT_OPTIONAL_LOCKS=0` so it never churns your index.
+- **Stop agent works on Windows** - stopping an agent (and removing a worktree
+  with a running agent) had no effect on Windows: the kill paths were
+  Unix-only, so the panel row vanished while the Claude process kept running and
+  could hold the worktree directory open, blocking removal. Stopping now
+  tree-kills the agent by its session id via `taskkill /T`, which also reaches
+  the `claude -w` child process.
+- **Per-worktree refresh button** - each worktree card now has a refresh button
+  that re-reads just that worktree's git status and, when the GitHub integration
+  is on, re-fetches that one worktree's PR/CI status. It does not run a `git
+  fetch` (that stays the toolbar Refresh), so it's a quick, targeted update of a
+  single card instead of refreshing everything.
+
 ## 2.7.7
 
 - **Branches view no longer shows a +/- line diff** - computing it required one

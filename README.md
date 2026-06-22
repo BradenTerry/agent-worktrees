@@ -27,6 +27,8 @@ state, and its running agents in one view.
   branch name and badges for `Primary` / `detached` / `locked`.
 - **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
   the ahead/behind distance from the upstream branch, refreshed as files change.
+  A per-card **refresh** button re-reads that one worktree's git status (and its
+  PR/CI when the GitHub integration is on) on demand, without a `git fetch`.
 - **GitHub PR status** — when a stored token resolves a PR for the branch, the
   card shows the PR title (wrapping when long), then its lifecycle state, CI
   check rollup, review decision and comment counts (polled from the REST API in
@@ -167,16 +169,24 @@ flowchart LR
 
 ### Refresh coalescing
 
-The panel refreshes in response to three chatty signals: the session-state
-`FileSystemWatcher` (one event per Claude hook firing), a workspace `**/*` file
-watcher (working-tree edits that move the dirty/ahead/behind counts), and window
-focus. Each refresh spawns `git status` for every worktree (plus a `git diff
---numstat HEAD` only for worktrees with tracked changes — a clean worktree skips
-it, halving its per-worktree spawns), so reacting to every raw event would peg
-the CPU - and noticeably worse on Windows, where the file watcher emits more
-events and every process spawn is far more expensive than on macOS.
+The panel refreshes on a few discrete signals: extension load, the manual Refresh
+button, the session-state `FileSystemWatcher` (one event per Claude hook firing,
+which also surfaces an agent creating a new worktree), window focus, and
+source-control scope changes. Each refresh spawns `git status` for every worktree
+(plus a `git diff --numstat HEAD` only for worktrees with tracked changes — a
+clean worktree skips it, halving its per-worktree spawns), so reacting to every
+raw event would peg the CPU - and noticeably worse on Windows, where every process
+spawn is far more expensive than on macOS.
 
-All three signals funnel through a `Coalescer` (`src/scheduler.ts`): a trailing
+Deliberately absent is a workspace-wide `**/*` file watcher. Refreshing on every
+saved file is overkill, and because our own `git status` opportunistically
+rewrites `.git/index`, watching the tree fed git's writes straight back into
+another refresh — a perpetual loop that respawned git for every worktree several
+times a second even while idle. The git line is recomputed on the discrete
+signals above instead; read-only git also runs with `GIT_OPTIONAL_LOCKS=0` so it
+never churns the user's index.
+
+These signals funnel through a `Coalescer` (`src/scheduler.ts`): a trailing
 debounce (`REFRESH_DEBOUNCE_MS`, 500ms) that collapses a burst into one refresh,
 with a `maxDelay` cap so a *continuous* stream (a build writing files, an agent
 streaming tool events) still flushes at a bounded rate instead of starving, and

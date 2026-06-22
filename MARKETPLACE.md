@@ -23,8 +23,10 @@ The **Branches view** opens as a full editor tab listing every branch with its P
 
 - **Every worktree at a glance** — primary and linked worktrees with branch
   names and `Primary` / `detached` / `locked` badges.
-- **Live git status per worktree** — changed-file count, `+`/`−` line totals, and
-  ahead/behind from upstream, updated as you work.
+- **Git status per worktree** — changed-file count, `+`/`−` line totals, and
+  ahead/behind from upstream, refreshed on agent activity and window focus, plus a
+  per-card refresh button to update one worktree's git (and PR/CI, when enabled)
+  on demand.
 - **PR status at a glance** — when a worktree's branch has a pull request, the
   card shows its title, state, CI checks, reviews and comments, plus an **Out of
   date** pill when the branch is behind its base branch and an **Auto-merge**
