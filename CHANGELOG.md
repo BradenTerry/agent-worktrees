@@ -2,7 +2,7 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## Unreleased
+## 2.7.2
 
 - **Branches view loads fast on Windows** - listing branches enriches each one
   with ahead/behind and a line diff, and every git call used to run through a
