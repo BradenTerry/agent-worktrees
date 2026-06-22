@@ -2,7 +2,7 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## Unreleased
+## 2.7.6
 
 - **Faster worktree loading** - loading the panel ran `git status` AND
   `git diff --numstat HEAD` for every worktree on every refresh. The diff is
