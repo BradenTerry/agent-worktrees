@@ -123,8 +123,6 @@ export class WorktreeWebviewProvider
   /** Watches the session-state dir so status changes refresh the panel without
    *  a polling loop. */
   private watcher?: vscode.FileSystemWatcher;
-  /** Watches workspace files so git status (dirty/ahead/behind) tracks edits. */
-  private fileWatcher?: vscode.FileSystemWatcher;
   /** Coalesces bursts of file/session/focus events into one refresh. Created in
    *  the constructor so the clock can be injected; see REFRESH_DEBOUNCE_MS. */
   private readonly refreshDebounce: Coalescer;
@@ -188,14 +186,13 @@ export class WorktreeWebviewProvider
     this.watcher.onDidChange(onChange);
     this.watcher.onDidDelete(onChange);
 
-    // Track working-tree edits so the git dirty/ahead/behind line stays current.
-    // Respects the user's files.watcherExclude (node_modules, etc.); debounced
-    // so a burst of saves triggers one refresh.
-    this.fileWatcher = vscode.workspace.createFileSystemWatcher("**/*");
-    const onFile = () => this.scheduleRefresh();
-    this.fileWatcher.onDidCreate(onFile);
-    this.fileWatcher.onDidChange(onFile);
-    this.fileWatcher.onDidDelete(onFile);
+    // No workspace-wide `**/*` file watcher: refreshing on every saved file (and,
+    // worse, on git's own `.git/index` writes) spun a perpetual refresh loop that
+    // spawned git for every worktree several times a second. The worktree/git
+    // panel only needs to update on a few discrete signals: extension load, the
+    // manual Refresh button, and Claude activity (the session-state watcher above,
+    // which also catches an agent creating a new worktree). The git line is
+    // recomputed on those refreshes rather than tracked keystroke-by-keystroke.
 
     // Re-link any agent terminals VS Code restored from before this host
     // started (e.g. an extension update or window reload), and keep claiming
@@ -219,13 +216,13 @@ export class WorktreeWebviewProvider
 
   dispose(): void {
     this.watcher?.dispose();
-    this.fileWatcher?.dispose();
     this.branchesPanel?.dispose();
     this.refreshDebounce.cancel();
     this.prNudge.cancel();
   }
 
-  /** Coalesce frequent file-change events into a single refresh. */
+  /** Coalesce bursts of discrete events (window focus, SCM scope changes) into a
+   *  single refresh. */
   private scheduleRefresh(): void {
     this.refreshDebounce.trigger();
   }
