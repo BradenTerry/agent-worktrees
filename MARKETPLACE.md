@@ -15,9 +15,9 @@ view.
 | :---: | :---: | :---: | :---: |
 | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills an agent has used" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png) |
 
-The **Branches view** opens as a full editor tab listing every branch with its PR status, filters, and one-click worktree creation:
+The **Branches view** opens as a full editor tab listing every branch with when and by whom it was last updated, its open PR status, git-based filters, and one-click worktree creation:
 
-[<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png" alt="The Branches editor tab listing every branch with PR status, author/reviews/sort filters, and create-worktree actions" width="720">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png)
+[<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png" alt="The Branches editor tab listing every branch with its last-updated time and author, open PR status, an Updated by / Sort filter bar, and create-worktree actions" width="720">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png)
 
 ## Highlights
 
@@ -72,32 +72,28 @@ don't get a **Create worktree & start agent** button that builds the worktree
 right there in your current window and starts a Claude agent in it. Picking a
 remote-only branch checks it out as a new local tracking branch.
 
-When the GitHub integration is connected, each branch row can also show its open
-PR's status — the same title, state badge, CI checks, review and comment summary
-you see on the worktree cards. The branch list paints instantly from local git,
-then PR status loads in the background: opening the view starts a **Refresh
-GitHub** of PR/CI status on its own (the button spins until it lands, and the
-**Last refreshed** label fills in with the time). You can re-run it anytime from
-that button (see below). A filter and
-sort bar across the top lets you slice the
-list without any extra loading. Nothing is filtered by default — every branch is
+This view is git-first. Each branch row shows when it was **last updated** (the
+relative time of its latest commit) and **who** made that commit, and a filter and
+sort bar across the top lets you slice the list — all from local git, with no
+loading and no token required. Nothing is filtered by default — every branch is
 listed until you make a selection:
 
-- **Author** — a select list of the authors found across the repo's PRs (pick one
-  or more; you are pinned to the top of the list).
-- **Reviews** — a select list of the review statuses: No reviews, Review required,
-  Approved, Changes requested, Reviewed by you, Not reviewed by you, or Awaiting
-  review from you. Pick one to filter; choose **Any** to clear it.
-- **Sort** — Newest, Oldest, Most or Least commented, Recently or Least recently
-  updated.
-- **Open PRs** / **Auto merge** — toggle chips to show only branches whose PR is
-  open, or whose PR has auto-merge enabled.
+- **Updated by** — pick one or more people (the committers of the listed branches)
+  to show only the branches they last touched. You are pinned to the top of the
+  list.
+- **Sort** — Recently updated, Least recently updated, or Name (A–Z).
 
-While a PR filter or sort is active, branches with no open PR are hidden. Without
-the GitHub integration connected, the author/reviews selects and PR sorts are
-hidden, and the view simply lists every branch so you can create worktrees as
-usual. Your filter and sort choices are remembered the next time you open the
-view. Close it like any editor tab; the Branches button reopens it.
+Your filter and sort choices are remembered the next time you open the view. Close
+it like any editor tab; the Branches button reopens it.
+
+When the GitHub integration is connected, a branch that has an **open** (or draft)
+pull request also shows it inline — the same title, state badge, CI checks, review
+and comment summary you see on the worktree cards — as a hint on the branch row. The
+branch list paints instantly from local git; PR status loads in the background:
+opening the view starts a **Refresh GitHub** of PR/CI status on its own (the button
+spins until it lands, and the **Last refreshed** label fills in with the time), and
+you can re-run it anytime from that button (see below). Without a token the view
+simply lists every branch, with no PR info. (A dedicated PR view may come later.)
 
 **Fetch and prune.** A **Fetch** button in the header pulls from the remote to
 refresh local branch state — ahead/behind counts — so the view

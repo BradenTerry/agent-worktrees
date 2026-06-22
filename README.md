@@ -67,14 +67,16 @@ state, and its running agents in one view.
   Claude agent. A header **Fetch** button with a **Prune** toggle pulls from the
   remote to refresh local branch state (git only), and a **Delete gone** button
   bulk-deletes every local branch whose upstream is gone (merged or deleted on
-  the remote). When a GitHub token is stored, PR/CI status is refreshed
-  automatically when the tab opens (the **Refresh GitHub** button spins until it
-  lands) and can be re-polled on demand from that button, decoupled from the
-  git fetch, which stays manual. When the PR integration is connected, rows carry
-  their open PR's rollup and the view offers client-side filters with no default selection — an
-  **Author** select populated from the fetched PRs and a single-select **Reviews**
-  select (the GitHub review statuses) — plus sorting and **Open PR** / **Auto
-  merge** toggle chips.
+  the remote). The view is **git-first**: each row carries a "last updated" line
+  (the tip commit's committer date as a relative time, and who made it), and the
+  client-side controls are an **Updated by** user filter (the committers of the
+  listed branches) and a **Sort** by most/least recently updated or name — all
+  derived from git, so they work with or without a token. When a GitHub token is
+  stored, PR/CI status is refreshed automatically when the tab opens (the
+  **Refresh GitHub** button spins until it lands) and can be re-polled on demand
+  from that button, decoupled from the git fetch, which stays manual. A branch's
+  **open** (or draft) PR rollup is shown when one exists, as a hint on the branch
+  row — a dedicated PR view may come later.
 
 ## Agent status from hooks
 
@@ -227,7 +229,11 @@ panel as a `{ type: "branches" }` payload:
   main cost on large repos, and the commit ahead/behind is the more useful
   signal. The per-branch ahead/behind calls run with bounded concurrency so a
   many-branch repo doesn't spawn a process per branch at once, and any per-branch
-  failure leaves that branch's counts at zero. Every git call goes through
+  failure leaves that branch's counts at zero. The same `for-each-ref` calls also
+  read each branch's tip-commit `committerdate`, `committername` and
+  `committeremail` (one extra field per record, no extra git process), which give
+  the row its "last updated" time and the **Updated by** user filter — the
+  git-native signal the view sorts and filters on. Every git call goes through
   `execFile` (argument arrays, no shell), so there is no per-call `cmd.exe`/`sh`
   wrapper — on Windows that roughly halves the process count for a branch listing
   and avoids shell-specific `--format` quoting. Each git call also has a timeout
@@ -235,7 +241,7 @@ panel as a `{ type: "branches" }` payload:
   timing summary (branch count and ahead/behind call counts) is logged to the
   "Agent Worktrees" output channel — wired via `setGitLogger` so `git.ts` keeps
   no dependency on the vscode API. The for-each-ref parsing is split into pure
-  `parseLocalBranchRefs` / `parseOriginNames` helpers (unit-tested, CRLF-safe).
+  `parseLocalBranchRefs` / `parseRemoteBranchRefs` helpers (unit-tested, CRLF-safe).
   If listing fails the error is surfaced in the view, not swallowed into an empty
   list.
 - The optional `Agent Worktrees: Trace` setting turns on verbose tracing of every
@@ -257,31 +263,30 @@ panel as a `{ type: "branches" }` payload:
   with a token connected, `github.fetchPrsByBranch` issues a batched `POST /graphql` request
   (paged from most-recently-updated, so one call for small repos and a bounded
   few for large ones) that returns the repo's PRs (open, merged and closed) with
-  their rollups (state, check rollup, comment count) and the fields the filters
-  need — author, created/updated timestamps, assignee logins, review
-  author/state, requested-reviewer logins, and `viewer.login`. The result is
+  their rollups (state, check rollup, comment count). The result is
   mapped to branches by head ref client-side, and the fetch time is surfaced as
   the header's **Last refreshed** label. A transport or GraphQL failure degrades
-  the whole view to "no PR data"; rows still render.
+  the whole view to "no PR data"; rows still render, and the failure reason
+  (`fetchPrsByBranch` now returns an `error`) plus a "fetched N PRs, matched M
+  branches" tally are logged to the "Agent Worktrees" output channel. That log is
+  the breadcrumb for "the cards show a PR but the branches view doesn't": the
+  cards use REST and the branches view uses GraphQL, so a token that is granted
+  REST but denied GraphQL fails only here.
 
 This GraphQL path is used **only** by the branches view. The per-worktree PR
 badges on the cards keep the existing per-branch REST `fetchPr` path unchanged,
 so the two are separate code paths.
 
-Filtering and sorting (author, reviews, sort, the Open PRs / Auto merge chips) run
-entirely client-side over that single cached payload — changing a filter or sort
-issues no new network requests. Nothing is selected by default: the view lists
-every branch until you pick a filter. The **Author** select is a multi-select
-populated from the fetched PRs' authors (`authorOptions`, with the viewer pinned
-first); the **Reviews** select is single-select over the GitHub review statuses
-(`No reviews`, `Review required`, `Approved`, `Changes requested`, `Reviewed by
-you`, `Not reviewed by you`, `Awaiting review from you`) with an `Any` entry that
-clears it. The **Open PR** chip keeps only branches whose PR is open or draft, and
-**Auto merge** keeps only those whose PR has auto-merge enabled (`autoMergeRequest`
-on the GraphQL node). While any PR filter or PR sort is active, branches with no
-open PR are hidden. With
-the integration off or no token connected, only the branch-name sort is offered and
-the PR-based controls are hidden. The selected filters and sort persist across
+The view is git-first, so its filter and sort are git-based and run entirely
+client-side over the cached payload — changing either issues no network request,
+and both work with no token at all. The **Updated by** filter is a multi-select
+of the branches' tip-commit committers (`userOptions`, viewer pinned first when a
+committer name matches the GitHub login); the **Sort** is single-select over
+`Recently updated` / `Least recently updated` (tip-commit `committerdate`) and
+`Name (A–Z)`. PR data never narrows or reorders the list. A branch's **open** (or
+draft) PR rollup is rendered as a hint on its row when one exists; merged/closed
+PRs are not shown (the row still uses a merged PR, when present, to skip the
+"not fully merged" prompt on delete). The selected filter and sort persist across
 reopens via the webview state.
 
 A branch with no worktree shows a **Create worktree & start agent** action; one
@@ -398,7 +403,7 @@ flowchart TD
     WV --> LB["git.listBranches<br/>local + remote-only,<br/>worktree association"]
     WV --> FPB["github.fetchPrsByBranch<br/>1 POST /graphql,<br/>all open PRs + rollups"]
     WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
-    BO --> FB["Filter / Sort bar<br/>Author · Reviews · Open PR · Auto merge · Sort"]
+    BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Sort (last commit / name)"]
     FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]
     CS --> PG["Client-side pagination<br/>25/page, Prev/Next"]
     PG --> ROWS[Branch rows]

@@ -287,6 +287,15 @@ export interface BranchInfo {
   behind: number;
   /** The repo's default branch (origin/HEAD, e.g. "main"). Never deletable. */
   isDefault: boolean;
+  /** Tip commit's committer date (ISO 8601), i.e. when the branch was last
+   *  updated. Used to sort the branches view most-recently-updated first. */
+  updatedAt?: string;
+  /** Tip commit's committer name — "who last updated this branch". Drives the
+   *  git-native author filter (no GitHub needed). */
+  lastUser?: string;
+  /** Tip commit's committer email, kept for stable de-duplication of users who
+   *  commit under more than one display name. */
+  lastEmail?: string;
 }
 
 /**
@@ -311,7 +320,16 @@ export interface BranchInfo {
  * confuses the parse.
  */
 const LOCAL_REF_FORMAT =
-  "%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)";
+  "%(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)%00%(committerdate:iso8601-strict)%00%(committername)%00%(committeremail)";
+
+/**
+ * Remote ref format (refs/remotes/origin). Full refname (so origin/HEAD can be
+ * filtered — see parseRemoteBranchRefs) plus the tip commit's committer date and
+ * committer so a remote-only branch carries the same "last updated" + "last user"
+ * the local refs do.
+ */
+const REMOTE_REF_FORMAT =
+  "%(refname)%00%(committerdate:iso8601-strict)%00%(committername)%00%(committeremail)";
 
 /**
  * Parse `git for-each-ref refs/heads` output (LOCAL_REF_FORMAT) into branch
@@ -333,7 +351,8 @@ export function parseLocalBranchRefs(stdout: string): {
   for (const raw of stdout.split(/\r?\n/)) {
     const line = raw.trimEnd();
     if (line === "") continue;
-    const [name, worktreePath, track, upstream] = line.split("\0");
+    const [name, worktreePath, track, upstream, committerdate, committername, committeremail] =
+      line.split("\0");
     if (!name) continue;
     const { ahead, behind } = parseTrack(track || "");
     if (upstream) upstreamOf.set(name, upstream);
@@ -346,27 +365,49 @@ export function parseLocalBranchRefs(stdout: string): {
       ahead,
       behind,
       isDefault: false,
+      updatedAt: committerdate || undefined,
+      lastUser: committername || undefined,
+      lastEmail: committeremail || undefined,
     });
   }
   return { branches, upstreamOf };
 }
 
+/** Tip-commit metadata for a remote branch: when it was last updated and by whom. */
+export interface RemoteRefMeta {
+  updatedAt?: string;
+  lastUser?: string;
+  lastEmail?: string;
+}
+
 /**
- * Parse `git for-each-ref refs/remotes/origin` (full refnames) into the set of
- * origin branch short-names, excluding the origin/HEAD symbolic alias. Pure and
- * exported for unit tests. Uses the FULL refname because `refname:short`
- * collapses `refs/remotes/origin/HEAD` to the bare "origin", which would slip
- * past a guard and surface a phantom "origin" branch.
+ * Parse `git for-each-ref refs/remotes/origin` (REMOTE_REF_FORMAT) into the set
+ * of origin branch short-names plus a per-branch tip-commit metadata map,
+ * excluding the origin/HEAD symbolic alias. Pure and exported for unit tests.
+ * Uses the FULL refname because `refname:short` collapses
+ * `refs/remotes/origin/HEAD` to the bare "origin", which would slip past a guard
+ * and surface a phantom "origin" branch.
  */
-export function parseOriginNames(stdout: string): Set<string> {
+export function parseRemoteBranchRefs(stdout: string): {
+  names: Set<string>;
+  meta: Map<string, RemoteRefMeta>;
+} {
   const names = new Set<string>();
+  const meta = new Map<string, RemoteRefMeta>();
   for (const raw of stdout.split(/\r?\n/)) {
-    const ref = raw.trimEnd();
-    if (ref === "") continue;
-    const name = ref.replace(/^refs\/remotes\/origin\//, "");
-    if (name && name !== "HEAD") names.add(name);
+    const line = raw.trimEnd();
+    if (line === "") continue;
+    const [ref, committerdate, committername, committeremail] = line.split("\0");
+    const name = (ref ?? "").replace(/^refs\/remotes\/origin\//, "");
+    if (!name || name === "HEAD") continue;
+    names.add(name);
+    meta.set(name, {
+      updatedAt: committerdate || undefined,
+      lastUser: committername || undefined,
+      lastEmail: committeremail || undefined,
+    });
   }
-  return names;
+  return { names, meta };
 }
 
 export async function listBranches(cwd: string): Promise<BranchInfo[]> {
@@ -379,15 +420,17 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   const { branches, upstreamOf } = parseLocalBranchRefs(localOut);
 
   const { stdout: remoteOut } = await git(
-    ["for-each-ref", "--format=%(refname)", "refs/remotes/origin"],
+    ["for-each-ref", `--format=${REMOTE_REF_FORMAT}`, "refs/remotes/origin"],
     { cwd }
   );
-  const originNames = parseOriginNames(remoteOut);
+  const { names: originNames, meta: remoteMeta } =
+    parseRemoteBranchRefs(remoteOut);
 
   const localNames = new Set(branches.map((b) => b.name));
   for (const b of branches) b.hasRemote = originNames.has(b.name);
   for (const name of originNames) {
     if (localNames.has(name)) continue;
+    const m = remoteMeta.get(name);
     branches.push({
       name,
       remoteOnly: true,
@@ -396,6 +439,9 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       ahead: 0,
       behind: 0,
       isDefault: false,
+      updatedAt: m?.updatedAt,
+      lastUser: m?.lastUser,
+      lastEmail: m?.lastEmail,
     });
   }
 

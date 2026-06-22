@@ -563,11 +563,20 @@ const MAX_PR_PAGES = 10;
 export async function fetchPrsByBranch(
   token: string,
   repo: RemoteInfo
-): Promise<{ prs: Map<string, BranchPrInfo>; viewerLogin?: string }> {
+): Promise<{
+  prs: Map<string, BranchPrInfo>;
+  viewerLogin?: string;
+  /** Set when the GraphQL fetch failed (non-2xx, transport, or a GraphQL error
+   *  body). Surfaced so the branches view's "no PRs" state can be diagnosed:
+   *  this is the path the worktree cards (REST) don't share, so a fine-grained
+   *  token that works for REST but is denied GraphQL fails only here. */
+  error?: string;
+}> {
   const prs = new Map<string, BranchPrInfo>();
   const nodes: GqlPr[] = [];
   let viewerLogin: string | undefined;
   let after: string | null = null;
+  let error: string | undefined;
 
   for (let page = 0; page < MAX_PR_PAGES; page++) {
     let body: GqlResponse | undefined;
@@ -580,13 +589,28 @@ export async function fetchPrsByBranch(
           variables: { owner: repo.owner, name: repo.repo, after },
         }),
       });
-      if (!res.ok) break;
+      if (!res.ok) {
+        // Only the first page's failure means "no data at all"; a later page
+        // keeps what we already collected.
+        if (page === 0) error = `GitHub GraphQL returned ${res.status}.`;
+        break;
+      }
       body = (await res.json()) as GqlResponse;
-    } catch {
+    } catch (e) {
+      if (page === 0) {
+        const first = (e instanceof Error ? e.message : String(e)).split("\n")[0];
+        error = `Could not reach GitHub GraphQL: ${first}`;
+      }
       break;
     }
     // A GraphQL error body still comes back 200; treat it as failure.
-    if (!body || (body.errors && body.errors.length)) break;
+    if (!body || (body.errors && body.errors.length)) {
+      if (page === 0) {
+        const msg = firstGqlError(body?.errors);
+        error = `GitHub GraphQL error${msg ? `: ${msg}` : ""}.`;
+      }
+      break;
+    }
 
     if (viewerLogin === undefined) viewerLogin = body.data?.viewer?.login;
     const conn = body.data?.repository?.pullRequests;
@@ -659,7 +683,17 @@ export async function fetchPrsByBranch(
     }
   }
 
-  return { prs, viewerLogin };
+  return { prs, viewerLogin, error };
+}
+
+/** Best-effort first human-readable message out of a GraphQL `errors` array. */
+function firstGqlError(errors: unknown[] | undefined): string | undefined {
+  const first = errors?.[0];
+  if (first && typeof first === "object" && "message" in first) {
+    const m = (first as { message?: unknown }).message;
+    if (typeof m === "string") return m.split("\n")[0];
+  }
+  return undefined;
 }
 
 /**

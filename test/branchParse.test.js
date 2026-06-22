@@ -3,15 +3,25 @@ const test = require("node:test");
 const assert = require("node:assert");
 const {
   parseLocalBranchRefs,
-  parseOriginNames,
+  parseRemoteBranchRefs,
   parseAheadBehindByRef,
 } = require("../out/git.js");
 
 // The local for-each-ref format is
-//   %(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)
-// Build a record the way git emits it (NUL between the four fields).
-function localLine(name, worktreePath, track, upstream) {
-  return [name, worktreePath || "", track || "", upstream || ""].join("\0");
+//   %(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)%00%(committerdate:iso8601-strict)%00%(committername)%00%(committeremail)
+// Build a record the way git emits it (NUL between the seven fields). The last
+// three (date/name/email) are optional in these helpers since most cases don't
+// assert on them.
+function localLine(name, worktreePath, track, upstream, date, user, email) {
+  return [
+    name,
+    worktreePath || "",
+    track || "",
+    upstream || "",
+    date || "",
+    user || "",
+    email || "",
+  ].join("\0");
 }
 
 test("parseLocalBranchRefs: plain local branch, no worktree, no upstream", () => {
@@ -75,22 +85,50 @@ test("parseLocalBranchRefs: branch name with a slash is preserved", () => {
   assert.strictEqual(branches[0].name, "feature/login");
 });
 
-test("parseOriginNames: full refnames to short names, excluding HEAD", () => {
+test("parseLocalBranchRefs: captures tip committer date and user", () => {
+  const { branches } = parseLocalBranchRefs(
+    localLine(
+      "feat",
+      "",
+      "",
+      "origin/feat",
+      "2026-06-20T10:00:00+00:00",
+      "Braden Terry",
+      "<bterry18@outlook.com>"
+    )
+  );
+  assert.strictEqual(branches[0].updatedAt, "2026-06-20T10:00:00+00:00");
+  assert.strictEqual(branches[0].lastUser, "Braden Terry");
+  assert.strictEqual(branches[0].lastEmail, "<bterry18@outlook.com>");
+});
+
+// The remote for-each-ref format is
+//   %(refname)%00%(committerdate:iso8601-strict)%00%(committername)%00%(committeremail)
+function remoteLine(ref, date, user, email) {
+  return [ref, date || "", user || "", email || ""].join("\0");
+}
+
+test("parseRemoteBranchRefs: full refnames to short names + meta, excluding HEAD", () => {
   const out = [
-    "refs/remotes/origin/main",
-    "refs/remotes/origin/feature/x",
-    "refs/remotes/origin/HEAD", // symbolic alias, must be excluded
+    remoteLine("refs/remotes/origin/main", "2026-06-21T09:00:00+00:00", "Lin H", "<lin@x>"),
+    remoteLine("refs/remotes/origin/feature/x", "2026-06-19T09:00:00+00:00", "Okafor", "<ok@x>"),
+    remoteLine("refs/remotes/origin/HEAD"), // symbolic alias, must be excluded
   ].join("\n");
-  const names = parseOriginNames(out);
+  const { names, meta } = parseRemoteBranchRefs(out);
   assert.ok(names.has("main"));
   assert.ok(names.has("feature/x"));
   assert.ok(!names.has("HEAD"));
   assert.strictEqual(names.size, 2);
+  assert.strictEqual(meta.get("main").lastUser, "Lin H");
+  assert.strictEqual(meta.get("feature/x").updatedAt, "2026-06-19T09:00:00+00:00");
 });
 
-test("parseOriginNames: tolerates CRLF and blank lines", () => {
-  const names = parseOriginNames(
-    "refs/remotes/origin/main\r\n\r\nrefs/remotes/origin/dev\r\n"
+test("parseRemoteBranchRefs: tolerates CRLF and blank lines", () => {
+  const { names } = parseRemoteBranchRefs(
+    remoteLine("refs/remotes/origin/main") +
+      "\r\n\r\n" +
+      remoteLine("refs/remotes/origin/dev") +
+      "\r\n"
   );
   assert.deepStrictEqual([...names].sort(), ["dev", "main"]);
 });

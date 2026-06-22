@@ -196,6 +196,14 @@ export interface BranchVM {
   behind: number;
   /** The repo's default branch (e.g. main); never offered for deletion. */
   isDefault: boolean;
+  /** Tip commit's committer date (ISO 8601): when the branch was last updated.
+   *  The branches view sorts on this. */
+  updatedAt?: string;
+  /** Tip commit's committer name: "who last updated this branch". Drives the
+   *  git-native user filter. */
+  lastUser?: string;
+  /** Tip commit's committer email, for stable user de-duplication. */
+  lastEmail?: string;
   /** PR rollup attached by the webview; null = looked up, no PR;
    *  undefined = not looked up (integration off or no token). */
   pr?: BranchPrInfo | null;
@@ -263,14 +271,25 @@ export async function gatherBranches(): Promise<BranchData> {
     ahead: b.ahead,
     behind: b.behind,
     isDefault: b.isDefault,
+    updatedAt: b.updatedAt,
+    lastUser: b.lastUser,
+    lastEmail: b.lastEmail,
   }));
 
-  vms.sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, {
+  // Default to most-recently-updated first (the view re-sorts client-side, but
+  // this keeps the order sensible for any consumer that doesn't). Branches with
+  // no commit date fall to the end, then tie-break by name.
+  vms.sort((a, b) => {
+    const ta = a.updatedAt ? Date.parse(a.updatedAt) : NaN;
+    const tb = b.updatedAt ? Date.parse(b.updatedAt) : NaN;
+    const va = isNaN(ta) ? -Infinity : ta;
+    const vb = isNaN(tb) ? -Infinity : tb;
+    if (va !== vb) return vb - va;
+    return a.name.localeCompare(b.name, undefined, {
       numeric: true,
       sensitivity: "base",
-    })
-  );
+    });
+  });
 
   // Name the repo after its primary worktree so the header matches the sidebar
   // even when the open folder is a linked worktree.
