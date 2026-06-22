@@ -176,6 +176,16 @@ by editing that settings file.
 4. Click **Agent** on any worktree to start a Claude session, or **Agent &
    Worktree** to spin up a new worktree and an agent together.
 
+## Troubleshooting
+
+If the panel or Branches view seems slow or empty, turn on **Agent Worktrees:
+Trace** (Settings, or the "Agent Worktrees: Toggle Debug Tracing" command). With
+it on, every external call - each git command and GitHub API request, with its
+duration and result - is logged to the "Agent Worktrees" output channel (View:
+Output, then pick "Agent Worktrees"; or run "Agent Worktrees: Show Log"). That
+shows you exactly what is being run and what is slow or failing. It is off by
+default, and request headers (which carry your GitHub token) are never logged.
+
 ## Privacy
 
 Agent Worktrees runs on your machine and collects no telemetry. It reads local

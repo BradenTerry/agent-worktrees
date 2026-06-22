@@ -2,6 +2,17 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.7.5
+
+- **Debug tracing for external calls** - a new `Agent Worktrees: Trace` setting
+  (off by default) logs every external call to the "Agent Worktrees" output
+  channel: each git command and each GitHub API request, with its duration and
+  result. Turn it on to see exactly what the panel runs on your machine (handy
+  for diagnosing slow or failing git/GitHub activity on Windows or Mac). Toggle
+  it from Settings or the "Agent Worktrees: Toggle Debug Tracing" command;
+  "Agent Worktrees: Show Log" reveals the channel. Request headers (which carry
+  your token) are never logged.
+
 ## 2.7.4
 
 - **Panel is much less of a CPU hog on Windows** - the sidebar refreshes when

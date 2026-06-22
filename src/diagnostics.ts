@@ -25,6 +25,48 @@ export function diag(msg: string): void {
   }
 }
 
+/**
+ * Whether verbose tracing of external calls (git + GitHub) is on. Off by
+ * default; toggled from the `agentWorktrees.trace` setting. Kept as a cheap
+ * boolean so hot paths can skip building trace strings when it is off.
+ */
+let tracing = false;
+
+/** Turn external-call tracing on/off. When turning on, reveal the channel so
+ *  the user sees the stream they just enabled. */
+export function setTracing(on: boolean): void {
+  if (on === tracing) return;
+  tracing = on;
+  diag(on ? "debug tracing enabled" : "debug tracing disabled");
+  if (on) {
+    try {
+      ensure().show(true);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Whether tracing is currently enabled (lets callers avoid building strings). */
+export function isTracing(): boolean {
+  return tracing;
+}
+
+/** Append a trace line, but only while tracing is enabled. Never throws. */
+export function trace(msg: string): void {
+  if (!tracing) return;
+  diag(msg);
+}
+
+/** Reveal the output channel (the "Show Log" command). */
+export function showDiagnostics(): void {
+  try {
+    ensure().show(true);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Dispose the channel (extension deactivate). */
 export function disposeDiagnostics(): void {
   channel?.dispose();

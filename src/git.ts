@@ -26,6 +26,27 @@ function log(msg: string): void {
   }
 }
 
+/**
+ * Optional per-call tracer. When tracing is enabled the extension host sets this
+ * (see `setGitTracer`) so every git invocation is logged with its command,
+ * duration, and result. Null when tracing is off, which lets `git()` skip
+ * building trace strings entirely. Kept vscode-free via injection like logSink.
+ */
+let traceSink: ((msg: string) => void) | null = null;
+
+/** Enable/disable per-call git tracing (pass null to disable). */
+export function setGitTracer(fn: ((msg: string) => void) | null): void {
+  traceSink = fn;
+}
+
+function emitTrace(msg: string): void {
+  try {
+    traceSink?.(msg);
+  } catch {
+    /* a broken tracer must never take git down */
+  }
+}
+
 /** Default per-call timeout. Long enough for a slow `for-each-ref` on a big
  *  repo, short enough that a wedged git (auth prompt, network stall) surfaces as
  *  an error instead of an infinite "Loading branches" spinner. */
@@ -51,12 +72,31 @@ function git(
   args: string[],
   opts: { cwd?: string; timeout?: number } = {}
 ): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync("git", args, {
+  const run = execFileAsync("git", args, {
     timeout: GIT_TIMEOUT_MS,
     ...opts,
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
   });
+  // When tracing is off, traceSink is null and we add zero overhead.
+  if (!traceSink) return run;
+  const started = Date.now();
+  const where = opts.cwd ? ` (${opts.cwd})` : "";
+  return run.then(
+    (r) => {
+      emitTrace(`git ${args.join(" ")} -> ok ${Date.now() - started}ms${where}`);
+      return r;
+    },
+    (err: unknown) => {
+      const first = (err instanceof Error ? err.message : String(err)).split(
+        "\n"
+      )[0];
+      emitTrace(
+        `git ${args.join(" ")} -> ERROR ${Date.now() - started}ms${where}: ${first}`
+      );
+      throw err;
+    }
+  );
 }
 
 export interface Worktree {
