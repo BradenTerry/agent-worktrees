@@ -2,6 +2,29 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.1.0
+
+- **The Branches view is now git-first** - branches always list, sort, and
+  filter from local git, with no GitHub needed. Each row shows when the branch
+  was last updated (the relative time of its latest commit) and who made that
+  commit. A new **Updated by** filter narrows the list to the people who last
+  touched each branch, and **Sort** orders by most or least recently updated, or
+  by name. The old PR-based filters (Author, Reviews, Open PR / Auto merge) are
+  gone in favor of these.
+- **A branch's pull request is shown as a hint** - when the GitHub integration
+  is connected, a branch that has an open (or draft) PR still shows its status
+  inline on the row. Merged and closed PRs are no longer displayed. A dedicated
+  PR view may come later.
+- **The "@" next to review counts is now a proper icon** - the requested
+  reviewers ("review pending") count rendered a bare "@" character that looked
+  like a glyph that failed to load next to the other icons. It is now an eye
+  icon, matching GitHub's "review requested" convention.
+- **Easier to diagnose missing PR status** - when the Branches view can fetch no
+  PRs even though the worktree cards show them, the reason (the GraphQL call's
+  error, or a "fetched N PRs, matched M branches" tally) is logged to the "Agent
+  Worktrees" output channel. The cards use a different GitHub API path than the
+  Branches view, so a token granted one but not the other now surfaces clearly.
+
 ## 3.0.0
 
 - **No more runaway refresh loop** - the panel watched the whole workspace for
