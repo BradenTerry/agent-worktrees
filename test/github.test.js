@@ -180,7 +180,7 @@ test("getJson: an untagged 403 is not cached", async () => {
 });
 
 
-// --- fetchPrsByBranch (REST GET /pulls?state=all) ---------------------------
+// --- fetchPrsByBranch (REST GET /pulls?state=open) --------------------------
 
 const REPO = { owner: "acme", repo: "widgets" };
 
@@ -227,7 +227,7 @@ test("fetchPrsByBranch: maps a PR from the list (state, author, assignees, reque
       const { prs, viewerLogin } = await fetchPrsByBranch("tok", REPO, "you");
       // One GET to the pulls list, no per-PR follow-ups.
       assert.strictEqual(calls.length, 1);
-      assert.match(calls[0].url, /\/repos\/acme\/widgets\/pulls\?state=all/);
+      assert.match(calls[0].url, /\/repos\/acme\/widgets\/pulls\?state=open/);
 
       assert.strictEqual(viewerLogin, "you"); // echoed back
       const pr = prs.get("feat-a");

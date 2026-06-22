@@ -2,6 +2,20 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.2.0
+
+- **The Branches view now fetches only open PRs** - it previously listed every
+  PR in the repo (open, merged and closed), which paged through up to ~1000
+  historical PRs on a repo with a long history to surface a handful of open ones.
+  Since the view only ever shows open and draft PRs, it now requests just those,
+  so the fetch is typically a single call. The header button is renamed from
+  **Refresh GitHub** to **Fetch Open PRs** to match.
+- **New Open PRs filter** - a one-click toggle in the Branches filter bar (shown
+  only when a GitHub token is connected) narrows the list to branches with an
+  open pull request.
+- **Alternating row backgrounds** - adjacent worktree cards and branch rows now
+  alternate their background shade so they are easier to tell apart.
+
 ## 3.1.1
 
 - **The Branches view PR status now works with fine-grained tokens** - it
