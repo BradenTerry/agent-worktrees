@@ -179,89 +179,57 @@ test("getJson: an untagged 403 is not cached", async () => {
   );
 });
 
-// --- fetchPrsByBranch (GraphQL) ---------------------------------------------
+
+// --- fetchPrsByBranch (REST GET /pulls?state=all) ---------------------------
 
 const REPO = { owner: "acme", repo: "widgets" };
 
-// A scripted GraphQL "data" body wrapped in a 200 response.
-function gqlResponse(status, body) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    headers: { get: () => null },
-    json: async () => body,
-  };
-}
-
-// One open PR by user "alice" on "feat-a": 1 approval, a failing check, a
-// passing check, a pending Actions run, viewer "you" requested + reviewed.
-function samplePrBody() {
-  return {
-    data: {
-      viewer: { login: "you" },
-      repository: {
-        pullRequests: {
-          nodes: [
-            {
-              number: 7,
-              title: "Add feature A",
-              url: "https://github.com/acme/widgets/pull/7",
-              isDraft: false,
-              state: "OPEN",
-              createdAt: "2026-06-01T00:00:00Z",
-              updatedAt: "2026-06-10T00:00:00Z",
-              headRefName: "feat-a",
-              autoMergeRequest: { enabledAt: "2026-06-07T00:00:00Z" },
-              author: { login: "alice" },
-              assignees: { nodes: [{ login: "bob" }, { login: "you" }] },
-              comments: { totalCount: 3 },
-              reviews: {
-                nodes: [
-                  { author: { login: "carol" }, state: "APPROVED", submittedAt: "2026-06-05T00:00:00Z" },
-                  { author: { login: "you" }, state: "COMMENTED", submittedAt: "2026-06-06T00:00:00Z" },
-                ],
-              },
-              reviewRequests: {
-                nodes: [
-                  { requestedReviewer: { __typename: "User", login: "you" } },
-                ],
-              },
-              commits: {
-                nodes: [
-                  {
-                    commit: {
-                      statusCheckRollup: {
-                        contexts: {
-                          nodes: [
-                            { __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" },
-                            { __typename: "CheckRun", status: "COMPLETED", conclusion: "FAILURE" },
-                            { __typename: "CheckRun", status: "IN_PROGRESS", conclusion: null },
-                            { __typename: "StatusContext", state: "SUCCESS" },
-                          ],
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      },
+// A raw REST pull-list item with sane defaults; override per test.
+function prItem(over) {
+  return Object.assign(
+    {
+      number: 1,
+      title: "PR",
+      html_url: "https://github.com/acme/widgets/pull/1",
+      state: "open",
+      draft: false,
+      merged_at: null,
+      created_at: "2026-06-01T00:00:00Z",
+      updated_at: "2026-06-01T00:00:00Z",
+      head: { ref: "feat-a", sha: "abc" },
+      user: { login: "alice" },
+      assignees: [],
+      requested_reviewers: [],
+      requested_teams: [],
+      auto_merge: null,
     },
-  };
+    over
+  );
 }
 
-test("fetchPrsByBranch: maps a PR (state, checks, reviews, viewer, author, assignees)", async () => {
+test("fetchPrsByBranch: maps a PR from the list (state, author, assignees, requested reviewer)", async () => {
+  resetGithubCache();
+  const item = prItem({
+    number: 7,
+    title: "Add feature A",
+    html_url: "https://github.com/acme/widgets/pull/7",
+    created_at: "2026-06-01T00:00:00Z",
+    updated_at: "2026-06-10T00:00:00Z",
+    head: { ref: "feat-a", sha: "deadbeef" },
+    user: { login: "alice" },
+    assignees: [{ login: "bob" }, { login: "you" }],
+    requested_reviewers: [{ login: "you" }],
+    auto_merge: { enabled_by: { login: "alice" } },
+  });
   await withFetch(
-    () => gqlResponse(200, samplePrBody()),
+    () => jsonResponse(200, [item]),
     async (calls) => {
-      const { prs, viewerLogin } = await fetchPrsByBranch("tok", REPO);
-      // One POST to /graphql, no per-branch REST calls.
+      const { prs, viewerLogin } = await fetchPrsByBranch("tok", REPO, "you");
+      // One GET to the pulls list, no per-PR follow-ups.
       assert.strictEqual(calls.length, 1);
-      assert.match(calls[0].url, /\/graphql$/);
+      assert.match(calls[0].url, /\/repos\/acme\/widgets\/pulls\?state=all/);
 
-      assert.strictEqual(viewerLogin, "you");
+      assert.strictEqual(viewerLogin, "you"); // echoed back
       const pr = prs.get("feat-a");
       assert.ok(pr, "PR keyed by head ref name");
 
@@ -269,62 +237,40 @@ test("fetchPrsByBranch: maps a PR (state, checks, reviews, viewer, author, assig
       assert.strictEqual(pr.state, "open");
       assert.strictEqual(pr.author, "alice");
       assert.deepStrictEqual(pr.assignees, ["bob", "you"]);
-      assert.strictEqual(pr.comments, 3);
       assert.strictEqual(pr.createdAt, "2026-06-01T00:00:00Z");
       assert.strictEqual(pr.updatedAt, "2026-06-10T00:00:00Z");
 
-      // 1 success CheckRun + 1 success StatusContext = 2 pass, 1 fail, 1 pending.
-      assert.strictEqual(pr.checks, "fail"); // any fail wins
-      assert.strictEqual(pr.checksPass, 2);
-      assert.strictEqual(pr.checksFail, 1);
-      assert.strictEqual(pr.checksPending, 1);
-
-      // carol approved; "you" only commented; one reviewer ("you") still requested.
-      assert.strictEqual(pr.approvals, 1);
+      // The list endpoint has no check/review/comment data: all empty.
+      assert.strictEqual(pr.checks, "none");
+      assert.strictEqual(pr.checksPass, 0);
+      assert.strictEqual(pr.review, "none");
+      assert.strictEqual(pr.approvals, 0);
       assert.strictEqual(pr.changesRequested, 0);
-      assert.strictEqual(pr.reviewsPending, 1);
-      assert.strictEqual(pr.review, "required"); // approval but a request still open
+      assert.strictEqual(pr.comments, 0);
+      assert.strictEqual(pr.reviewedByViewer, false);
 
-      assert.strictEqual(pr.reviewedByViewer, true); // "you" submitted a review
-      assert.strictEqual(pr.reviewRequestedFromViewer, true); // "you" is requested
-      assert.strictEqual(pr.autoMerge, true); // autoMergeRequest present
+      // "you" is a still-pending requested reviewer.
+      assert.strictEqual(pr.reviewsPending, 1);
+      assert.strictEqual(pr.reviewRequestedFromViewer, true);
+      assert.strictEqual(pr.autoMerge, true); // auto_merge object present
     }
   );
 });
 
-// A minimal PR node with sane defaults; override per test. Empty rollups so the
-// mapping has nothing to choke on.
-function prNode(over) {
-  return Object.assign(
-    {
-      number: 1,
-      title: "PR",
-      url: "https://github.com/acme/widgets/pull/1",
-      isDraft: false,
-      state: "OPEN",
-      createdAt: "2026-06-01T00:00:00Z",
-      updatedAt: "2026-06-01T00:00:00Z",
-      headRefName: "feat-a",
-      author: { login: "alice" },
-      assignees: { nodes: [] },
-      comments: { totalCount: 0 },
-      reviews: { nodes: [] },
-      reviewRequests: { nodes: [] },
-      commits: { nodes: [] },
-    },
-    over
-  );
-}
-
-function gqlNodes(nodes) {
-  return { data: { viewer: { login: "you" }, repository: { pullRequests: { nodes } } } };
-}
-
-test("fetchPrsByBranch: includes a merged PR (state=merged)", async () => {
+test("fetchPrsByBranch: derives merged state from merged_at", async () => {
+  resetGithubCache();
   await withFetch(
-    () => gqlResponse(200, gqlNodes([prNode({ number: 9, state: "MERGED", headRefName: "feat-done" })])),
+    () =>
+      jsonResponse(200, [
+        prItem({
+          number: 9,
+          state: "closed",
+          merged_at: "2026-06-09T00:00:00Z",
+          head: { ref: "feat-done" },
+        }),
+      ]),
     async () => {
-      const { prs } = await fetchPrsByBranch("tok", REPO);
+      const { prs } = await fetchPrsByBranch("tok", REPO, "you");
       const pr = prs.get("feat-done");
       assert.ok(pr, "merged PR is mapped");
       assert.strictEqual(pr.state, "merged");
@@ -333,25 +279,50 @@ test("fetchPrsByBranch: includes a merged PR (state=merged)", async () => {
   );
 });
 
-test("fetchPrsByBranch: autoMerge is false when no autoMergeRequest is set", async () => {
+test("fetchPrsByBranch: draft state from the draft flag", async () => {
+  resetGithubCache();
   await withFetch(
-    () => gqlResponse(200, gqlNodes([prNode({ headRefName: "feat-a" })])),
+    () => jsonResponse(200, [prItem({ draft: true, head: { ref: "feat-a" } })]),
     async () => {
-      const { prs } = await fetchPrsByBranch("tok", REPO);
+      const { prs } = await fetchPrsByBranch("tok", REPO, "you");
+      assert.strictEqual(prs.get("feat-a").state, "draft");
+    }
+  );
+});
+
+test("fetchPrsByBranch: autoMerge is false when auto_merge is null", async () => {
+  resetGithubCache();
+  await withFetch(
+    () =>
+      jsonResponse(200, [prItem({ head: { ref: "feat-a" }, auto_merge: null })]),
+    async () => {
+      const { prs } = await fetchPrsByBranch("tok", REPO, "you");
       assert.strictEqual(prs.get("feat-a").autoMerge, false);
     }
   );
 });
 
 test("fetchPrsByBranch: prefers an open PR over a merged one on the same branch", async () => {
-  // Merged PR is newer (arrives first under UPDATED_AT desc); the open one is
+  resetGithubCache();
+  // Merged PR is newer (arrives first under updated desc); the open one is
   // older. We should still surface the open PR for the branch.
-  const merged = prNode({ number: 2, state: "MERGED", updatedAt: "2026-06-10T00:00:00Z" });
-  const open = prNode({ number: 1, state: "OPEN", updatedAt: "2026-06-02T00:00:00Z" });
+  const merged = prItem({
+    number: 2,
+    state: "closed",
+    merged_at: "2026-06-10T00:00:00Z",
+    updated_at: "2026-06-10T00:00:00Z",
+    head: { ref: "feat-a" },
+  });
+  const open = prItem({
+    number: 1,
+    state: "open",
+    updated_at: "2026-06-02T00:00:00Z",
+    head: { ref: "feat-a" },
+  });
   await withFetch(
-    () => gqlResponse(200, gqlNodes([merged, open])),
+    () => jsonResponse(200, [merged, open]),
     async () => {
-      const { prs } = await fetchPrsByBranch("tok", REPO);
+      const { prs } = await fetchPrsByBranch("tok", REPO, "you");
       const pr = prs.get("feat-a");
       assert.strictEqual(pr.state, "open");
       assert.strictEqual(pr.number, 1);
@@ -359,57 +330,47 @@ test("fetchPrsByBranch: prefers an open PR over a merged one on the same branch"
   );
 });
 
-test("fetchPrsByBranch: pages through until hasNextPage is false", async () => {
-  const page = (hasNext, endCursor, nodes) => ({
-    data: {
-      viewer: { login: "you" },
-      repository: { pullRequests: { pageInfo: { hasNextPage: hasNext, endCursor }, nodes } },
-    },
-  });
+test("fetchPrsByBranch: pages through until a short page arrives", async () => {
+  resetGithubCache();
+  const fullPage = Array.from({ length: 100 }, (_, i) =>
+    prItem({ number: i + 1, head: { ref: "feat-" + (i + 1) } })
+  );
   await withFetch(
-    (_url, init) => {
-      const vars = JSON.parse(init.body).variables;
-      return vars.after
-        ? gqlResponse(200, page(false, null, [prNode({ number: 2, headRefName: "feat-2" })]))
-        : gqlResponse(200, page(true, "CUR1", [prNode({ number: 1, headRefName: "feat-1" })]));
-    },
+    (url) =>
+      /page=2/.test(url)
+        ? jsonResponse(200, [
+            prItem({ number: 101, head: { ref: "feat-101" } }),
+          ])
+        : jsonResponse(200, fullPage),
     async (calls) => {
-      const { prs } = await fetchPrsByBranch("tok", REPO);
+      const { prs } = await fetchPrsByBranch("tok", REPO, "you");
       assert.strictEqual(calls.length, 2, "fetched a second page");
       assert.ok(prs.get("feat-1"));
-      assert.ok(prs.get("feat-2"));
+      assert.ok(prs.get("feat-101"));
     }
   );
 });
 
-test("fetchPrsByBranch: a GraphQL errors body resolves to an empty map", async () => {
+test("fetchPrsByBranch: a non-2xx resolves to an empty map with an error", async () => {
+  resetGithubCache();
   await withFetch(
-    () => gqlResponse(200, { errors: [{ message: "Bad credentials" }] }),
+    () => jsonResponse(403, undefined),
     async () => {
-      const { prs, viewerLogin } = await fetchPrsByBranch("tok", REPO);
+      const { prs, error } = await fetchPrsByBranch("tok", REPO, "you");
       assert.strictEqual(prs.size, 0);
-      assert.strictEqual(viewerLogin, undefined);
-    }
-  );
-});
-
-test("fetchPrsByBranch: a non-2xx resolves to an empty map", async () => {
-  await withFetch(
-    () => gqlResponse(401, undefined),
-    async () => {
-      const { prs } = await fetchPrsByBranch("tok", REPO);
-      assert.strictEqual(prs.size, 0);
+      assert.ok(error, "error is surfaced for diagnostics");
     }
   );
 });
 
 test("fetchPrsByBranch: a transport error resolves to an empty map", async () => {
+  resetGithubCache();
   const original = globalThis.fetch;
   globalThis.fetch = async () => {
     throw new Error("offline");
   };
   try {
-    const { prs } = await fetchPrsByBranch("tok", REPO);
+    const { prs } = await fetchPrsByBranch("tok", REPO, "you");
     assert.strictEqual(prs.size, 0);
   } finally {
     globalThis.fetch = original;

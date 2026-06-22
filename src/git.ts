@@ -583,6 +583,45 @@ export async function goneBranches(cwd: string): Promise<string[]> {
 }
 
 /**
+ * Short-lived per-repo cache of the raw `origin/HEAD` lookup. origin/HEAD
+ * effectively never changes during a session, yet every Branches refresh
+ * resolved it twice (`defaultBranchName` + `resolveDefaultBranchRef`) and again
+ * from several webview paths — a burst of identical `git symbolic-ref` spawns,
+ * most visible on Windows where each spawn is a fresh process. Caching the
+ * in-flight promise collapses that burst to one call; the TTL (not a permanent
+ * cache) lets a `git remote set-head` register within a refresh or two.
+ */
+const ORIGIN_HEAD_TTL_MS = 5_000;
+const originHeadCache = new Map<
+  string,
+  { at: number; p: Promise<string | undefined> }
+>();
+
+/**
+ * The `origin/HEAD` short ref (e.g. "origin/main"), or undefined when
+ * origin/HEAD is unset. Memoized per cwd for ORIGIN_HEAD_TTL_MS so a refresh
+ * storm does not respawn `git symbolic-ref` once per caller. Caches the promise
+ * so concurrent callers within one refresh share a single git process.
+ */
+function originHead(cwd: string): Promise<string | undefined> {
+  const cached = originHeadCache.get(cwd);
+  if (cached && Date.now() - cached.at < ORIGIN_HEAD_TTL_MS) return cached.p;
+  const p = (async () => {
+    try {
+      const { stdout } = await git(
+        ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+        { cwd }
+      );
+      return stdout.trim().replace(/^refs\/remotes\//, "") || undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  originHeadCache.set(cwd, { at: Date.now(), p });
+  return p;
+}
+
+/**
  * The repo's default branch short name from origin/HEAD (e.g. "main", "master",
  * "trunk" — whatever git reports), or undefined when origin/HEAD is not set.
  * Authoritative and used to protect the default branch from deletion, so it
@@ -591,16 +630,8 @@ export async function goneBranches(cwd: string): Promise<string[]> {
 export async function defaultBranchName(
   cwd: string
 ): Promise<string | undefined> {
-  try {
-    const { stdout } = await git(
-      ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
-      { cwd }
-    );
-    const ref = stdout.trim().replace(/^refs\/remotes\/origin\//, "");
-    return ref || undefined;
-  } catch {
-    return undefined;
-  }
+  const ref = await originHead(cwd);
+  return ref ? ref.replace(/^origin\//, "") : undefined;
 }
 
 /**
@@ -614,16 +645,8 @@ export async function defaultBranchName(
 async function resolveDefaultBranchRef(
   cwd: string
 ): Promise<string | undefined> {
-  try {
-    const { stdout } = await git(
-      ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
-      { cwd }
-    );
-    const ref = stdout.trim().replace(/^refs\/remotes\//, "");
-    if (ref) return ref;
-  } catch {
-    /* no origin/HEAD: fall through to the candidate list */
-  }
+  const head = await originHead(cwd);
+  if (head) return head;
   for (const cand of ["origin/main", "origin/master", "main", "master"]) {
     try {
       await git(["rev-parse", "--verify", "--quiet", cand], { cwd });

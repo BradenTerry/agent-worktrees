@@ -1272,7 +1272,7 @@ export class WorktreeWebviewProvider
           const token = await getToken();
           if (token) {
             if (refetchPrs) {
-              const fetched = await fetchPrsByBranch(token, repo);
+              const fetched = await fetchPrsByBranch(token, repo, github.login);
               this.branchPrs = fetched;
               this.branchPrsAt = Date.now();
               // Surface why the branches view may show no PRs even though the
