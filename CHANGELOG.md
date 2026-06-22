@@ -9,10 +9,13 @@ All notable changes to the Agent Worktrees extension are documented here.
   shell (`child_process.exec`), which on Windows spawns a `cmd.exe` per call. On
   a repo with many branches that meant hundreds of `cmd.exe` + `git.exe` spawns
   per load, pegging the CPU and leaving the view stuck on "Loading branches".
-  All git calls now run via `execFile` with argument arrays (no shell), which
-  roughly halves the process count, speeds each spawn, suppresses the console
-  window flashes, and removes the fragile `--format='...'` quoting that differed
-  between cmd.exe and POSIX shells.
+  Two fixes: all git calls now run via `execFile` with argument arrays (no
+  shell), which roughly halves the process count, speeds each spawn, suppresses
+  the console window flashes, and removes the fragile `--format='...'` quoting
+  that differed between cmd.exe and POSIX shells; and the per-branch line diff
+  now runs only for branches that are actually ahead of their base (a merged or
+  in-sync branch's diff is always empty), so a repo full of merged branches no
+  longer runs a tree diff per branch.
 - **Source Control scope button now works on Windows** - the button matched
   worktree paths by exact string, but git reports an uppercase drive letter
   ("C:\\repo") while VS Code reports it lowercased ("c:\\repo"), so the paths

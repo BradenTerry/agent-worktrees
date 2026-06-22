@@ -168,12 +168,16 @@ panel as a `{ type: "branches" }` payload:
   base — its upstream when configured, otherwise the repo's default branch
   (`origin/HEAD`). Ahead/behind comes from `%(upstream:track)` when there is an
   upstream and from `git rev-list --left-right --count base...tip` otherwise; the
-  diff from `git diff --numstat base...tip`. The per-branch git calls run with
-  bounded concurrency so a many-branch repo doesn't spawn a process per branch at
-  once, and any per-branch failure leaves that branch's counts at zero. Every git
-  call goes through `execFile` (argument arrays, no shell), so there is no
-  per-call `cmd.exe`/`sh` wrapper — on Windows that roughly halves the process
-  count for a branch listing and avoids shell-specific `--format` quoting.
+  diff from `git diff --numstat base...tip`. The line diff is the costly part, so
+  it runs **only for branches that are actually ahead** of their base — the
+  three-dot diff is empty for a merged or in-sync branch (its tip has no commits
+  the base lacks), so a repo full of merged branches skips it entirely. The
+  remaining per-branch calls run with bounded concurrency so a many-branch repo
+  doesn't spawn a process per branch at once, and any per-branch failure leaves
+  that branch's counts at zero. Every git call goes through `execFile` (argument
+  arrays, no shell), so there is no per-call `cmd.exe`/`sh` wrapper — on Windows
+  that roughly halves the process count for a branch listing and avoids
+  shell-specific `--format` quoting.
 - The git-only branch list paints first, so the tab is responsive immediately,
   then PR data is fetched in the background: when the PR integration is enabled
   with a token connected, opening the tab kicks off a GitHub refresh on load (the

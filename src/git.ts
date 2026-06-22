@@ -295,10 +295,10 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
     });
   }
 
-  // Enrich each branch with its diff vs the compare base (and ahead/behind for
-  // the branches whose count did not come from %(upstream:track)). Bounded
-  // concurrency keeps a many-branch repo from spawning a git process per branch
-  // all at once. Any per-branch failure leaves that branch's counts at zero.
+  // Enrich each branch with ahead/behind and, only when it is actually ahead,
+  // its +/- line diff vs the compare base. Bounded concurrency keeps a
+  // many-branch repo from spawning a git process per branch all at once. Any
+  // per-branch failure leaves that branch's counts at zero.
   const defaultRef = await resolveDefaultBranchRef(cwd);
   // Flag the default branch so the UI can protect it from deletion. This is
   // authoritative (origin/HEAD only, no guessing) — distinct from defaultRef,
@@ -313,15 +313,23 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       ? defaultRef
       : upstreamOf.get(b.name) || (b.hasRemote ? `origin/${b.name}` : defaultRef);
     if (!base || base === tip) return;
-    const diff = await diffStat(cwd, base, tip);
-    b.insertions = diff.insertions;
-    b.deletions = diff.deletions;
-    // A configured upstream already gave authoritative ahead/behind via :track;
-    // everything else (no upstream, or remote-only) is counted against the base.
+    // Resolve ahead/behind first. A configured upstream already gave
+    // authoritative counts via %(upstream:track); everything else (no upstream,
+    // or remote-only) is counted against the base.
     if (!upstreamOf.has(b.name)) {
       const ab = await aheadBehind(cwd, base, tip);
       b.ahead = ab.ahead;
       b.behind = ab.behind;
+    }
+    // The +/- line diff is `git diff --numstat base...tip` (three-dot): it shows
+    // only the changes tip introduced since it diverged from base. When the
+    // branch is not ahead, tip has no commits the base lacks, so that diff is
+    // always empty (0/0). Skip it then — that is what keeps a repo full of
+    // merged/in-sync branches from running an expensive tree diff per branch.
+    if (b.ahead > 0) {
+      const diff = await diffStat(cwd, base, tip);
+      b.insertions = diff.insertions;
+      b.deletions = diff.deletions;
     }
   });
   return branches;
