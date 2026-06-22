@@ -2,7 +2,7 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## Unreleased
+## 3.0.0
 
 - **No more runaway refresh loop** - the panel watched the whole workspace for
   file changes, but its own `git status` opportunistically rewrites
