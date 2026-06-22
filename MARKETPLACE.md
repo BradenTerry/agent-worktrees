@@ -87,13 +87,16 @@ Your filter and sort choices are remembered the next time you open the view. Clo
 it like any editor tab; the Branches button reopens it.
 
 When the GitHub integration is connected, a branch that has an **open** (or draft)
-pull request also shows it inline — the same title, state badge, CI checks, review
-and comment summary you see on the worktree cards — as a hint on the branch row. The
-branch list paints instantly from local git; PR status loads in the background:
-opening the view starts a **Refresh GitHub** of PR/CI status on its own (the button
-spins until it lands, and the **Last refreshed** label fills in with the time), and
-you can re-run it anytime from that button (see below). Without a token the view
-simply lists every branch, with no PR info. (A dedicated PR view may come later.)
+pull request also shows it inline — its title, state badge, author, assignees and
+whether you are a requested reviewer — as a hint on the branch row. (The branches
+view pulls every PR in one bulk call, which doesn't include CI-check or
+review-approval detail; for the full checks-and-reviews rollup, see the PR on its
+worktree card.) The branch list paints instantly from local git; PR status loads in
+the background: opening the view starts a **Refresh GitHub** of PR status on its own
+(the button spins until it lands, and the **Last refreshed** label fills in with the
+time), and you can re-run it anytime from that button (see below). Without a token
+the view simply lists every branch, with no PR info. (A dedicated PR view may come
+later.)
 
 **Fetch and prune.** A **Fetch** button in the header pulls from the remote to
 refresh local branch state — ahead/behind counts — so the view

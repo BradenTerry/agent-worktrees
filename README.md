@@ -260,22 +260,29 @@ panel as a `{ type: "branches" }` payload:
   demand afterwards. The git fetch is **not** run on open — it stays the manual
   **Fetch** button. With no token the view stays git-only and never calls the API.
 - When that fetch runs (on open or on demand) and the PR integration is enabled
-  with a token connected, `github.fetchPrsByBranch` issues a batched `POST /graphql` request
-  (paged from most-recently-updated, so one call for small repos and a bounded
-  few for large ones) that returns the repo's PRs (open, merged and closed) with
-  their rollups (state, check rollup, comment count). The result is
-  mapped to branches by head ref client-side, and the fetch time is surfaced as
-  the header's **Last refreshed** label. A transport or GraphQL failure degrades
+  with a token connected, `github.fetchPrsByBranch` lists the repo's PRs with a
+  single REST `GET /repos/{owner}/{repo}/pulls?state=all` (paged from
+  most-recently-updated, so one call for small repos and a bounded few for large
+  ones, no per-PR follow-ups). It returns the repo's PRs (open, merged and
+  closed) with the fields the list endpoint carries — state, author, assignees,
+  requested reviewers and auto-merge. The list endpoint has **no** CI-check,
+  review-decision or comment data, so those badges are left empty in the branches
+  view; pulling them would require a per-PR follow-up the bulk path deliberately
+  skips. The result is mapped to branches by head ref client-side, and the fetch
+  time is surfaced as the header's **Last refreshed** label. A failure degrades
   the whole view to "no PR data"; rows still render, and the failure reason
-  (`fetchPrsByBranch` now returns an `error`) plus a "fetched N PRs, matched M
-  branches" tally are logged to the "Agent Worktrees" output channel. That log is
-  the breadcrumb for "the cards show a PR but the branches view doesn't": the
-  cards use REST and the branches view uses GraphQL, so a token that is granted
-  REST but denied GraphQL fails only here.
+  (`fetchPrsByBranch` returns an `error`) plus a "fetched N PRs, matched M
+  branches" tally are logged to the "Agent Worktrees" output channel. Because the
+  bulk list is a plain `GET /pulls`, a fine-grained PAT only needs
+  **Pull requests: Read** — the previous GraphQL path failed with "Resource not
+  accessible by personal access token" on tokens denied GraphQL, which this
+  avoids.
 
-This GraphQL path is used **only** by the branches view. The per-worktree PR
-badges on the cards keep the existing per-branch REST `fetchPr` path unchanged,
-so the two are separate code paths.
+The bulk-list path is used **only** by the branches view. The per-worktree PR
+badges on the cards keep the existing per-branch REST `fetchPr` path (which does
+fetch each PR's checks and reviews) unchanged, so the two are separate code
+paths — and the cards still show CI checks and review status that the branches
+view does not.
 
 The view is git-first, so its filter and sort are git-based and run entirely
 client-side over the cached payload — changing either issues no network request,
@@ -401,7 +408,7 @@ flowchart TD
     WV -->|create/reveal singleton| EP["Branches editor tab<br/>AWT_VIEW=branches<br/>same panel.js + panel.css"]
     EP -->|loadBranches on mount| WV
     WV --> LB["git.listBranches<br/>local + remote-only,<br/>worktree association"]
-    WV --> FPB["github.fetchPrsByBranch<br/>1 POST /graphql,<br/>all open PRs + rollups"]
+    WV --> FPB["github.fetchPrsByBranch<br/>GET /pulls?state=all,<br/>all PRs (no checks/reviews)"]
     WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
     BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Sort (last commit / name)"]
     FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]

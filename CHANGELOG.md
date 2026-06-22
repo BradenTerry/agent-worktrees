@@ -2,6 +2,22 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.1.1
+
+- **The Branches view PR status now works with fine-grained tokens** - it
+  previously fetched PRs through GitHub's GraphQL API, which a fine-grained
+  personal access token can be denied even when it works for the worktree cards
+  (the "Resource not accessible by personal access token" error). The view now
+  pulls every PR for the repo in a single REST call that only needs
+  **Pull requests: Read**. The tradeoff: the bulk call carries no CI-check or
+  review-approval detail, so the Branches view shows a PR's title, state, author,
+  assignees and whether you are a requested reviewer, but not its checks/reviews
+  rollup - that is still on the worktree card.
+- **Fewer redundant git calls on refresh** - the repo's default branch
+  (`origin/HEAD`) was looked up several times per refresh, spawning duplicate
+  `git symbolic-ref` processes (most noticeable on Windows). It is now resolved
+  once and reused.
+
 ## 3.1.0
 
 - **The Branches view is now git-first** - branches always list, sort, and
