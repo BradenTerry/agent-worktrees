@@ -27,6 +27,8 @@ state, and its running agents in one view.
   branch name and badges for `Primary` / `detached` / `locked`.
 - **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
   the ahead/behind distance from the upstream branch, refreshed as files change.
+  A per-card **refresh** button re-reads that one worktree's git status (and its
+  PR/CI when the GitHub integration is on) on demand, without a `git fetch`.
 - **GitHub PR status** — when a stored token resolves a PR for the branch, the
   card shows the PR title (wrapping when long), then its lifecycle state, CI
   check rollup, review decision and comment counts (polled from the REST API in

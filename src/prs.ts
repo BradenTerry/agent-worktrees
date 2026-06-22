@@ -208,6 +208,36 @@ export class PrService implements vscode.Disposable {
     if (changed) this._onChange.fire();
     this.ensureScheduled();
   }
+
+  /**
+   * Force-refresh a single tracked target (the per-worktree refresh button), so
+   * one card's GitHub call doesn't have to re-poll the whole board. No-op when
+   * disabled, hidden, tokenless, or the key isn't a current target. Fires a
+   * change (so the panel re-reads the cache) only when the value actually moved.
+   */
+  async refreshOne(key: string): Promise<void> {
+    if (!this.enabled || !this.visible) return;
+    const target = this.targets.find((t) => t.key === key);
+    if (!target) return;
+    const token = await getToken();
+    if (!token) return;
+    let next: PrInfo | null;
+    try {
+      next = await fetchPr(token, target.repo, target.branch);
+    } catch {
+      // Keep whatever we had on a hard failure.
+      next = this.cache.has(key) ? (this.cache.get(key) as PrInfo | null) : null;
+    }
+    const changed = sigOf(this.cache.get(key)) !== sigOf(next);
+    this.cache.set(key, next);
+    // A new head SHA means a push landed; poll fast for a window (mirrors refresh).
+    const prevSha = this.headShas.get(key);
+    if (prevSha && next?.headSha && prevSha !== next.headSha) {
+      this.fastUntil = Date.now() + PUSH_WINDOW_MS;
+    }
+    this.headShas.set(key, next?.headSha);
+    if (changed) this._onChange.fire();
+  }
 }
 
 /** Stable fingerprint of the display-relevant PR fields. */

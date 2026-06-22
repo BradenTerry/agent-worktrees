@@ -58,6 +58,7 @@ interface ActionMessage {
   type: "action";
   action:
     | "refresh"
+    | "refreshWorktree"
     | "agent"
     | "agentWorktree"
     | "focusAgent"
@@ -305,6 +306,27 @@ export class WorktreeWebviewProvider
   }
 
   /**
+   * On-demand refresh for a single worktree's card (the per-card refresh button):
+   * re-read its git working-tree state and, when the PR integration is on, make a
+   * fresh GitHub call for just that worktree's branch. Unlike the global Refresh
+   * it does not run a `git fetch` (that is the global button's job) — it picks up
+   * local working-tree changes and the latest PR/CI for the one card the user
+   * asked about. The whole payload is re-posted (git status is cheap and local),
+   * so other cards simply reflect their current state.
+   */
+  private async refreshWorktree(fsPath?: string): Promise<void> {
+    if (!fsPath || !this.view) return;
+    if (this.prService.isEnabled()) {
+      const github = await connection();
+      if (github.hasToken) await this.prService.refreshOne(normalize(fsPath));
+    }
+    // Force the re-post even if nothing else changed, so the user sees the click
+    // take effect.
+    this.lastPosted = "";
+    await this.refresh(false);
+  }
+
+  /**
    * Attach GitHub connection + per-worktree PR status onto the payload. This is
    * the only place PR work is kicked off, and it is fully optional: with no
    * token (or the integration toggled off) it sets an empty target list, does no
@@ -364,6 +386,8 @@ export class WorktreeWebviewProvider
     switch (msg.action) {
       case "refresh":
         return void this.refresh(true);
+      case "refreshWorktree":
+        return this.refreshWorktree(msg.path);
       case "agent":
         return this.agent(msg.path);
       case "agentWorktree":

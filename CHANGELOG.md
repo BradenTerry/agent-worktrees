@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## Unreleased
+
+- **Per-worktree refresh button** - each worktree card now has a refresh button
+  that re-reads just that worktree's git status and, when the GitHub integration
+  is on, re-fetches that one worktree's PR/CI status. It does not run a `git
+  fetch` (that stays the toolbar Refresh), so it's a quick, targeted update of a
+  single card instead of refreshing everything.
+
 ## 2.7.7
 
 - **Branches view no longer shows a +/- line diff** - computing it required one
