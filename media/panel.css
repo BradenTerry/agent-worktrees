@@ -1484,12 +1484,6 @@ button.busy {
   align-items: center;
   font-variant-numeric: tabular-nums;
 }
-.bseg.ins {
-  color: var(--vscode-charts-green, #89d185);
-}
-.bseg.del {
-  color: var(--vscode-charts-red, #f14c4c);
-}
 .brow-control {
   margin-left: auto;
   flex: 0 0 auto;

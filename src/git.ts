@@ -279,10 +279,6 @@ export interface BranchInfo {
   ahead: number;
   /** Commits behind the compare base. */
   behind: number;
-  /** Lines added vs the compare base across the branch's own commits. */
-  insertions: number;
-  /** Lines removed vs the compare base. */
-  deletions: number;
   /** The repo's default branch (origin/HEAD, e.g. "main"). Never deletable. */
   isDefault: boolean;
 }
@@ -343,8 +339,6 @@ export function parseLocalBranchRefs(stdout: string): {
       worktreePath: worktreePath || undefined,
       ahead,
       behind,
-      insertions: 0,
-      deletions: 0,
       isDefault: false,
     });
   }
@@ -395,16 +389,13 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
       hasWorktree: false,
       ahead: 0,
       behind: 0,
-      insertions: 0,
-      deletions: 0,
       isDefault: false,
     });
   }
 
-  // Enrich each branch with ahead/behind and, only when it is actually ahead,
-  // its +/- line diff vs the compare base. Bounded concurrency keeps a
-  // many-branch repo from spawning a git process per branch all at once. Any
-  // per-branch failure leaves that branch's counts at zero.
+  // Enrich each branch with ahead/behind vs its compare base. Bounded
+  // concurrency keeps a many-branch repo from spawning a git process per branch
+  // all at once. Any per-branch failure leaves that branch's counts at zero.
   const defaultRef = await resolveDefaultBranchRef(cwd);
   // Flag the default branch so the UI can protect it from deletion. This is
   // authoritative (origin/HEAD only, no guessing) — distinct from defaultRef,
@@ -428,16 +419,16 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   // much work a big repo actually drove (the "branch list size vs Windows"
   // question).
   let aheadBehindCalls = 0;
-  let diffCalls = 0;
   await mapLimit(branches, 8, async (b) => {
     const tip = b.remoteOnly ? `origin/${b.name}` : b.name;
     const base = b.remoteOnly
       ? defaultRef
       : upstreamOf.get(b.name) || (b.hasRemote ? `origin/${b.name}` : defaultRef);
     if (!base || base === tip) return;
-    // Resolve ahead/behind first. A configured upstream already gave
-    // authoritative counts via %(upstream:track); everything else (no upstream,
-    // or remote-only) is counted against the base.
+    // A configured upstream already gave authoritative ahead/behind via
+    // %(upstream:track); everything else (no upstream, or remote-only) is counted
+    // against the base. Prefer the batched %(ahead-behind) result; fall back to a
+    // per-branch rev-list when the base is not the default ref or git is too old.
     if (!upstreamOf.has(b.name)) {
       const fullRef = b.remoteOnly
         ? `refs/remotes/origin/${b.name}`
@@ -454,22 +445,11 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
         b.behind = ab.behind;
       }
     }
-    // The +/- line diff is `git diff --numstat base...tip` (three-dot): it shows
-    // only the changes tip introduced since it diverged from base. When the
-    // branch is not ahead, tip has no commits the base lacks, so that diff is
-    // always empty (0/0). Skip it then — that is what keeps a repo full of
-    // merged/in-sync branches from running an expensive tree diff per branch.
-    if (b.ahead > 0) {
-      diffCalls++;
-      const diff = await diffStat(cwd, base, tip);
-      b.insertions = diff.insertions;
-      b.deletions = diff.deletions;
-    }
   });
   log(
     `listBranches: ${branches.length} branches in ${
       Date.now() - startedAt
-    }ms (${aheadBehindCalls} ahead/behind + ${diffCalls} diff calls${
+    }ms (${aheadBehindCalls} ahead/behind calls${
       abByRef ? ", ahead/behind batched" : ""
     })`
   );
@@ -601,33 +581,6 @@ async function resolveDefaultBranchRef(
     }
   }
   return undefined;
-}
-
-/** Lines added/removed introduced by `tip` since it diverged from `base`
- *  (`git diff --numstat base...tip`). Binary files are skipped; zero on error. */
-async function diffStat(
-  cwd: string,
-  base: string,
-  tip: string
-): Promise<{ insertions: number; deletions: number }> {
-  let insertions = 0;
-  let deletions = 0;
-  try {
-    const { stdout } = await git(
-      ["diff", "--numstat", `${base}...${tip}`],
-      { cwd }
-    );
-    for (const line of stdout.split("\n")) {
-      const m = line.match(/^(\d+)\t(\d+)\t/);
-      if (m) {
-        insertions += Number(m[1]);
-        deletions += Number(m[2]);
-      }
-    }
-  } catch {
-    /* missing ref / unrelated histories: leave zeros */
-  }
-  return { insertions, deletions };
 }
 
 /** Commits `tip` is ahead/behind `base` (`git rev-list --left-right --count

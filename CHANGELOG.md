@@ -2,6 +2,16 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.7.7
+
+- **Branches view no longer shows a +/- line diff** - computing it required one
+  `git diff` process per branch (git has no batch form), which was the main
+  remaining cost when listing branches on a large repo. The branch rows now show
+  just the commit ahead/behind (the more useful signal), which is already
+  computed in a single batched call. Listing a repo's branches now costs a
+  handful of git processes total instead of one diff per branch. The worktree
+  cards still show their +/- line totals.
+
 ## 2.7.6
 
 - **Faster worktree loading** - loading the panel ran `git status` AND

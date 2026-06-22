@@ -166,10 +166,10 @@ test("listBranches never surfaces a phantom 'origin' from origin/HEAD", async ()
   assert.ok(!branches.some((b) => b.name === "HEAD"));
 });
 
-test("listBranches reports ahead/behind and diff vs the default branch", async () => {
+test("listBranches reports ahead/behind vs the default branch", async () => {
   // A self-contained repo: main with one file, a topic branch ahead by one
-  // commit that adds two lines. No remote, so the compare base falls back to the
-  // local default branch (main).
+  // commit. No remote, so the compare base falls back to the local default
+  // branch (main).
   const r = path.join(dir, "enrich");
   fs.mkdirSync(r);
   git(r, ["init", "-b", "main"]);
@@ -191,11 +191,8 @@ test("listBranches reports ahead/behind and diff vs the default branch", async (
   assert.ok(topic, "topic is listed");
   assert.strictEqual(topic.ahead, 1, "one commit ahead of main");
   assert.strictEqual(topic.behind, 0);
-  assert.strictEqual(topic.insertions, 2, "two lines added vs main");
-  assert.strictEqual(topic.deletions, 0);
-  // main is its own base, so no divergence and no diff.
+  // main is its own base, so no divergence.
   assert.strictEqual(byName["main"].ahead, 0);
-  assert.strictEqual(byName["main"].insertions, 0);
   // With no remote there is no origin/HEAD, so nothing is flagged as the
   // default branch (we trust git, not a guessed name).
   assert.strictEqual(byName["main"].isDefault, false);
@@ -263,12 +260,10 @@ test("listBranches handles a many-branch repo and returns every branch", async (
   // main + N created branches.
   assert.strictEqual(branches.length, N + 1, "every branch is listed");
   const byName = Object.fromEntries(branches.map((b) => [b.name, b]));
-  // An "ahead" branch reports its one-commit divergence and its line diff.
+  // An "ahead" branch reports its one-commit divergence.
   assert.strictEqual(byName["ahead-1"].ahead, 1);
-  assert.strictEqual(byName["ahead-1"].insertions, 1);
-  // An "in sync" branch has no divergence and no diff.
+  // An "in sync" branch has no divergence.
   assert.strictEqual(byName["sync-0"].ahead, 0);
-  assert.strictEqual(byName["sync-0"].insertions, 0);
 });
 
 test("unpushedCommitCount counts commits not on the base branch", async () => {

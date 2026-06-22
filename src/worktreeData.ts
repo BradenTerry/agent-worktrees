@@ -194,9 +194,6 @@ export interface BranchVM {
    *  branch when there is no upstream). */
   ahead: number;
   behind: number;
-  /** Lines added / removed vs the compare base across the branch's commits. */
-  insertions: number;
-  deletions: number;
   /** The repo's default branch (e.g. main); never offered for deletion. */
   isDefault: boolean;
   /** PR rollup attached by the webview; null = looked up, no PR;
@@ -265,8 +262,6 @@ export async function gatherBranches(): Promise<BranchData> {
     worktreePath: b.worktreePath,
     ahead: b.ahead,
     behind: b.behind,
-    insertions: b.insertions,
-    deletions: b.deletions,
     isDefault: b.isDefault,
   }));
 

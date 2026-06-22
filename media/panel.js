@@ -1321,10 +1321,10 @@
       esc(k.label) +
       "</span>";
 
-    // Commit/diff summary vs the compare base (upstream, or the default branch
-    // when the branch has no upstream): ahead/behind and the +/- line diff, like
-    // the worktree cards' git line. Each piece shows only when non-zero so an
-    // in-sync row stays uncluttered.
+    // Ahead/behind vs the compare base (upstream, or the default branch when the
+    // branch has no upstream). Each piece shows only when non-zero so an in-sync
+    // row stays uncluttered. (No +/- line diff here: it cost a git process per
+    // branch and was dropped for speed; the commit ahead/behind is the signal.)
     const segs = [];
     if (b.ahead)
       segs.push(
@@ -1338,18 +1338,6 @@
           b.behind +
           "</span>"
       );
-    if (b.insertions || b.deletions) {
-      segs.push(
-        '<span class="bseg ins" title="Lines added vs base">+' +
-          (b.insertions || 0) +
-          "</span>"
-      );
-      segs.push(
-        '<span class="bseg del" title="Lines removed vs base">−' +
-          (b.deletions || 0) +
-          "</span>"
-      );
-    }
     const remoteMark =
       tag + (segs.length ? '<span class="bsync">' + segs.join("") + "</span>" : "");
     // A worktree already exists: show the marker, and (when we know its path)
