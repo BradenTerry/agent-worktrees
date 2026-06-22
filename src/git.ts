@@ -175,6 +175,7 @@ export async function fetchRemotes(
  */
 export async function getStatus(cwd: string): Promise<GitStatus> {
   let dirty = 0;
+  let tracked = 0;
   let ahead = 0;
   let behind = 0;
   try {
@@ -193,14 +194,21 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
           behind = Number(m[2]);
         }
       } else if (!line.startsWith("#")) {
-        // 1/2/u = tracked changes, ? = untracked, ! = ignored (excluded below).
+        // 1/2 = changed tracked, u = unmerged, ? = untracked, ! = ignored.
         if (line[0] !== "!") dirty++;
+        // Only changed/unmerged tracked entries appear in `git diff HEAD`.
+        if (line[0] === "1" || line[0] === "2" || line[0] === "u") tracked++;
       }
     }
   } catch {
     /* leave zeros on error */
   }
-  const { insertions, deletions } = await getDiffStat(cwd);
+  // `git diff --numstat HEAD` is empty unless there are tracked changes, so skip
+  // that second git process per worktree when there are none. A clean worktree
+  // (the common case) then costs one git spawn instead of two — the difference
+  // that makes loading many worktrees on Windows noticeably faster.
+  const { insertions, deletions } =
+    tracked > 0 ? await getDiffStat(cwd) : { insertions: 0, deletions: 0 };
   return { dirty, insertions, deletions, ahead, behind };
 }
 

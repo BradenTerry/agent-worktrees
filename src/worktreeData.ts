@@ -138,7 +138,13 @@ export async function gatherWorktrees(
   );
 
   // Fetch git status for every worktree concurrently.
+  const startedAt = Date.now();
   const statuses = await Promise.all(worktrees.map((wt) => getStatus(wt.path)));
+  diag(
+    `gatherWorktrees: ${worktrees.length} worktrees in ${
+      Date.now() - startedAt
+    }ms`
+  );
 
   const vms: WorktreeVM[] = worktrees.map((wt, i) => ({
     path: wt.path,

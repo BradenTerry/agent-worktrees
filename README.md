@@ -152,10 +152,11 @@ flowchart LR
 The panel refreshes in response to three chatty signals: the session-state
 `FileSystemWatcher` (one event per Claude hook firing), a workspace `**/*` file
 watcher (working-tree edits that move the dirty/ahead/behind counts), and window
-focus. Each refresh spawns `git status` + `git diff` for every worktree, so
-reacting to every raw event would peg the CPU - and noticeably worse on Windows,
-where the file watcher emits more events and every process spawn is far more
-expensive than on macOS.
+focus. Each refresh spawns `git status` for every worktree (plus a `git diff
+--numstat HEAD` only for worktrees with tracked changes — a clean worktree skips
+it, halving its per-worktree spawns), so reacting to every raw event would peg
+the CPU - and noticeably worse on Windows, where the file watcher emits more
+events and every process spawn is far more expensive than on macOS.
 
 All three signals funnel through a `Coalescer` (`src/scheduler.ts`): a trailing
 debounce (`REFRESH_DEBOUNCE_MS`, 500ms) that collapses a burst into one refresh,
