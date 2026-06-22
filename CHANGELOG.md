@@ -2,6 +2,15 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.7.1
+
+- **Clicking an agent from another window no longer does nothing** - the agent
+  list is shared across every VS Code window, but a terminal can only be revealed
+  by the window that started it. Clicking an agent whose terminal lives in another
+  window (or was started outside the extension) now shows a short message saying
+  so, instead of silently failing. Revealing an agent from the window that owns it
+  is unchanged.
+
 ## 2.7.0
 
 - **Branches view refreshes GitHub on open** - opening the tab paints your local
