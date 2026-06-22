@@ -163,6 +163,16 @@ button.accept {
   margin-bottom: var(--gap);
   background: var(--vscode-editorWidget-background, transparent);
 }
+/* Alternating row tint so adjacent rows read as distinct. A translucent gray
+   layered over the base widget background, so it works in light and dark themes
+   without a second hardcoded color. */
+.card:nth-child(even) {
+  background-color: var(--vscode-editorWidget-background, transparent);
+  background-image: linear-gradient(
+    rgba(127, 127, 127, 0.16),
+    rgba(127, 127, 127, 0.16)
+  );
+}
 .card.open {
   border-color: var(--vscode-focusBorder);
 }
@@ -1326,6 +1336,31 @@ button.busy {
 .bfilter.open .bfilter-btn {
   border-color: var(--vscode-focusBorder);
 }
+/* Open-PRs toggle: mirrors .bfilter-btn, with an "on" state using VS Code's
+   active-input-option tokens (the same accent used for search/find toggles). */
+.bfilter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: var(--vscode-foreground);
+  background: transparent;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
+}
+.bfilter-toggle:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+.bfilter-toggle svg {
+  width: 12px;
+  height: 12px;
+}
+.bfilter-toggle.on {
+  color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
+  background: var(--vscode-inputOption-activeBackground, rgba(14, 99, 156, 0.4));
+  border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
+}
 .bfilter-label {
   color: var(--vscode-descriptionForeground);
 }
@@ -1410,6 +1445,14 @@ button.busy {
   border-radius: 6px;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
   background: var(--vscode-editorWidget-background, transparent);
+}
+/* Alternating row tint, matching the worktree cards (see .card:nth-child). */
+.brow:nth-child(even) {
+  background-color: var(--vscode-editorWidget-background, transparent);
+  background-image: linear-gradient(
+    rgba(127, 127, 127, 0.16),
+    rgba(127, 127, 127, 0.16)
+  );
 }
 .brow-top {
   display: flex;

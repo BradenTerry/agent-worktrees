@@ -428,23 +428,29 @@ export interface BranchPrInfo {
   autoMerge: boolean;
 }
 
-/** Page cap for the PR fetch: up to ~1000 PRs (100/page, updated-desc). The loop
- *  stops early once a short page arrives, so small repos cost a single request;
- *  the cap only bounds pathologically large repos. */
+/** Page cap for the PR fetch (100/page, updated-desc). With `state=open` the
+ *  loop almost always stops on the first short page, so this only bounds repos
+ *  with an unusually large number of simultaneously-open PRs. */
 const MAX_PR_PAGES = 10;
 
 /**
- * Fetch the repo's PRs (open, merged, closed) via the REST `GET /pulls?state=all`
- * list, mapped by head ref name. One list call per page and no per-PR
- * follow-ups, so it works with a fine-grained PAT that has "Pull requests: Read"
- * but is denied GraphQL (the case the old GraphQL path failed on with "Resource
- * not accessible by personal access token"). The tradeoff: the list endpoint
- * carries no CI-check, review-decision, or comment data, so those fields are
- * left empty (checks/review "none", counts 0) — only what a single list call
- * provides is populated. Paged most-recently-updated first so a freshly merged
- * PR is covered; the cap bounds huge repos. A first-page failure resolves to an
- * empty map with `error` set; a later-page failure keeps the pages already
- * collected. Never throws.
+ * Fetch the repo's open PRs via the REST `GET /pulls?state=open` list, mapped by
+ * head ref name. One list call per page and no per-PR follow-ups, so it works
+ * with a fine-grained PAT that has "Pull requests: Read" but is denied GraphQL
+ * (the case the old GraphQL path failed on with "Resource not accessible by
+ * personal access token"). The tradeoff: the list endpoint carries no CI-check,
+ * review-decision, or comment data, so those fields are left empty
+ * (checks/review "none", counts 0) — only what a single list call provides is
+ * populated.
+ *
+ * Open-only on purpose: the branches view only renders open/draft PRs, and a
+ * repo accumulates far more closed/merged PRs than live branches, so fetching
+ * `state=all` paged through up to ~1000 historical PRs to surface a handful of
+ * open ones. The cost of dropping merged PRs is small — the delete flow loses
+ * the optimization that skips git's "not fully merged" prompt for squash-merged
+ * branches, so deleting such a branch shows one extra confirmation. A first-page
+ * failure resolves to an empty map with `error` set; a later-page failure keeps
+ * the pages already collected. Never throws.
  *
  * `viewerLogin` (the authenticated user, which the caller already resolves) is
  * echoed back and used to flag PRs where the viewer is a still-pending requested
@@ -471,7 +477,7 @@ export async function fetchPrsByBranch(
 
   for (let page = 1; page <= MAX_PR_PAGES; page++) {
     const list = await getJson<RawPr[]>(
-      `/repos/${owner}/${name}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`,
+      `/repos/${owner}/${name}/pulls?state=open&sort=updated&direction=desc&per_page=100&page=${page}`,
       token
     );
     if (!list) {
