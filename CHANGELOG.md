@@ -2,6 +2,16 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.7.6
+
+- **Faster worktree loading** - loading the panel ran `git status` AND
+  `git diff --numstat HEAD` for every worktree on every refresh. The diff is
+  empty for a clean worktree, so it is now skipped unless the worktree has
+  tracked changes. A clean worktree costs one git spawn instead of two, which
+  noticeably cuts the "Loading worktrees" time (and the non-stop
+  `git diff --numstat HEAD` calls) on Windows, where each process spawn is
+  expensive. The worktree-load time is also logged when debug tracing is on.
+
 ## 2.7.5
 
 - **Debug tracing for external calls** - a new `Agent Worktrees: Trace` setting

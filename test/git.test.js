@@ -88,6 +88,37 @@ test("getStatus reports clean then dirty", async () => {
   assert.ok(st.dirty >= 1, "untracked file counts as dirty");
 });
 
+test("getStatus reports line diff for tracked changes, zero when clean", async () => {
+  const r = path.join(dir, "status-diff");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "one\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+
+  // Clean: the per-worktree diff is skipped, so insertions/deletions are zero.
+  let st = await getStatus(r);
+  assert.strictEqual(st.dirty, 0);
+  assert.strictEqual(st.insertions, 0);
+  assert.strictEqual(st.deletions, 0);
+
+  // A tracked modification: the diff runs and the added line is counted.
+  fs.writeFileSync(path.join(r, "a.txt"), "one\ntwo\n");
+  st = await getStatus(r);
+  assert.ok(st.dirty >= 1, "tracked change counts as dirty");
+  assert.strictEqual(st.insertions, 1, "one line added vs HEAD");
+  assert.strictEqual(st.deletions, 0);
+
+  // An untracked file alone must NOT trigger the diff (nothing tracked changed).
+  git(r, ["checkout", "--", "a.txt"]); // revert the tracked change
+  fs.writeFileSync(path.join(r, "b.txt"), "new\n");
+  st = await getStatus(r);
+  assert.ok(st.dirty >= 1, "untracked file is dirty");
+  assert.strictEqual(st.insertions, 0, "untracked files are not in git diff HEAD");
+});
+
 test("listBranches annotates worktree association and remote-only branches", async () => {
   // The repo has `main` (primary worktree) and `feature` (nested worktree).
   // Add a plain local branch with no worktree, and a remote-only ref by hand.
