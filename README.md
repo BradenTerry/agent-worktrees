@@ -167,9 +167,14 @@ panel as a `{ type: "branches" }` payload:
   enriches each branch with ahead/behind and a +/- line diff against its compare
   base — its upstream when configured, otherwise the repo's default branch
   (`origin/HEAD`). Ahead/behind comes from `%(upstream:track)` when there is an
-  upstream and from `git rev-list --left-right --count base...tip` otherwise; the
-  diff from `git diff --numstat base...tip`. The line diff is the costly part, so
-  it runs **only for branches that are actually ahead** of their base — the
+  upstream and, for branches without one, from a single batched
+  `git for-each-ref --format=%(ahead-behind:<default>)` call (git 2.41+) over all
+  refs at once, falling back to a per-branch `git rev-list --left-right --count
+  base...tip` only on older git or when a branch compares to its own
+  `origin/<name>` (a per-branch base that cannot be expressed against a single
+  committish); the diff from `git diff --numstat base...tip`. The line diff is
+  the costly part, so it runs **only for branches that are actually ahead** of
+  their base — the
   three-dot diff is empty for a merged or in-sync branch (its tip has no commits
   the base lacks), so a repo full of merged branches skips it entirely. The
   remaining per-branch calls run with bounded concurrency so a many-branch repo
@@ -177,7 +182,14 @@ panel as a `{ type: "branches" }` payload:
   that branch's counts at zero. Every git call goes through `execFile` (argument
   arrays, no shell), so there is no per-call `cmd.exe`/`sh` wrapper — on Windows
   that roughly halves the process count for a branch listing and avoids
-  shell-specific `--format` quoting.
+  shell-specific `--format` quoting. Each git call also has a timeout so a wedged
+  invocation cannot hang the view, and git activity plus a per-load timing
+  summary (branch count, ahead/behind and diff call counts) is logged to the
+  "Agent Worktrees" output channel — wired via `setGitLogger` so `git.ts` keeps
+  no dependency on the vscode API. The for-each-ref parsing is split into pure
+  `parseLocalBranchRefs` / `parseOriginNames` helpers (unit-tested, CRLF-safe).
+  If listing fails the error is surfaced in the view, not swallowed into an empty
+  list.
 - The git-only branch list paints first, so the tab is responsive immediately,
   then PR data is fetched in the background: when the PR integration is enabled
   with a token connected, opening the tab kicks off a GitHub refresh on load (the

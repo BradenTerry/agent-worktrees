@@ -199,6 +199,46 @@ test("listBranches flags the default branch from origin/HEAD", async () => {
   assert.strictEqual(byName["side"].isDefault, false);
 });
 
+test("listBranches handles a many-branch repo and returns every branch", async () => {
+  // The "branch list size" hypothesis: verify a repo with a large branch count
+  // lists all of them (and completes). A mix of merged/in-sync branches (no
+  // diff) and ahead branches (one extra commit) exercises both enrichment paths.
+  const r = path.join(dir, "many");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hello\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+
+  const N = 60;
+  for (let i = 0; i < N; i++) {
+    // Half are plain branches at main (in sync -> no diff), half are one commit
+    // ahead (a diff is computed).
+    if (i % 2 === 0) {
+      git(r, ["branch", `sync-${i}`]);
+    } else {
+      git(r, ["checkout", "-b", `ahead-${i}`]);
+      fs.writeFileSync(path.join(r, `f${i}.txt`), "x\n");
+      git(r, ["add", "."]);
+      git(r, ["commit", "-m", `c${i}`]);
+      git(r, ["checkout", "main"]);
+    }
+  }
+
+  const branches = await listBranches(r);
+  // main + N created branches.
+  assert.strictEqual(branches.length, N + 1, "every branch is listed");
+  const byName = Object.fromEntries(branches.map((b) => [b.name, b]));
+  // An "ahead" branch reports its one-commit divergence and its line diff.
+  assert.strictEqual(byName["ahead-1"].ahead, 1);
+  assert.strictEqual(byName["ahead-1"].insertions, 1);
+  // An "in sync" branch has no divergence and no diff.
+  assert.strictEqual(byName["sync-0"].ahead, 0);
+  assert.strictEqual(byName["sync-0"].insertions, 0);
+});
+
 test("unpushedCommitCount counts commits not on the base branch", async () => {
   const r = path.join(dir, "unpushed");
   fs.mkdirSync(r);

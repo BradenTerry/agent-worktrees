@@ -2,6 +2,26 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 2.7.3
+
+- **Branches view is much faster on big repos** - ahead/behind for every branch
+  is now computed in a single `git for-each-ref` call (using the
+  `%(ahead-behind:)` atom on git 2.41+) instead of one `git rev-list` per branch.
+  Combined with the existing "diff only branches that are ahead", a repo with
+  dozens of branches now spawns a handful of git processes on load instead of one
+  or two per branch, which is what pegged the CPU and stalled the view on
+  Windows. On older git (pre-2.41) it falls back to the per-branch calls.
+- **Branches view surfaces failures instead of a blank list** - when listing
+  branches fails (git missing, hung, or timed out) the view now shows the error
+  and points to the new "Agent Worktrees" output channel, rather than a
+  misleading "No branches found". This is aimed at the Windows reports where the
+  view never loaded and there was nothing to diagnose: git activity, per-load
+  timing (branch count and how many ahead/behind and diff calls ran), and any
+  failure are now logged to View -> Output -> "Agent Worktrees".
+- **Git calls no longer hang the view forever** - every git invocation now has a
+  timeout, so a wedged call (auth prompt, stalled network) surfaces as an error
+  instead of an endless "Loading branches" spinner.
+
 ## 2.7.2
 
 - **Branches view loads fast on Windows** - listing branches enriches each one

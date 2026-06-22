@@ -1457,6 +1457,13 @@
     } else if (!data || !data.repoRoot) {
       body =
         '<div class="empty">No git repository in this window.<br/>Open a folder that is a git repository to list its branches.</div>';
+    } else if (data.error) {
+      // A git failure (missing/hung/timed out): show it rather than a misleading
+      // "No branches found". Full detail is in the "Agent Worktrees" output.
+      body =
+        '<div class="empty">Could not list branches.<br/>' +
+        esc(data.error) +
+        '<br/><br/>See View &gt; Output &gt; "Agent Worktrees" for details.</div>';
     } else if (!data.branches || !data.branches.length) {
       body = '<div class="empty">No branches found in this repository.</div>';
     } else {
