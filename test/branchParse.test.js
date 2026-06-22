@@ -1,7 +1,11 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");
-const { parseLocalBranchRefs, parseOriginNames } = require("../out/git.js");
+const {
+  parseLocalBranchRefs,
+  parseOriginNames,
+  parseAheadBehindByRef,
+} = require("../out/git.js");
 
 // The local for-each-ref format is
 //   %(refname:short)%00%(worktreepath)%00%(upstream:track,nobracket)%00%(upstream:short)
@@ -89,4 +93,43 @@ test("parseOriginNames: tolerates CRLF and blank lines", () => {
     "refs/remotes/origin/main\r\n\r\nrefs/remotes/origin/dev\r\n"
   );
   assert.deepStrictEqual([...names].sort(), ["dev", "main"]);
+});
+
+// The batched ahead/behind format is %(refname)%00%(ahead-behind:base); the atom
+// prints "<ahead> <behind>".
+function abLine(ref, ahead, behind) {
+  return ref + "\0" + ahead + " " + behind;
+}
+
+test("parseAheadBehindByRef: maps full refname to ahead/behind", () => {
+  const out = [
+    abLine("refs/heads/feature", 2, 1),
+    abLine("refs/remotes/origin/topic", 0, 5),
+  ].join("\n");
+  const map = parseAheadBehindByRef(out);
+  assert.deepStrictEqual(map.get("refs/heads/feature"), { ahead: 2, behind: 0 + 1 });
+  assert.deepStrictEqual(map.get("refs/remotes/origin/topic"), {
+    ahead: 0,
+    behind: 5,
+  });
+});
+
+test("parseAheadBehindByRef: skips refs with no counts (no common ancestor)", () => {
+  // A ref unrelated to the base prints an empty ahead-behind field; such a line
+  // must be skipped so the caller falls back to a per-branch rev-list.
+  const out = [
+    abLine("refs/heads/main", 0, 0),
+    "refs/heads/orphan\0", // empty field
+  ].join("\n");
+  const map = parseAheadBehindByRef(out);
+  assert.deepStrictEqual(map.get("refs/heads/main"), { ahead: 0, behind: 0 });
+  assert.strictEqual(map.has("refs/heads/orphan"), false);
+});
+
+test("parseAheadBehindByRef: tolerates CRLF", () => {
+  const map = parseAheadBehindByRef(
+    abLine("refs/heads/a", 1, 2) + "\r\n" + abLine("refs/heads/b", 3, 4) + "\r\n"
+  );
+  assert.deepStrictEqual(map.get("refs/heads/a"), { ahead: 1, behind: 2 });
+  assert.deepStrictEqual(map.get("refs/heads/b"), { ahead: 3, behind: 4 });
 });

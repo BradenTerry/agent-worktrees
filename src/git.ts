@@ -365,8 +365,20 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   if (defaultName) {
     for (const b of branches) if (b.name === defaultName) b.isDefault = true;
   }
-  // Count the per-branch git calls so the diagnostics summary shows how much
-  // work a big repo actually drove (the "branch list size vs Windows" question).
+  // Batch ahead/behind vs the default branch for every ref in ONE call, instead
+  // of a `rev-list` per branch. This is the big reduction in git processes on a
+  // many-branch repo (the Windows "CPU screaming / never loads" case). It only
+  // covers branches whose base IS the default ref; a branch that compares to its
+  // own origin/<name> has a per-branch base that cannot be expressed against a
+  // single committish, so it still falls back to a `rev-list`. Returns undefined
+  // on git < 2.41 (the %(ahead-behind) atom errors), so we degrade gracefully.
+  const abByRef = defaultRef
+    ? await aheadBehindByRef(cwd, defaultRef)
+    : undefined;
+
+  // Count the remaining per-branch git calls so the diagnostics summary shows how
+  // much work a big repo actually drove (the "branch list size vs Windows"
+  // question).
   let aheadBehindCalls = 0;
   let diffCalls = 0;
   await mapLimit(branches, 8, async (b) => {
@@ -379,10 +391,20 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
     // authoritative counts via %(upstream:track); everything else (no upstream,
     // or remote-only) is counted against the base.
     if (!upstreamOf.has(b.name)) {
-      aheadBehindCalls++;
-      const ab = await aheadBehind(cwd, base, tip);
-      b.ahead = ab.ahead;
-      b.behind = ab.behind;
+      const fullRef = b.remoteOnly
+        ? `refs/remotes/origin/${b.name}`
+        : `refs/heads/${b.name}`;
+      const batched =
+        base === defaultRef ? abByRef?.get(fullRef) : undefined;
+      if (batched) {
+        b.ahead = batched.ahead;
+        b.behind = batched.behind;
+      } else {
+        aheadBehindCalls++;
+        const ab = await aheadBehind(cwd, base, tip);
+        b.ahead = ab.ahead;
+        b.behind = ab.behind;
+      }
     }
     // The +/- line diff is `git diff --numstat base...tip` (three-dot): it shows
     // only the changes tip introduced since it diverged from base. When the
@@ -399,9 +421,60 @@ export async function listBranches(cwd: string): Promise<BranchInfo[]> {
   log(
     `listBranches: ${branches.length} branches in ${
       Date.now() - startedAt
-    }ms (${aheadBehindCalls} ahead/behind + ${diffCalls} diff calls)`
+    }ms (${aheadBehindCalls} ahead/behind + ${diffCalls} diff calls${
+      abByRef ? ", ahead/behind batched" : ""
+    })`
   );
   return branches;
+}
+
+/**
+ * Ahead/behind of every local and origin ref vs a single base, in ONE
+ * `for-each-ref` call using the %(ahead-behind:) atom (git 2.41+). Returns a map
+ * keyed by full refname (e.g. "refs/heads/feature"). Resolves to undefined when
+ * git does not support the atom — older git errors on the unknown field, which
+ * we catch — so the caller falls back to a per-branch `rev-list`.
+ */
+async function aheadBehindByRef(
+  cwd: string,
+  base: string
+): Promise<Map<string, { ahead: number; behind: number }> | undefined> {
+  try {
+    const { stdout } = await git(
+      [
+        "for-each-ref",
+        `--format=%(refname)%00%(ahead-behind:${base})`,
+        "refs/heads",
+        "refs/remotes/origin",
+      ],
+      { cwd }
+    );
+    return parseAheadBehindByRef(stdout);
+  } catch {
+    // git < 2.41 (unknown atom) or an unresolvable base: degrade to per-branch.
+    return undefined;
+  }
+}
+
+/**
+ * Parse `%(refname)%00%(ahead-behind:base)` records into a map from full refname
+ * to counts. The atom prints "<ahead> <behind>"; a ref with no common ancestor
+ * prints nothing, so such lines are skipped (left to the per-branch fallback).
+ * Pure and exported for unit tests.
+ */
+export function parseAheadBehindByRef(
+  stdout: string
+): Map<string, { ahead: number; behind: number }> {
+  const map = new Map<string, { ahead: number; behind: number }>();
+  for (const raw of stdout.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (!line) continue;
+    const [ref, ab] = line.split("\0");
+    if (!ref) continue;
+    const m = (ab || "").match(/(\d+)\s+(\d+)/);
+    if (m) map.set(ref, { ahead: Number(m[1]), behind: Number(m[2]) });
+  }
+  return map;
 }
 
 /**
