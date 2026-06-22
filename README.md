@@ -131,6 +131,24 @@ npm run compile     # or: npm run watch
 Press `F5` (Run Extension) to launch an Extension Development Host. Open a folder
 that is a git repository (with worktrees) to populate the panel.
 
+### Tests
+
+Two layers, both run on the `ubuntu`/`macos`/`windows` CI matrix
+(`.github/workflows/ci.yml`):
+
+```bash
+npm test              # fast: node --test over test/**/*.test.js (pure git/util logic)
+npm run test:integration   # real VS Code extension host (@vscode/test-electron)
+```
+
+`npm test` exercises the pure logic against the real `git` CLI and never needs
+VS Code. `npm run test:integration` downloads a real VS Code, launches the
+extension host, and runs `src/test/integration/**` (compiled to `out/test/`) with
+the `vscode` API available — this is what gives **real Windows coverage** of the
+parts the unit suite can't reach (activation, commands, the built-in Git
+extension API), which is where the Windows-only panel failures lived. On a
+headless Linux box it needs a display (`xvfb-run -a npm run test:integration`).
+
 ## Architecture
 
 ```mermaid

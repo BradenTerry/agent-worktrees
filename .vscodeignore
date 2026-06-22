@@ -1,8 +1,11 @@
 .vscode/**
+.vscode-test/**
+.vscode-test.mjs
 .claude/**
 .github/**
 src/**
 test/**
+out/test/**
 screenshots/**
 images/**
 playwright.config.js

@@ -7,6 +7,11 @@ name: CI
 # The job fans out across the three OSes the extension ships to. The tests exercise the
 # OS-sensitive logic (git plumbing, the emitter, path handling), so the matrix is the point:
 # a Windows-only path-separator or line-ending regression fails here, not in the wild.
+#
+# Two layers run on each OS: the fast `node --test` suite (pure git/util logic), and a real
+# VS Code extension host (via @vscode/test-electron) that exercises the vscode API surface --
+# activation, commands, the built-in Git extension API -- which is where the Windows-only
+# failures actually lived (the panel integration), invisible to the plain unit suite.
 on:
   pull_request:
     branches: [main]
@@ -43,3 +48,13 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Real VS Code extension host. Linux runners are headless, so they need a
+      # virtual display; macOS and Windows run it directly.
+      - name: Extension host tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:integration
+
+      - name: Extension host tests (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:integration
