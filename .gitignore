@@ -4,3 +4,6 @@ out/
 .DS_Store
 playwright-report/
 test-results/
+
+# VS Code extension test runner download cache
+.vscode-test/
