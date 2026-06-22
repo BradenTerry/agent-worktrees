@@ -2,7 +2,7 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## Unreleased
+## 2.7.3
 
 - **Branches view is much faster on big repos** - ahead/behind for every branch
   is now computed in a single `git for-each-ref` call (using the
