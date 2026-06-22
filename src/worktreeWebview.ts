@@ -39,6 +39,12 @@ import {
   BranchPrInfo,
 } from "./github";
 import { PrService, PrTarget } from "./prs";
+import { Coalescer } from "./scheduler";
+
+/** Quiet period (ms) before a burst of file/session events triggers a refresh.
+ *  Refreshing spawns git per worktree, so coalescing keeps a flood of watcher
+ *  events (heaviest on Windows) down to one refresh. */
+const REFRESH_DEBOUNCE_MS = 500;
 
 /** globalState key for the opt-in Source Control scope button. */
 const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
@@ -118,8 +124,12 @@ export class WorktreeWebviewProvider
   private watcher?: vscode.FileSystemWatcher;
   /** Watches workspace files so git status (dirty/ahead/behind) tracks edits. */
   private fileWatcher?: vscode.FileSystemWatcher;
-  /** Debounce timer coalescing bursts of file changes into one refresh. */
-  private refreshTimer?: ReturnType<typeof setTimeout>;
+  /** Coalesces bursts of file/session/focus events into one refresh. Created in
+   *  the constructor so the clock can be injected; see REFRESH_DEBOUNCE_MS. */
+  private readonly refreshDebounce: Coalescer;
+  /** Coalesces session-state writes into one (already throttled) PR nudge, so an
+   *  agent streaming hook events doesn't poke the GitHub poller on every event. */
+  private readonly prNudge: Coalescer;
   /** Terminals we launched, keyed by the session id we started Claude with. */
   private terminals = new Map<string, vscode.Terminal>();
   /** Env var stamped on each agent terminal carrying its session id. VS Code
@@ -144,6 +154,14 @@ export class WorktreeWebviewProvider
   constructor(private readonly context: vscode.ExtensionContext) {
     initGithub(context);
     this.prService = new PrService(context);
+    this.refreshDebounce = new Coalescer(
+      () => this.refresh(),
+      REFRESH_DEBOUNCE_MS
+    );
+    this.prNudge = new Coalescer(
+      () => this.prService.refresh(false),
+      REFRESH_DEBOUNCE_MS
+    );
     this.sessionsDir = sessionsDir(context);
     // Ensure the sessions dir exists so the watcher attaches even before the
     // first hook fires.
@@ -158,10 +176,12 @@ export class WorktreeWebviewProvider
     // A session-state file changing is a Claude hook firing (a prompt, a tool
     // run, a stop). Besides re-rendering, nudge the PR service: this is the
     // signal that an agent may have just run `gh pr create`/merge, so PR status
-    // is worth a (throttled) refresh without waiting for the poll timer.
+    // is worth a (throttled) refresh without waiting for the poll timer. An
+    // active agent fires many hooks in quick succession, so both are coalesced
+    // rather than run per event (each refresh spawns git for every worktree).
     const onChange = () => {
-      void this.refresh();
-      void this.prService.refresh(false);
+      this.refreshDebounce.trigger();
+      this.prNudge.trigger();
     };
     this.watcher.onDidCreate(onChange);
     this.watcher.onDidChange(onChange);
@@ -200,13 +220,13 @@ export class WorktreeWebviewProvider
     this.watcher?.dispose();
     this.fileWatcher?.dispose();
     this.branchesPanel?.dispose();
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshDebounce.cancel();
+    this.prNudge.cancel();
   }
 
   /** Coalesce frequent file-change events into a single refresh. */
   private scheduleRefresh(): void {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    this.refreshTimer = setTimeout(() => void this.refresh(), 500);
+    this.refreshDebounce.trigger();
   }
 
   private get extensionUri(): vscode.Uri {
