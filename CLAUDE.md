@@ -104,6 +104,20 @@ This is for visual review only - it is not a committed test.
 - Keep icons monochrome via `currentColor` so they inherit and stay legible in
   both themes.
 
+## CI and releases
+
+The full test gate only runs on **pull requests**. `ci.yml` is `pull_request`-only
+and fans out across the three shipped OSes (ubuntu/macos/windows) plus a real VS
+Code extension-host run; merges to main are deliberately not re-tested there.
+`release.yml` re-runs `npm ci + compile + test` on the tagged commit, but on a
+**single** runner only - so a tag's release gate does not exercise the multi-OS
+matrix or the extension-host tests.
+
+Consequence: **land every change through a PR**, never push straight to main.
+Pushing directly (or admin-merging a red PR) skips the only full-matrix gate, so
+an OS-specific or extension-host regression can reach a release untested. If a PR
+must be admin-merged past branch protection, get its CI green first.
+
 ## Conventions
 
 - Spaces, not tabs. No em dashes or emojis in UI copy.
