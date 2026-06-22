@@ -206,6 +206,8 @@ function branchesData() {
     branches: [
       {
         name: "feat/search-filters",
+        updatedAt: iso(22 * MIN),
+        lastUser: "lin-h",
         remoteOnly: false,
         hasRemote: true,
         hasWorktree: false,
@@ -237,6 +239,8 @@ function branchesData() {
       },
       {
         name: "feat/checkout-redesign",
+        updatedAt: iso(30 * MIN),
+        lastUser: "acme-dev",
         remoteOnly: false,
         hasRemote: true,
         hasWorktree: true,
@@ -270,6 +274,8 @@ function branchesData() {
       },
       {
         name: "fix/login-race",
+        updatedAt: iso(3 * HOUR),
+        lastUser: "rivera",
         remoteOnly: false,
         hasRemote: true,
         hasWorktree: true,
@@ -302,6 +308,8 @@ function branchesData() {
       },
       {
         name: "chore/deps-bump",
+        updatedAt: iso(28 * HOUR),
+        lastUser: "acme-dev",
         remoteOnly: false,
         hasRemote: false,
         hasWorktree: false,
@@ -333,6 +341,8 @@ function branchesData() {
       },
       {
         name: "feat/analytics-events",
+        updatedAt: iso(2 * 24 * HOUR),
+        lastUser: "okafor",
         remoteOnly: true,
         hasRemote: true,
         hasWorktree: false,
@@ -364,6 +374,8 @@ function branchesData() {
       },
       {
         name: "main",
+        updatedAt: iso(5 * HOUR),
+        lastUser: "lin-h",
         remoteOnly: false,
         hasRemote: true,
         hasWorktree: true,
@@ -377,6 +389,8 @@ function branchesData() {
       },
       {
         name: "fix/typo-readme",
+        updatedAt: iso(4 * 24 * HOUR),
+        lastUser: "okafor",
         remoteOnly: true,
         hasRemote: true,
         hasWorktree: false,

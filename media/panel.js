@@ -69,34 +69,27 @@
   const expanded = new Set((vscode.getState() || {}).expanded || []);
 
   // Branches-overlay filter/sort selections, persisted alongside `expanded` so
-  // reopening the overlay restores the last view. `authors` is a list of logins
-  // (multi-select); `reviews` is one of the REVIEW_FILTERS keys or ""; `openOnly`
-  // and `autoMerge` are boolean preset toggles; `sort` is one of the SORT_OPTIONS
-  // keys.
+  // reopening the overlay restores the last view. This view is git-first: `users`
+  // is a list of committer names (the people who last updated each branch,
+  // multi-select); `sort` is one of the SORT_OPTIONS keys (all git-based, no
+  // GitHub needed). A branch's open PR is shown when present but is not a filter.
   const savedState = vscode.getState() || {};
   const branchFilters = {
     // Prune on fetch. On by default; persisted so the checkbox stays set.
     prune: savedState.branchPrune !== false,
-    authors: Array.isArray(savedState.branchAuthors)
-      ? savedState.branchAuthors.slice()
+    users: Array.isArray(savedState.branchUsers)
+      ? savedState.branchUsers.slice()
       : [],
-    reviews:
-      typeof savedState.branchReviews === "string"
-        ? savedState.branchReviews
-        : "",
-    openOnly: savedState.branchOpenOnly === true,
-    autoMerge: savedState.branchAutoMerge === true,
     sort:
-      typeof savedState.branchSort === "string" ? savedState.branchSort : "newest",
+      typeof savedState.branchSort === "string"
+        ? savedState.branchSort
+        : "recentlyUpdated",
   };
   function persist() {
     vscode.setState({
       expanded: Array.from(expanded),
       branchPrune: branchFilters.prune,
-      branchAuthors: branchFilters.authors.slice(),
-      branchReviews: branchFilters.reviews,
-      branchOpenOnly: branchFilters.openOnly,
-      branchAutoMerge: branchFilters.autoMerge,
+      branchUsers: branchFilters.users.slice(),
       branchSort: branchFilters.sort,
     });
   }
@@ -1014,67 +1007,42 @@
   // Tracks which filter/sort dropdown is open (webview-only UI state).
   let openMenu = "";
 
-  // Single-select Reviews filter. Each entry maps a PR to a boolean predicate.
-  const REVIEW_FILTERS = [
-    { id: "none", label: "No reviews", test: (pr) => pr.review === "none" },
-    {
-      id: "required",
-      label: "Review required",
-      test: (pr) => pr.review === "required",
-    },
-    { id: "approved", label: "Approved", test: (pr) => pr.review === "approved" },
-    {
-      id: "changes",
-      label: "Changes requested",
-      test: (pr) => pr.review === "changes",
-    },
-    {
-      id: "reviewedByYou",
-      label: "Reviewed by you",
-      test: (pr) => !!pr.reviewedByViewer,
-    },
-    {
-      id: "notReviewedByYou",
-      label: "Not reviewed by you",
-      test: (pr) => !pr.reviewedByViewer,
-    },
-    {
-      id: "awaitingYou",
-      label: "Awaiting review from you",
-      test: (pr) => !!pr.reviewRequestedFromViewer,
-    },
-  ];
-
-  // Single-select Sort. `prSort` true entries fall back to branch-name order
-  // when PR data is unavailable.
+  // Single-select Sort. All git-based (branch tip-commit date / name), so they
+  // work with or without a GitHub token — this is a git-first view.
   const SORT_OPTIONS = [
-    { id: "newest", label: "Newest", prSort: true },
-    { id: "oldest", label: "Oldest", prSort: true },
-    { id: "mostCommented", label: "Most commented", prSort: true },
-    { id: "leastCommented", label: "Least commented", prSort: true },
-    { id: "recentlyUpdated", label: "Recently updated", prSort: true },
-    { id: "leastRecentlyUpdated", label: "Least recently updated", prSort: true },
+    { id: "recentlyUpdated", label: "Recently updated" },
+    { id: "leastRecentlyUpdated", label: "Least recently updated" },
+    { id: "name", label: "Name (A–Z)" },
   ];
 
-  /** True when the GitHub integration is connected and PR display is enabled. */
+  /** True when the GitHub integration is connected and PR display is enabled.
+   *  Gates only whether a branch's open PR is shown, never the branch list. */
   function prAvailable(data) {
     const gh = data && data.github;
     return !!(gh && gh.connected && data.prEnabled !== false);
   }
 
-  /** Any PR-based narrowing active? Used to hide no-PR rows (R16). */
-  function prFilterActive() {
-    return (
-      branchFilters.authors.length > 0 ||
-      !!branchFilters.reviews ||
-      branchFilters.openOnly ||
-      branchFilters.autoMerge
-    );
-  }
-
   function timeVal(s) {
     const t = s ? Date.parse(s) : NaN;
     return isNaN(t) ? 0 : t;
+  }
+
+  // Compact relative time ("just now", "5m", "3h", "4d", "2w", "5mo", "1y") for a
+  // branch's last-updated commit date. Empty string when the date is missing.
+  function relTime(s) {
+    const t = timeVal(s);
+    if (!t) return "";
+    const sec = Math.max(0, (Date.now() - t) / 1000);
+    if (sec < 45) return "just now";
+    const min = sec / 60;
+    if (min < 60) return Math.round(min) + "m ago";
+    const hr = min / 60;
+    if (hr < 24) return Math.round(hr) + "h ago";
+    const day = hr / 24;
+    if (day < 7) return Math.round(day) + "d ago";
+    if (day < 30) return Math.round(day / 7) + "w ago";
+    if (day < 365) return Math.round(day / 30) + "mo ago";
+    return Math.round(day / 365) + "y ago";
   }
 
   // "Last refreshed" label for the GitHub PR data. The branches view fetches on
@@ -1089,86 +1057,58 @@
     });
   }
 
-  /** Apply the active filters + sort to the branch list, client-side. */
+  /** Apply the active user filter + sort to the branch list, client-side. All
+   *  git-based: the list is never narrowed or reordered by PR data. */
   function visibleBranches(data) {
     const all = (data && data.branches) || [];
-    const pr = prAvailable(data);
     const sortOpt =
       SORT_OPTIONS.find((s) => s.id === branchFilters.sort) || SORT_OPTIONS[0];
-    const reviewFilter = pr
-      ? REVIEW_FILTERS.find((r) => r.id === branchFilters.reviews)
-      : null;
-    const authorSet = pr ? new Set(branchFilters.authors) : new Set();
+    const userSet = new Set(branchFilters.users);
 
     let rows = all.slice();
 
-    if (pr) {
-      // While any PR-based filter is active, drop rows with no PR (R16).
-      const filterActive = prFilterActive();
-      rows = rows.filter((b) => {
-        const p = b.pr;
-        if (filterActive && !p) return false;
-        if (!p) return true;
-        if (authorSet.size && !authorSet.has(p.author)) return false;
-        if (reviewFilter && !reviewFilter.test(p)) return false;
-        if (
-          branchFilters.openOnly &&
-          p.state !== "open" &&
-          p.state !== "draft"
-        )
-          return false;
-        if (branchFilters.autoMerge && !p.autoMerge) return false;
-        return true;
-      });
+    // Filter to branches last updated by the selected user(s). A branch with no
+    // known committer is dropped only while a filter is active.
+    if (userSet.size) {
+      rows = rows.filter((b) => b.lastUser && userSet.has(b.lastUser));
     }
 
-    // Sort. PR sorts need PR data; rows without a PR sort to the end, and when
-    // PR data is unavailable entirely we fall back to branch-name order.
-    if (pr && sortOpt.prSort) {
-      const dir = (a, b) => {
-        const pa = a.pr;
-        const pb = b.pr;
-        if (!pa && !pb) return a.name.localeCompare(b.name);
-        if (!pa) return 1;
-        if (!pb) return -1;
-        switch (sortOpt.id) {
-          case "oldest":
-            return timeVal(pa.createdAt) - timeVal(pb.createdAt);
-          case "mostCommented":
-            return (pb.comments || 0) - (pa.comments || 0);
-          case "leastCommented":
-            return (pa.comments || 0) - (pb.comments || 0);
-          case "recentlyUpdated":
-            return timeVal(pb.updatedAt) - timeVal(pa.updatedAt);
-          case "leastRecentlyUpdated":
-            return timeVal(pa.updatedAt) - timeVal(pb.updatedAt);
-          case "newest":
-          default:
-            return timeVal(pb.createdAt) - timeVal(pa.createdAt);
-        }
-      };
-      rows.sort(dir);
-    } else {
-      rows.sort((a, b) => a.name.localeCompare(b.name));
-    }
+    const byName = (a, b) =>
+      a.name.localeCompare(b.name, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    rows.sort((a, b) => {
+      if (sortOpt.id === "name") return byName(a, b);
+      const ta = timeVal(a.updatedAt);
+      const tb = timeVal(b.updatedAt);
+      // Branches with no date sort to the end, then tie-break by name.
+      if (ta !== tb) {
+        if (!ta) return 1;
+        if (!tb) return -1;
+        return sortOpt.id === "leastRecentlyUpdated" ? ta - tb : tb - ta;
+      }
+      return byName(a, b);
+    });
     return rows;
   }
 
-  /** Distinct PR authors, "you" pinned first (R12). */
-  function authorOptions(data) {
+  /** Distinct branch committers ("who last updated it"), the current user pinned
+   *  first when known, then alphabetical. Derived from git, not GitHub. */
+  function userOptions(data) {
     const viewer = (data && data.viewerLogin) || "";
     const seen = new Set();
     const out = [];
     for (const b of (data && data.branches) || []) {
-      const a = b.pr && b.pr.author;
-      if (a && !seen.has(a)) {
-        seen.add(a);
-        out.push(a);
+      const u = b.lastUser;
+      if (u && !seen.has(u)) {
+        seen.add(u);
+        out.push(u);
       }
     }
     out.sort((a, b) => a.localeCompare(b));
     if (viewer && seen.has(viewer)) {
-      return [viewer].concat(out.filter((a) => a !== viewer));
+      return [viewer].concat(out.filter((u) => u !== viewer));
     }
     return out;
   }
@@ -1199,76 +1139,33 @@
   }
 
   function filterBar(data) {
-    const pr = prAvailable(data);
     const sortOpt =
       SORT_OPTIONS.find((s) => s.id === branchFilters.sort) || SORT_OPTIONS[0];
 
-    let controls = "";
-
-    if (pr) {
-      const viewer = (data && data.viewerLogin) || "";
-      const authors = authorOptions(data);
-      const selected = new Set(branchFilters.authors);
-      const authorItems = authors.length
-        ? authors
-            .map(
-              (a) =>
-                '<button class="bfilter-item" role="menuitemcheckbox" data-author="' +
-                esc(a) +
-                '" aria-checked="' +
-                selected.has(a) +
-                '"><span class="bcheck">' +
-                (selected.has(a) ? icons.check : "") +
-                "</span>" +
-                esc(a) +
-                (a === viewer ? ' <span class="bdim">(you)</span>' : "") +
-                "</button>"
-            )
-            .join("")
-        : '<div class="bfilter-empty">No PR authors</div>';
-      const authorSummary = branchFilters.authors.length
-        ? branchFilters.authors.length + " selected"
-        : "Any";
-
-      const reviewItems = (
-        '<button class="bfilter-item" role="menuitemradio" data-review="" aria-checked="' +
-        (!branchFilters.reviews) +
-        '"><span class="bcheck">' +
-        (!branchFilters.reviews ? icons.check : "") +
-        "</span>Any</button>" +
-        REVIEW_FILTERS.map(
-          (r) =>
-            '<button class="bfilter-item" role="menuitemradio" data-review="' +
-            r.id +
-            '" aria-checked="' +
-            (branchFilters.reviews === r.id) +
-            '"><span class="bcheck">' +
-            (branchFilters.reviews === r.id ? icons.check : "") +
-            "</span>" +
-            esc(r.label) +
-            "</button>"
-        ).join("")
-      );
-      const rf = REVIEW_FILTERS.find((r) => r.id === branchFilters.reviews);
-      const reviewSummary = rf ? rf.label : "Any";
-
-      const presets =
-        '<div class="bpresets">' +
-        '<button class="bchip' +
-        (branchFilters.openOnly ? " on" : "") +
-        '" data-preset="openPr" title="Only branches whose PR is open">' +
-        "Open PRs</button>" +
-        '<button class="bchip' +
-        (branchFilters.autoMerge ? " on" : "") +
-        '" data-preset="autoMerge" title="Only branches whose PR has auto-merge enabled">' +
-        "Auto merge</button>" +
-        "</div>";
-
-      controls =
-        menu("author", "Author", authorSummary, authorItems) +
-        menu("reviews", "Reviews", reviewSummary, reviewItems) +
-        presets;
-    }
+    const viewer = (data && data.viewerLogin) || "";
+    const users = userOptions(data);
+    const selected = new Set(branchFilters.users);
+    const userItems = users.length
+      ? users
+          .map(
+            (u) =>
+              '<button class="bfilter-item" role="menuitemcheckbox" data-user="' +
+              esc(u) +
+              '" aria-checked="' +
+              selected.has(u) +
+              '"><span class="bcheck">' +
+              (selected.has(u) ? icons.check : "") +
+              "</span>" +
+              esc(u) +
+              (u === viewer ? ' <span class="bdim">(you)</span>' : "") +
+              "</button>"
+          )
+          .join("")
+      : '<div class="bfilter-empty">No branch authors</div>';
+    const userSummary = branchFilters.users.length
+      ? branchFilters.users.length + " selected"
+      : "Anyone";
+    const controls = menu("user", "Updated by", userSummary, userItems);
 
     const sortItems = SORT_OPTIONS.map(
       (s) =>
@@ -1321,7 +1218,14 @@
   }
 
   function branchRow(b, data) {
-    const pr = prAvailable(data) ? b.pr : null;
+    // PR data is still used to detect a merged branch for the delete flow, but
+    // only an OPEN (or draft) PR is shown on the row — this is a branches view,
+    // with the PR as a hint, not a PR list.
+    const prData = prAvailable(data) ? b.pr : null;
+    const pr =
+      prData && (prData.state === "open" || prData.state === "draft")
+        ? prData
+        : null;
     const kind = branchKind(b);
     const k = BRANCH_KINDS[kind];
     const tag =
@@ -1384,7 +1288,7 @@
       ? '<button class="bdelete danger" data-action="deleteBranch" data-branch="' +
         esc(b.name) +
         '" data-merged="' +
-        (pr && pr.state === "merged" ? "1" : "0") +
+        (prData && prData.state === "merged" ? "1" : "0") +
         '" title="Delete this local branch (the remote branch is left untouched)">' +
         icons.trash +
         "Delete Local</button>"
@@ -1399,6 +1303,24 @@
         "</a>"
       : "";
 
+    // Git-native "last updated" line: when, and by whom. The signal this view
+    // sorts and filters on, shown so the order is legible.
+    const when = relTime(b.updatedAt);
+    const meta =
+      when || b.lastUser
+        ? '<div class="brow-meta">' +
+          (when ? '<span class="bmeta-when">' + esc(when) + "</span>" : "") +
+          (b.lastUser
+            ? '<span class="bmeta-user" title="Last commit by ' +
+              esc(b.lastUser) +
+              '">' +
+              icons.agentMark +
+              esc(b.lastUser) +
+              "</span>"
+            : "") +
+          "</div>"
+        : "";
+
     return (
       '<div class="brow">' +
       '<div class="brow-top">' +
@@ -1412,6 +1334,7 @@
       deleteBtn +
       "</span>" +
       "</div>" +
+      meta +
       (pr ? prLine(pr) : "") +
       "</div>"
     );
@@ -1605,21 +1528,12 @@
         renderBranches();
         return;
       }
-      const author = e.target.closest("[data-author]");
-      if (author) {
-        const name = author.getAttribute("data-author");
-        const i = branchFilters.authors.indexOf(name);
-        if (i === -1) branchFilters.authors.push(name);
-        else branchFilters.authors.splice(i, 1);
-        branchPage = 0;
-        persist();
-        renderBranches();
-        return;
-      }
-      const review = e.target.closest("[data-review]");
-      if (review) {
-        branchFilters.reviews = review.getAttribute("data-review") || "";
-        openMenu = "";
+      const user = e.target.closest("[data-user]");
+      if (user) {
+        const name = user.getAttribute("data-user");
+        const i = branchFilters.users.indexOf(name);
+        if (i === -1) branchFilters.users.push(name);
+        else branchFilters.users.splice(i, 1);
         branchPage = 0;
         persist();
         renderBranches();
@@ -1627,21 +1541,9 @@
       }
       const sort = e.target.closest("[data-sort]");
       if (sort) {
-        branchFilters.sort = sort.getAttribute("data-sort") || "newest";
+        branchFilters.sort =
+          sort.getAttribute("data-sort") || "recentlyUpdated";
         openMenu = "";
-        branchPage = 0;
-        persist();
-        renderBranches();
-        return;
-      }
-      const preset = e.target.closest("[data-preset]");
-      if (preset) {
-        const kind = preset.getAttribute("data-preset");
-        if (kind === "openPr") {
-          branchFilters.openOnly = !branchFilters.openOnly;
-        } else if (kind === "autoMerge") {
-          branchFilters.autoMerge = !branchFilters.autoMerge;
-        }
         branchPage = 0;
         persist();
         renderBranches();

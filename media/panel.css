@@ -1397,33 +1397,6 @@ button.busy {
   color: var(--vscode-descriptionForeground);
 }
 
-/* Preset chips: one-click filter shortcuts. */
-.bpresets {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.bchip {
-  font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  color: var(--vscode-descriptionForeground);
-  background: transparent;
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
-}
-.bchip:hover {
-  color: var(--vscode-foreground);
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
-}
-.bchip.on {
-  color: var(--vscode-button-foreground, #fff);
-  background: var(--vscode-button-background, #0e639c);
-  border-color: var(--vscode-button-background, #0e639c);
-}
-.bchip.on:hover {
-  background: var(--vscode-button-hoverBackground, #1177bb);
-}
-
 /* Scrollable branch rows fill the remaining height. */
 .brows {
   flex: 1 1 auto;
@@ -1490,6 +1463,35 @@ button.busy {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+/* Git-native "last updated" line: when, and by whom. The signal the view sorts
+   and filters on. */
+.brow-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.bmeta-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bmeta-user svg {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+.bmeta-when {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 .bcreate,
 .bagent {

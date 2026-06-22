@@ -40,6 +40,7 @@ import {
 } from "./github";
 import { PrService, PrTarget } from "./prs";
 import { Coalescer } from "./scheduler";
+import { diag } from "./diagnostics";
 
 /** Quiet period (ms) before a burst of file/session events triggers a refresh.
  *  Refreshing spawns git per worktree, so coalescing keeps a flood of watcher
@@ -1271,8 +1272,22 @@ export class WorktreeWebviewProvider
           const token = await getToken();
           if (token) {
             if (refetchPrs) {
-              this.branchPrs = await fetchPrsByBranch(token, repo);
+              const fetched = await fetchPrsByBranch(token, repo);
+              this.branchPrs = fetched;
               this.branchPrsAt = Date.now();
+              // Surface why the branches view may show no PRs even though the
+              // worktree cards (REST path) do. A GraphQL-only failure (e.g. a
+              // fine-grained token denied GraphQL) lands here, not on the cards.
+              if (fetched.error) {
+                diag(`postBranches: PR fetch failed: ${fetched.error}`);
+              } else {
+                const matched = data.branches.filter((b) =>
+                  fetched.prs.has(b.name)
+                ).length;
+                diag(
+                  `postBranches: fetched ${fetched.prs.size} PR(s), matched ${matched}/${data.branches.length} branches`
+                );
+              }
             }
             if (this.branchPrs) {
               const { prs, viewerLogin } = this.branchPrs;
