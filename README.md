@@ -147,6 +147,27 @@ flowchart LR
     TW --> H
 ```
 
+### Refresh coalescing
+
+The panel refreshes in response to three chatty signals: the session-state
+`FileSystemWatcher` (one event per Claude hook firing), a workspace `**/*` file
+watcher (working-tree edits that move the dirty/ahead/behind counts), and window
+focus. Each refresh spawns `git status` + `git diff` for every worktree, so
+reacting to every raw event would peg the CPU - and noticeably worse on Windows,
+where the file watcher emits more events and every process spawn is far more
+expensive than on macOS.
+
+All three signals funnel through a `Coalescer` (`src/scheduler.ts`): a trailing
+debounce (`REFRESH_DEBOUNCE_MS`, 500ms) that collapses a burst into one refresh,
+with a `maxDelay` cap so a *continuous* stream (a build writing files, an agent
+streaming tool events) still flushes at a bounded rate instead of starving, and
+in-flight coalescing so an async refresh never overlaps itself - triggers that
+arrive mid-refresh fold into a single follow-up. The session-state watcher pokes
+a second `Coalescer` that nudges the (independently throttled) PR poller, so an
+active agent's hook stream doesn't hit the GitHub API per event. The clock is
+injectable, so the coalescing guarantees are unit-tested with virtual time in
+`test/scheduler.test.js`.
+
 ### Branches view
 
 The **Branches** toolbar button posts an `openBranches` message to the webview
