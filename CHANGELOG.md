@@ -2,7 +2,7 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## Unreleased
+## 2.7.5
 
 - **Debug tracing for external calls** - a new `Agent Worktrees: Trace` setting
   (off by default) logs every external call to the "Agent Worktrees" output
