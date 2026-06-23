@@ -88,8 +88,11 @@ listed until you make a selection:
 - **PR Status** — a single-select (shown only once a GitHub token is connected)
   that narrows the list by pull request state: **All** (no filter), **Open**, or
   **Draft**.
-- **Clear Filters** — resets the author and PR Status filters in one click;
-  enabled only while a filter is active. (Sort is left as you set it.)
+- **Reviewer** — a single-select (shown only once a GitHub token is connected)
+  that narrows the list to branches whose PR has a review requested from one or
+  more person: **All** (no filter) or **Review requested**.
+- **Clear Filters** — resets the author, PR Status and Reviewer filters in one
+  click; enabled only while a filter is active. (Sort is left as you set it.)
 
 Your filter and sort choices are remembered the next time you open the view. Close
 it like any editor tab; the Branches button reopens it.

@@ -79,10 +79,12 @@
   // reopening the overlay restores the last view. This view is git-first: `users`
   // is a list of committer names (the people who last updated each branch,
   // multi-select); `sort` is one of the SORT_OPTIONS keys (all git-based, no
-  // GitHub needed). `prStatus` is the one PR-aware filter: a single-select
-  // (only shown when GitHub PR data is available) narrowing the list by PR state
-  // — "all" (no filter), "open" (open, non-draft PR), or "draft" (draft PR). The
-  // PR fetch is open-only, so open and draft are the only states it can match.
+  // GitHub needed). `prStatus` and `reviewer` are the PR-aware filters: each a
+  // single-select (only shown when GitHub PR data is available). `prStatus`
+  // narrows by PR state — "all" (no filter), "open" (open, non-draft PR), or
+  // "draft" (draft PR); the PR fetch is open-only, so open and draft are the
+  // only states it can match. `reviewer` narrows to branches whose PR has a
+  // review requested from one or more person — "all" (no filter) or "requested".
   const savedState = vscode.getState() || {};
   const branchFilters = {
     // Prune on fetch. On by default; persisted so the checkbox stays set.
@@ -102,6 +104,11 @@
         : savedState.branchOpenPrsOnly === true
         ? "open"
         : "all",
+    // "all" by default: no review-request filter until the user narrows it.
+    reviewer:
+      typeof savedState.branchReviewer === "string"
+        ? savedState.branchReviewer
+        : "all",
   };
   function persist() {
     vscode.setState({
@@ -110,6 +117,7 @@
       branchUsers: branchFilters.users.slice(),
       branchSort: branchFilters.sort,
       branchPrStatus: branchFilters.prStatus,
+      branchReviewer: branchFilters.reviewer,
     });
   }
 
@@ -1084,6 +1092,14 @@
     { id: "draft", label: "Draft" },
   ];
 
+  // Single-select Reviewer filter. "all" applies no filter; "requested" keeps
+  // only branches whose PR has a review requested from one or more person (or
+  // team) still pending. Only shown when GitHub PR data is available.
+  const REVIEWER_OPTIONS = [
+    { id: "all", label: "All" },
+    { id: "requested", label: "Review requested" },
+  ];
+
   /** True when the GitHub integration is connected and PR display is enabled.
    *  Gates only whether a branch's open PR is shown, never the branch list. */
   function prAvailable(data) {
@@ -1134,6 +1150,14 @@
     return !!(b && b.pr && b.pr.state === status);
   }
 
+  /** Whether a branch's PR matches the active Reviewer filter. "all" matches
+   *  everything; "requested" matches a branch whose PR still has one or more
+   *  pending requested reviewers (or teams), i.e. reviewsPending > 0. */
+  function matchesReviewer(b, sel) {
+    if (sel === "all") return true;
+    return !!(b && b.pr && b.pr.reviewsPending > 0);
+  }
+
   /** Apply the active user + PR-status filters and sort to the branch list,
    *  client-side. Sorting and the user filter are git-based; the PR-status filter
    *  is the only one that consults GitHub data and is gated by prAvailable. */
@@ -1155,6 +1179,12 @@
     // stale selection can never hide every branch when the integration is off.
     if (branchFilters.prStatus !== "all" && prAvailable(data)) {
       rows = rows.filter((b) => matchesPrStatus(b, branchFilters.prStatus));
+    }
+
+    // Reviewer filter: same gating as PR status — only consulted when PR data is
+    // available, so a stale selection can never empty the list when GitHub is off.
+    if (branchFilters.reviewer !== "all" && prAvailable(data)) {
+      rows = rows.filter((b) => matchesReviewer(b, branchFilters.reviewer));
     }
 
     const byName = (a, b) =>
@@ -1286,17 +1316,41 @@
       ? menu("prStatus", "PR Status", prStatusOpt.label, prStatusItems)
       : "";
 
-    // Clear Filters: resets the author + PR Status filters (Sort is an ordering,
-    // not a filter, so it is left alone). Disabled when nothing is filtering —
-    // the PR Status part only counts when PR data is actually available, mirroring
-    // visibleBranches so the button is live exactly when the list is narrowed.
+    // Reviewer single-select: same gating as PR Status (only shown with GitHub
+    // PR data). Narrows to branches whose PR has a review requested — All /
+    // Review requested.
+    const reviewerOpt =
+      REVIEWER_OPTIONS.find((s) => s.id === branchFilters.reviewer) ||
+      REVIEWER_OPTIONS[0];
+    const reviewerItems = REVIEWER_OPTIONS.map(
+      (s) =>
+        '<button class="bfilter-item" role="menuitemradio" data-reviewer="' +
+        s.id +
+        '" aria-checked="' +
+        (branchFilters.reviewer === s.id) +
+        '"><span class="bcheck">' +
+        (branchFilters.reviewer === s.id ? icons.check : "") +
+        "</span>" +
+        esc(s.label) +
+        "</button>"
+    ).join("");
+    const reviewerMenu = prAvailable(data)
+      ? menu("reviewer", "Reviewer", reviewerOpt.label, reviewerItems)
+      : "";
+
+    // Clear Filters: resets the author + PR Status + Reviewer filters (Sort is an
+    // ordering, not a filter, so it is left alone). Disabled when nothing is
+    // filtering — the PR-aware parts only count when PR data is actually
+    // available, mirroring visibleBranches so the button is live exactly when the
+    // list is narrowed.
     const filterApplied =
       branchFilters.users.length > 0 ||
-      (branchFilters.prStatus !== "all" && prAvailable(data));
+      (branchFilters.prStatus !== "all" && prAvailable(data)) ||
+      (branchFilters.reviewer !== "all" && prAvailable(data));
     const clearButton =
       '<button class="bfilter-clear" data-action="clearFilters"' +
       (filterApplied ? "" : " disabled") +
-      ' title="Clear the author and PR Status filters">' +
+      ' title="Clear the author, PR Status and Reviewer filters">' +
       icons.cross +
       "<span>Clear Filters</span></button>";
 
@@ -1305,6 +1359,7 @@
       controls +
       menu("sort", "Sort", sortOpt.label, sortItems) +
       prStatusMenu +
+      reviewerMenu +
       clearButton +
       "</div>"
     );
@@ -1682,14 +1737,26 @@
         renderBranches();
         return;
       }
-      // Clear Filters: resets author + PR Status (not Sort). Webview-only; the
-      // disabled attribute is the rendered guard, re-checked here so a stale
-      // click can't fire when nothing is filtering.
+      // Reviewer single-select: webview-only filter, no message to the extension.
+      const reviewer = e.target.closest("[data-reviewer]");
+      if (reviewer) {
+        branchFilters.reviewer =
+          reviewer.getAttribute("data-reviewer") || "all";
+        openMenu = "";
+        branchPage = 0;
+        persist();
+        renderBranches();
+        return;
+      }
+      // Clear Filters: resets author + PR Status + Reviewer (not Sort).
+      // Webview-only; the disabled attribute is the rendered guard, re-checked
+      // here so a stale click can't fire when nothing is filtering.
       const clearFilters = e.target.closest("[data-action='clearFilters']");
       if (clearFilters) {
         if (clearFilters.disabled) return;
         branchFilters.users = [];
         branchFilters.prStatus = "all";
+        branchFilters.reviewer = "all";
         openMenu = "";
         branchPage = 0;
         persist();
