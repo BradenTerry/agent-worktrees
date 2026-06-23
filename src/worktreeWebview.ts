@@ -54,6 +54,9 @@ const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
  *  Git extension happens to keep open. */
 const SCM_SCOPED_PATH_KEY = "agentWorktrees.scmScopedPath";
 
+/** Config key for the debug-tracing toggle, surfaced in Settings → Debug. */
+const TRACE_SETTING = "agentWorktrees.trace";
+
 /** Messages sent from the webview to the extension. */
 interface ActionMessage {
   type: "action";
@@ -73,6 +76,8 @@ interface ActionMessage {
     | "clearGithubToken"
     | "togglePr"
     | "toggleScm"
+    | "toggleTrace"
+    | "showLog"
     | "scopeScm"
     | "openBranches"
     | "loadBranches"
@@ -285,6 +290,9 @@ export class WorktreeWebviewProvider
     const data = await gatherWorktrees(agents, installed, force);
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
+    data.traceEnabled = vscode.workspace
+      .getConfiguration()
+      .get<boolean>(TRACE_SETTING, false);
     if (!installed) {
       data.hooks = HOOKS.map((h) => ({
         label: h.label,
@@ -410,6 +418,10 @@ export class WorktreeWebviewProvider
         return this.togglePr(msg.value);
       case "toggleScm":
         return this.toggleScm(msg.value);
+      case "toggleTrace":
+        return this.toggleTrace(msg.value);
+      case "showLog":
+        return void vscode.commands.executeCommand("worktreeView.showLog");
       case "scopeScm":
         return this.scopeScm(msg.path);
       case "openBranches":
@@ -427,6 +439,20 @@ export class WorktreeWebviewProvider
   /** Turn the Source Control scope button on/off and re-render. */
   private async toggleScm(value?: boolean): Promise<void> {
     await this.context.globalState.update(SCM_SCOPE_KEY, !!value);
+    this.lastPosted = "";
+    await this.refresh();
+  }
+
+  /**
+   * Turn debug tracing on/off from the Settings → Debug tab. Writes the same
+   * `agentWorktrees.trace` config the toggleTrace command flips, so the host's
+   * onDidChangeConfiguration handler re-wires git/GitHub tracing. Re-renders so
+   * the toggle reflects the new state.
+   */
+  private async toggleTrace(value?: boolean): Promise<void> {
+    await vscode.workspace
+      .getConfiguration()
+      .update(TRACE_SETTING, !!value, vscode.ConfigurationTarget.Global);
     this.lastPosted = "";
     await this.refresh();
   }

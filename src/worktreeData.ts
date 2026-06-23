@@ -79,6 +79,8 @@ export interface WorktreeData {
   prEnabled?: boolean;
   /** Whether the Source Control scope button is enabled on worktrees. */
   scmEnabled?: boolean;
+  /** Whether debug tracing (the diagnostics output channel) is enabled. */
+  traceEnabled?: boolean;
 }
 
 export function normalize(p: string): string {
