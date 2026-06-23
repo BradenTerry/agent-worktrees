@@ -12,6 +12,7 @@ const {
   listBranches,
   deleteBranch,
   unpushedCommitCount,
+  switchWorktreeBranch,
   setGitTracer,
 } = require("../out/git.js");
 
@@ -67,6 +68,66 @@ test("listWorktrees lists every worktree from a linked worktree too", async () =
   const wts = await listWorktrees(feat);
   assert.strictEqual(wts.length, 2);
   assert.ok(wts.some((w) => w.branch === "main" && w.isPrimary));
+});
+
+test("switchWorktreeBranch checks out an existing branch in just that worktree", async () => {
+  const r = path.join(dir, "switch-existing");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hi\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  git(r, ["branch", "other"]);
+  const wt = path.join(r, "wt");
+  git(r, ["worktree", "add", "-b", "work", wt]);
+
+  await switchWorktreeBranch(wt, "other");
+
+  assert.strictEqual(gitOut(wt, ["rev-parse", "--abbrev-ref", "HEAD"]), "other");
+  // The primary worktree is untouched.
+  assert.strictEqual(gitOut(r, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+});
+
+test("switchWorktreeBranch with create makes a branch off HEAD and switches to it", async () => {
+  const r = path.join(dir, "switch-create");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hi\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  const wt = path.join(r, "wt");
+  git(r, ["worktree", "add", wt]);
+
+  await switchWorktreeBranch(wt, "fresh-branch", { create: true });
+
+  assert.strictEqual(
+    gitOut(wt, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    "fresh-branch"
+  );
+});
+
+test("switchWorktreeBranch throws git's message when the branch is held elsewhere", async () => {
+  const r = path.join(dir, "switch-conflict");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hi\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  // "taken" is checked out in its own worktree, so a second checkout must fail.
+  git(r, ["worktree", "add", "-b", "taken", path.join(r, "taken-wt")]);
+  const wt = path.join(r, "wt");
+  git(r, ["worktree", "add", wt]);
+
+  await assert.rejects(
+    () => switchWorktreeBranch(wt, "taken"),
+    /already (used by|checked out)/i
+  );
 });
 
 test("getStatus reports clean then dirty", async () => {

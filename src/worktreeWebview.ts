@@ -14,6 +14,9 @@ import {
 import {
   addWorktree,
   addBranchWorktree,
+  switchWorktreeBranch,
+  listBranches,
+  BranchInfo,
   removeWorktree,
   deleteBranch,
   detachWorktreeHead,
@@ -69,6 +72,7 @@ interface ActionMessage {
     | "stopAgent"
     | "newWorktree"
     | "removeWorktree"
+    | "changeBranch"
     | "openWindow"
     | "acceptHooks"
     | "openSettings"
@@ -406,6 +410,8 @@ export class WorktreeWebviewProvider
         return this.newWorktree();
       case "removeWorktree":
         return this.removeWorktreeAction(msg.path);
+      case "changeBranch":
+        return this.changeBranchAction(msg.path);
       case "openWindow":
         return this.openWindow(msg.path);
       case "acceptHooks":
@@ -967,6 +973,105 @@ export class WorktreeWebviewProvider
       return;
     }
     await this.refresh();
+  }
+
+  /**
+   * Switch the branch a worktree has checked out. Offers a quick pick of the
+   * branches that can be checked out here (every local/remote branch except the
+   * one already checked out and any held by another worktree, since git allows a
+   * branch in only one worktree) plus a "Create new branch" entry that prompts
+   * for a name and branches off the worktree's current HEAD. On success both
+   * views refresh so the card's branch name and the branches panel update.
+   */
+  private async changeBranchAction(fsPath?: string): Promise<void> {
+    if (!fsPath) return;
+    const primary = await this.primaryWorktree();
+    if (!primary) {
+      vscode.window.showErrorMessage("No git repository in this window.");
+      return;
+    }
+    const target = normalize(fsPath);
+    const worktree = (await listWorktrees(primary)).find(
+      (w) => normalize(w.path) === target
+    );
+    if (!worktree) {
+      vscode.window.showErrorMessage("That worktree no longer exists.");
+      return;
+    }
+    const current = worktree.detached ? undefined : worktree.branch;
+
+    let branches: BranchInfo[];
+    try {
+      branches = await listBranches(primary);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Could not list branches: ${(err as Error).message}`
+      );
+      return;
+    }
+
+    const CREATE = "$(add) Create new branch...";
+    // Branches you can switch onto: not the one already here, and not held by
+    // another worktree (git refuses a second checkout of the same branch).
+    const switchable = branches.filter(
+      (b) => b.name !== current && !b.hasWorktree
+    );
+    const items: vscode.QuickPickItem[] = [
+      { label: CREATE },
+      ...(switchable.length
+        ? [
+            {
+              label: "",
+              kind: vscode.QuickPickItemKind.Separator,
+            } as vscode.QuickPickItem,
+          ]
+        : []),
+      ...switchable.map((b) => ({
+        label: b.name,
+        description: b.remoteOnly ? "remote only" : undefined,
+      })),
+    ];
+
+    const picked = await vscode.window.showQuickPick(items, {
+      title: current ? `Switch branch (currently on ${current})` : "Switch branch",
+      placeHolder: "Choose a branch to check out, or create a new one",
+    });
+    if (!picked) return;
+
+    let name: string;
+    let create = false;
+    if (picked.label === CREATE) {
+      const existing = new Set(branches.map((b) => b.name));
+      const input = await vscode.window.showInputBox({
+        title: "New branch name",
+        prompt: `Branch off ${
+          current ?? "the current commit"
+        } and switch this worktree to it`,
+        validateInput: (v) => {
+          const t = v.trim();
+          if (!t) return "Enter a branch name.";
+          if (/\s/.test(t)) return "Branch names cannot contain spaces.";
+          if (existing.has(t)) return "A branch with that name already exists.";
+          return undefined;
+        },
+      });
+      if (!input) return;
+      name = input.trim();
+      create = true;
+    } else {
+      name = picked.label;
+    }
+
+    try {
+      await switchWorktreeBranch(fsPath, name, { create });
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Could not switch branch: ${(err as Error).message}`
+      );
+      return;
+    }
+    await this.refresh();
+    await this.postBranches();
   }
 
   /** Confirm and remove a worktree from disk (offering --force when dirty). */

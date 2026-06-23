@@ -763,6 +763,30 @@ export async function addBranchWorktree(
   }
 }
 
+/**
+ * Switch the branch checked out in an existing worktree. With `create`, makes a
+ * new branch off the worktree's current HEAD (`git switch -c`); otherwise checks
+ * out an existing local branch (`git switch`). Runs in the worktree's own
+ * directory so only that worktree moves. Uncommitted changes are carried over by
+ * git; a real conflict (or a branch already checked out in another worktree)
+ * surfaces as the thrown, trimmed git stderr.
+ */
+export async function switchWorktreeBranch(
+  worktreePath: string,
+  branch: string,
+  opts: { create?: boolean } = {}
+): Promise<void> {
+  const args = opts.create
+    ? ["switch", "-c", branch]
+    : ["switch", branch];
+  try {
+    await git(args, { cwd: worktreePath });
+  } catch (err) {
+    const msg = String((err as { stderr?: string }).stderr ?? err);
+    throw new Error(msg.trim());
+  }
+}
+
 /** Owner/repo of a GitHub remote, parsed from its URL. */
 export interface RemoteInfo {
   owner: string;
