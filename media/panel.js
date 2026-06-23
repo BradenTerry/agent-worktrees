@@ -84,7 +84,7 @@
   // narrows by PR state — "all" (no filter), "open" (open, non-draft PR), or
   // "draft" (draft PR); the PR fetch is open-only, so open and draft are the
   // only states it can match. `reviewer` narrows to branches whose PR has a
-  // review requested from one or more person — "all" (no filter) or "requested".
+  // review requested from the signed-in user — "all" (no filter) or "requested".
   const savedState = vscode.getState() || {};
   const branchFilters = {
     // Prune on fetch. On by default; persisted so the checkbox stays set.
@@ -1093,8 +1093,9 @@
   ];
 
   // Single-select Reviewer filter. "all" applies no filter; "requested" keeps
-  // only branches whose PR has a review requested from one or more person (or
-  // team) still pending. Only shown when GitHub PR data is available.
+  // only branches whose PR has a review requested from the signed-in user, i.e.
+  // the PRs they still have to review. Only shown when GitHub PR data is
+  // available.
   const REVIEWER_OPTIONS = [
     { id: "all", label: "All" },
     { id: "requested", label: "Review requested" },
@@ -1151,11 +1152,11 @@
   }
 
   /** Whether a branch's PR matches the active Reviewer filter. "all" matches
-   *  everything; "requested" matches a branch whose PR still has one or more
-   *  pending requested reviewers (or teams), i.e. reviewsPending > 0. */
+   *  everything; "requested" matches a branch whose PR has a review requested
+   *  from the signed-in user, i.e. the PRs they still have to review. */
   function matchesReviewer(b, sel) {
     if (sel === "all") return true;
-    return !!(b && b.pr && b.pr.reviewsPending > 0);
+    return !!(b && b.pr && b.pr.reviewRequestedFromViewer);
   }
 
   /** Apply the active user + PR-status filters and sort to the branch list,

@@ -314,9 +314,9 @@ bar, each shown **only** when GitHub PR data is available (and ignored if their
 persisted state is stale while the integration is off, so neither can blank the
 list): **PR Status** narrows by PR state — `All` (no filter), `Open`, or `Draft`
 (the fetch is open-only, so those are the only states it can match) — and
-**Reviewer** narrows to branches whose PR still has a review requested from one
-or more person or team (`reviewsPending > 0`) — `All` (no filter) or
-`Review requested`. A
+**Reviewer** narrows to branches whose PR has a review requested from the
+signed-in user (`reviewRequestedFromViewer`), i.e. the PRs they still have to
+review — `All` (no filter) or `Review requested`. A
 **Clear Filters** button (right-aligned, `data-action="clearFilters"`) resets the
 **Updated by**, **PR Status** and **Reviewer** filters in one click (Sort is an
 ordering, not a filter, so it is left alone); it is `disabled` unless a filter is
