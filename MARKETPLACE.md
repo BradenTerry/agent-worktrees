@@ -85,8 +85,11 @@ listed until you make a selection:
   to show only the branches they last touched. You are pinned to the top of the
   list.
 - **Sort** — Recently updated, Least recently updated, or Name (A–Z).
-- **Open PRs** — a one-click toggle (shown only once a GitHub token is connected)
-  that narrows the list to just the branches with an open pull request.
+- **PR Status** — a single-select (shown only once a GitHub token is connected)
+  that narrows the list by pull request state: **All** (no filter), **Open**, or
+  **Draft**.
+- **Clear Filters** — resets the author and PR Status filters in one click;
+  enabled only while a filter is active. (Sort is left as you set it.)
 
 Your filter and sort choices are remembered the next time you open the view. Close
 it like any editor tab; the Branches button reopens it.

@@ -40,6 +40,7 @@ import {
   fetchPrsByBranch,
   getToken,
   BranchPrInfo,
+  GithubConnection,
 } from "./github";
 import { PrService, PrTarget } from "./prs";
 import { Coalescer } from "./scheduler";
@@ -1330,17 +1331,31 @@ export class WorktreeWebviewProvider
     if (msg.type !== "action") return;
     switch (msg.action) {
       case "loadBranches": {
-        // Opening the tab paints the fast local list immediately, then (when a
-        // token is connected) auto-runs a Refresh GitHub — the Refresh GitHub
-        // button spins until the PR/CI data lands. No git fetch on open: that
-        // stays a manual action. The posts are awaited in order (not raced) so
-        // the slow GitHub post isn't dropped by the branchPostSeq staleness
-        // guard; the background sidebar refresh runs last.
-        const github = await connection();
-        const auto = this.prService.isEnabled() && github.hasToken;
-        await this.postBranches(false, { githubRefreshing: auto });
-        if (auto) await this.postBranches(true);
-        void this.refresh(false);
+        // Opening the tab paints the fast local (git-only) branch list right
+        // away, WITHOUT waiting on the GitHub token probe (connection()) — that
+        // probe is a network round trip and used to gate the first paint, so the
+        // list would not appear until GitHub responded. The connection probe and
+        // PR/CI fetch run in the background below, each re-posting as it lands.
+        // getToken() is local (no network), so synthesize a hasToken connection
+        // for the immediate paint to keep the Fetch Open PRs button visible (in
+        // its busy state) while the real probe is in flight.
+        const token = await getToken();
+        const auto = this.prService.isEnabled() && !!token;
+        await this.postBranches(false, {
+          githubRefreshing: auto,
+          github: { hasToken: !!token, connected: false },
+        });
+        // Background: the real probe, then (when a token is connected) the PR/CI
+        // fetch — the Refresh GitHub button spins until the data lands. No git
+        // fetch on open: that stays a manual action. Posts are awaited in order
+        // (not raced) so the slow GitHub post isn't dropped by the branchPostSeq
+        // staleness guard; the background sidebar refresh runs last. Not awaited
+        // here so the message handler returns and the list stays interactive.
+        void (async () => {
+          await this.postBranches(false, { githubRefreshing: auto });
+          if (auto) await this.postBranches(true);
+          void this.refresh(false);
+        })();
         return;
       }
       case "fetchBranches":
@@ -1378,14 +1393,16 @@ export class WorktreeWebviewProvider
    */
   private async postBranches(
     refetchPrs = false,
-    flags: { githubRefreshing?: boolean } = {}
+    flags: { githubRefreshing?: boolean; github?: GithubConnection } = {}
   ): Promise<void> {
     if (!this.branchesPanel) return;
     // Claim this post's place in line. Anything that started earlier and resolves
     // after a newer post must not overwrite it (see branchPostSeq).
     const seq = ++this.branchPostSeq;
     const data = await gatherBranches();
-    const github = await connection();
+    // A caller can supply a pre-resolved connection (the immediate on-open paint
+    // passes a synthesized one) to avoid the network probe gating the post.
+    const github = flags.github ?? (await connection());
     data.github = github;
     data.prEnabled = this.prService.isEnabled();
 

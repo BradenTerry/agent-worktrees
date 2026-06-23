@@ -82,10 +82,12 @@ state, and its running agents in one view.
   derived from git, so they work with or without a token. When a GitHub token is
   stored, PR/CI status is refreshed automatically when the tab opens (the
   **Fetch Open PRs** button spins until it lands) and can be re-polled on demand
-  from that button, decoupled from the git fetch, which stays manual; an **Open
-  PRs** toggle then appears that narrows the list to branches with an open PR. A
-  branch's **open** (or draft) PR rollup is shown when one exists, as a hint on
-  the branch row — a dedicated PR view may come later.
+  from that button, decoupled from the git fetch, which stays manual; a **PR
+  Status** single-select then appears that narrows the list by PR state — **All**
+  (no filter), **Open**, or **Draft**. A **Clear Filters** button resets the
+  author and PR Status filters (enabled only while one is active). A branch's
+  **open** (or draft) PR rollup is shown when one exists, as a hint on the branch
+  row — a dedicated PR view may come later.
 
 ## Agent status from hooks
 
@@ -305,10 +307,16 @@ network request, and both work with no token at all. The **Updated by** filter i
 a multi-select of the branches' tip-commit committers (`userOptions`, viewer
 pinned first when a committer name matches the GitHub login); the **Sort** is
 single-select over `Recently updated` / `Least recently updated` (tip-commit
-`committerdate`) and `Name (A–Z)`. A third **Open PRs** toggle is the one
-PR-aware filter: it narrows the list to branches with an open/draft PR and is
-shown **only** when GitHub PR data is available (and ignored if its persisted
+`committerdate`) and `Name (A–Z)`. A third **PR Status** single-select is the one
+PR-aware filter: it narrows the list by PR state — `All` (no filter), `Open`, or
+`Draft` (the fetch is open-only, so those are the only states it can match) — and
+is shown **only** when GitHub PR data is available (and ignored if its persisted
 state is stale while the integration is off, so it can never blank the list). A
+**Clear Filters** button (right-aligned, `data-action="clearFilters"`) resets the
+**Updated by** and **PR Status** filters in one click (Sort is an ordering, not a
+filter, so it is left alone); it is `disabled` unless a filter is actually
+narrowing the list (`users.length > 0 || (prStatus !== "all" && prAvailable)`),
+the same predicate `visibleBranches` filters on. A
 branch's open (or draft) PR rollup is rendered as a hint on its row when one
 exists; the fetch is open-only, so merged/closed PRs are not loaded. Deleting a
 squash-merged branch therefore falls back to git's "not fully merged" prompt
@@ -382,11 +390,15 @@ round-trip.
 (with `--prune` unless disabled), so stale `refs/remotes/origin/*` (branches
 deleted on the remote) are dropped and no longer surface as phantom "remote only"
 / "local + remote" rows. Opening the tab (`loadBranches`) posts the local list
-immediately (flagged `githubRefreshing` when a token is connected, so the Refresh
-GitHub button spins), then — when a token is connected — runs `postBranches(true)`
-for PR/CI status, then a background `refresh(false)` for the sidebar. The posts
-are awaited in sequence so the slow GitHub post isn't dropped by the
-`branchPostSeq` staleness guard. No git fetch runs on open; that stays the manual
+immediately and **without** awaiting the GitHub token probe (`connection()`, a
+network round trip that used to gate the first paint): it synthesizes a
+`hasToken` connection from the local `getToken()` so the Fetch Open PRs button
+still shows (flagged `githubRefreshing` when a token is present, so it spins),
+then does the rest in the background — the real `connection()` probe, then (when
+a token is connected) `postBranches(true)` for PR/CI status, then a background
+`refresh(false)` for the sidebar. The background posts are awaited in sequence so
+the slow GitHub post isn't dropped by the `branchPostSeq` staleness guard. No git
+fetch runs on open; that stays the manual
 **Fetch** button, which posts `fetchBranches` with the
 **Prune** checkbox state; the provider fetches with the chosen prune setting, then
 re-reads both views (without a second fetch) and re-posts the branches reusing the
@@ -430,7 +442,7 @@ flowchart TD
     WV --> LB["git.listBranches<br/>local + remote-only,<br/>worktree association"]
     WV --> FPB["github.fetchPrsByBranch<br/>GET /pulls?state=open,<br/>open PRs (no checks/reviews)"]
     WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
-    BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Sort (last commit / name) · Open PRs toggle (when PR data available)"]
+    BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Sort (last commit / name) · PR Status select: All/Open/Draft (when PR data available) · Clear Filters (when a filter is active)"]
     FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]
     CS --> PG["Client-side pagination<br/>25/page, Prev/Next"]
     PG --> ROWS[Branch rows]
