@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.3.1
+
+- **Reviewer filter** - the Branches filter bar gains a **Reviewer** single-select
+  beside **PR Status** that narrows the list to branches whose pull request has a
+  review requested from one or more person: **All** (no filter) or **Review
+  requested**. Shown only once a GitHub token is connected, and reset by Clear
+  Filters.
+
 ## 3.3.0
 
 - **Switch a worktree's branch from the panel** - an edit button beside the
