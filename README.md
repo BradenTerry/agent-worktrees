@@ -246,7 +246,11 @@ panel as a `{ type: "branches" }` payload:
   If listing fails the error is surfaced in the view, not swallowed into an empty
   list.
 - The optional `Agent Worktrees: Trace` setting turns on verbose tracing of every
-  external call. `git.ts` and `github.ts` each take an injected tracer
+  external call. It is surfaced in the panel under **Settings → Debug** (a
+  toggle plus an **Open log** button), and is also flipped by the "Toggle Debug
+  Tracing" command; both write the same `agentWorktrees.trace` config, which the
+  host's `onDidChangeConfiguration` handler re-applies. `git.ts` and `github.ts`
+  each take an injected tracer
   (`setGitTracer` / `setGithubTracer`) wired by the extension host to the
   diagnostics channel, so both modules stay free of a *runtime* vscode dependency
   (their `vscode` imports are type-only and elided, which is what lets the unit
