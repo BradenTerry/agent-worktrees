@@ -2,6 +2,26 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.3.0
+
+- **Switch a worktree's branch from the panel** - an edit button beside the
+  branch name checks out a different branch in that worktree, or creates a new
+  one, without leaving the panel.
+- **PR Status filter** - the Branches filter bar's one-click **Open PRs** toggle
+  is now a **PR Status** single-select with **All** (no filter), **Open**, and
+  **Draft**, so you can narrow the list to just open or just draft pull requests.
+- **Clear Filters button** - a one-click reset for the Branches view's author and
+  PR Status filters, enabled only while a filter is active. Sort is left as you
+  set it.
+- **The Branches view paints instantly** - the branch list now renders right away
+  from local git instead of waiting on the GitHub token probe; PR and CI status
+  fill in afterward in the background.
+- **A merged PR no longer lingers after switching branches** - when a worktree
+  switches off the branch a merged pull request was tied to, the PR badge clears
+  instead of staying on the card until the next poll.
+- **New Debug tab in Settings** - the panel's Settings view gains a Debug tab
+  surfacing diagnostic details for troubleshooting.
+
 ## 3.2.0
 
 - **The Branches view now fetches only open PRs** - it previously listed every
