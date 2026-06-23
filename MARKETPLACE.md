@@ -183,11 +183,12 @@ by editing that settings file.
 
 ## Troubleshooting
 
-If the panel or Branches view seems slow or empty, turn on **Agent Worktrees:
-Trace** (Settings, or the "Agent Worktrees: Toggle Debug Tracing" command). With
-it on, every external call - each git command and GitHub API request, with its
-duration and result - is logged to the "Agent Worktrees" output channel (View:
-Output, then pick "Agent Worktrees"; or run "Agent Worktrees: Show Log"). That
+If the panel or Branches view seems slow or empty, open the panel **Settings**
+and switch to the **Debug** tab, then turn on **Debug tracing** (the "Agent
+Worktrees: Toggle Debug Tracing" command does the same). With it on, every
+external call - each git command and GitHub API request, with its duration and
+result - is logged to the "Agent Worktrees" output channel. Use **Open log** on
+the same tab to reveal it (or View: Output, then pick "Agent Worktrees"). That
 shows you exactly what is being run and what is slow or failing. It is off by
 default, and request headers (which carry your GitHub token) are never logged.
 

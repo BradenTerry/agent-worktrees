@@ -58,6 +58,7 @@
     eye: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.7"/></svg>',
     external:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h4v4"/><path d="M13 3L7.5 8.5"/><path d="M11 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h3"/></svg>',
+    bug: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5.5" width="6" height="7" rx="3"/><path d="M6 4a2 2 0 0 1 4 0"/><path d="M5 8H2.5M11 8h2.5M5.2 5.7L3.5 4M10.8 5.7L12.5 4M5.2 11.5L3.5 13M10.8 11.5L12.5 13M8 6.5v5"/></svg>',
     behind:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v7M5 6.5l3 3 3-3"/><path d="M3.5 13.5h9"/></svg>',
     autoMerge:
@@ -792,6 +793,7 @@
       (data && data.github) || null,
       (data && data.prEnabled) !== false,
       (data && data.scmEnabled) === true,
+      (data && data.traceEnabled) === true,
     ]);
   }
 
@@ -805,6 +807,7 @@
       label: "Source Control",
       section: integrationsSection,
     },
+    { id: "debug", icon: "bug", label: "Debug", section: debugSection },
   ];
 
   function githubSection(data) {
@@ -923,6 +926,33 @@
       '<p class="gh-help dim">When a single repository is open, choosing a worktree ' +
       "swaps it into Source Control — the previous repo is removed from the view, " +
       "not from disk. When several are open, it reveals and focuses the selected one.</p>" +
+      "</section>"
+    );
+  }
+
+  function debugSection(data) {
+    const traceEnabled = !!(data && data.traceEnabled);
+    const toggle =
+      '<label class="gh-toggle">' +
+      '<span class="gh-toggle-label">Debug tracing</span>' +
+      '<input type="checkbox" id="debug-trace" class="switch-input"' +
+      (traceEnabled ? " checked" : "") +
+      ' role="switch" aria-label="Enable debug tracing" />' +
+      '<span class="switch" aria-hidden="true"></span>' +
+      "</label>";
+
+    return (
+      '<section class="gh-section">' +
+      '<h3 class="gh-h">' +
+      icons.bug +
+      " Debug</h3>" +
+      '<p class="gh-lead">Trace git and GitHub activity to the “Agent Worktrees” ' +
+      "output channel to diagnose why a view fails to load or a PR status is " +
+      "missing.</p>" +
+      toggle +
+      '<p class="gh-help dim">When on, every git command and GitHub request is ' +
+      "logged with timing. Leave it off for normal use.</p>" +
+      '<button class="gh-disconnect" data-action="showLog">Open log</button>' +
       "</section>"
     );
   }
@@ -1691,6 +1721,8 @@
       send("togglePr", { value: !!e.target.checked });
     } else if (e.target && e.target.id === "scm-enable") {
       send("toggleScm", { value: !!e.target.checked });
+    } else if (e.target && e.target.id === "debug-trace") {
+      send("toggleTrace", { value: !!e.target.checked });
     } else if (e.target && e.target.id === "branches-prune") {
       // Remember the Prune choice for the next fetch; the value is read live when
       // Fetch is clicked, so no re-render is needed here.
