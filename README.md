@@ -84,8 +84,10 @@ state, and its running agents in one view.
   **Fetch Open PRs** button spins until it lands) and can be re-polled on demand
   from that button, decoupled from the git fetch, which stays manual; a **PR
   Status** single-select then appears that narrows the list by PR state — **All**
-  (no filter), **Open**, or **Draft**. A **Clear Filters** button resets the
-  author and PR Status filters (enabled only while one is active). A branch's
+  (no filter), **Open**, or **Draft** — alongside a **Reviewer** single-select
+  that narrows to branches whose PR has a review requested from one or more
+  person (**All** or **Review requested**). A **Clear Filters** button resets the
+  author, PR Status and Reviewer filters (enabled only while one is active). A branch's
   **open** (or draft) PR rollup is shown when one exists, as a hint on the branch
   row — a dedicated PR view may come later.
 
@@ -307,16 +309,20 @@ network request, and both work with no token at all. The **Updated by** filter i
 a multi-select of the branches' tip-commit committers (`userOptions`, viewer
 pinned first when a committer name matches the GitHub login); the **Sort** is
 single-select over `Recently updated` / `Least recently updated` (tip-commit
-`committerdate`) and `Name (A–Z)`. A third **PR Status** single-select is the one
-PR-aware filter: it narrows the list by PR state — `All` (no filter), `Open`, or
-`Draft` (the fetch is open-only, so those are the only states it can match) — and
-is shown **only** when GitHub PR data is available (and ignored if its persisted
-state is stale while the integration is off, so it can never blank the list). A
+`committerdate`) and `Name (A–Z)`. Two **PR-aware** single-selects round out the
+bar, each shown **only** when GitHub PR data is available (and ignored if their
+persisted state is stale while the integration is off, so neither can blank the
+list): **PR Status** narrows by PR state — `All` (no filter), `Open`, or `Draft`
+(the fetch is open-only, so those are the only states it can match) — and
+**Reviewer** narrows to branches whose PR still has a review requested from one
+or more person or team (`reviewsPending > 0`) — `All` (no filter) or
+`Review requested`. A
 **Clear Filters** button (right-aligned, `data-action="clearFilters"`) resets the
-**Updated by** and **PR Status** filters in one click (Sort is an ordering, not a
-filter, so it is left alone); it is `disabled` unless a filter is actually
-narrowing the list (`users.length > 0 || (prStatus !== "all" && prAvailable)`),
-the same predicate `visibleBranches` filters on. A
+**Updated by**, **PR Status** and **Reviewer** filters in one click (Sort is an
+ordering, not a filter, so it is left alone); it is `disabled` unless a filter is
+actually narrowing the list (`users.length > 0 || (prStatus !== "all" &&
+prAvailable) || (reviewer !== "all" && prAvailable)`), the same predicate
+`visibleBranches` filters on. A
 branch's open (or draft) PR rollup is rendered as a hint on its row when one
 exists; the fetch is open-only, so merged/closed PRs are not loaded. Deleting a
 squash-merged branch therefore falls back to git's "not fully merged" prompt
