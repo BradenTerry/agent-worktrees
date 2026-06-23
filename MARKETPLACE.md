@@ -40,6 +40,9 @@ The **Branches view** opens as a full editor tab listing every branch with when 
 - **Open in a new window** — open any worktree in its own VS Code window in a
   click; if one is already open for that worktree, it is focused instead of
   duplicated.
+- **Switch a worktree's branch** — an edit button beside the branch name lets you
+  check out a different branch in that worktree, or create a new one, without
+  leaving the panel.
 - **Live agent status** — each agent shows as **active**, **waiting**, or
   **idle**, driven by Claude Code hook events.
 - **Skills used** — see which Claude skills each agent has invoked.

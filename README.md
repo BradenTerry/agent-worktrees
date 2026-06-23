@@ -45,6 +45,14 @@ state, and its running agents in one view.
   card header. If a window for that worktree is already open, VS Code focuses it
   instead of duplicating (the focus behavior uses the `code` CLI when it is on
   `PATH`; otherwise a fresh window is always opened).
+- **Change branch** — an edit button beside the branch name opens a quick pick of
+  the branches that can be checked out in that worktree (every local/remote branch
+  except the one already there and any held by another worktree, since git allows a
+  branch in only one worktree at a time), plus a **Create new branch** entry that
+  prompts for a name and branches off the worktree's current HEAD. The switch runs
+  `git switch` in that worktree only (`git switch -c` when creating), so the other
+  worktrees stay put; git's own error (a checkout conflict, say) is surfaced
+  verbatim.
 - **Delete Worktree** — `git worktree remove` (offers `--force` when dirty, and
   stops any agents running in the worktree first). Removing a worktree leaves its
   branch behind, so it then offers to delete that branch too (never the default

@@ -29,6 +29,8 @@
     stop: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
     trash:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 4h10M6 4V3h4v1M5 4l.5 9h5L11 4"/></svg>',
+    edit:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M10.5 2.5l3 3-7 7H3.5v-3z"/><path d="M9 4l3 3"/></svg>',
     refresh:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/></svg>',
     collapse:
@@ -537,6 +539,16 @@
       icons.agentMark +
       "</button>";
 
+    // Change the branch this worktree has checked out: pick an existing branch
+    // or create a new one. Detached worktrees have no branch to swap from, but
+    // the action still lets you switch onto one, so it is always offered.
+    const editBranchBtn =
+      '<button class="act ghost iconact" data-action="changeBranch" data-path="' +
+      esc(wt.path) +
+      '" title="Switch this worktree to another branch (or create one)">' +
+      icons.edit +
+      "</button>";
+
     // Refresh just this worktree's git status (and its PR/CI when the GitHub
     // integration is on). Does not run a git fetch - that's the toolbar Refresh.
     const refreshBtn =
@@ -575,6 +587,7 @@
       '<span class="branch">' +
       esc(wt.name) +
       "</span>" +
+      editBranchBtn +
       '<span class="badges">' +
       badges.join("") +
       "</span>" +
