@@ -13,11 +13,19 @@ let sessions;
 let repo;
 
 function run(payload) {
+  // Hermetic env: the emitter keys its state file by AGENT_WORKTREES_SID when
+  // set, which would otherwise override every payload's session_id and collapse
+  // all writes onto one file. The extension stamps that var into its terminals,
+  // so a test run launched from inside such a session would inherit it and fail.
+  // Strip it (and any inherited AGENT_WORKTREES_DIR) so the test drives the
+  // payload-keyed path it is asserting on.
+  const env = { ...process.env, AGENT_WORKTREES_DIR: sessions };
+  delete env.AGENT_WORKTREES_SID;
   return spawnSync("node", [EMITTER], {
     input: JSON.stringify(payload),
     cwd: repo,
     encoding: "utf8",
-    env: { ...process.env, AGENT_WORKTREES_DIR: sessions },
+    env,
   });
 }
 
