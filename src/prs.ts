@@ -90,6 +90,9 @@ export class PrService implements vscode.Disposable {
         .sort()
         .join("\n");
     const changed = sig(targets) !== sig(this.targets);
+    // The branch each worktree was tracking before this update, so we can spot a
+    // worktree that switched branches (same key, different branch).
+    const prevBranch = new Map(this.targets.map((t) => [t.key, t.branch]));
     this.targets = targets;
     // Forget cache entries for worktrees that are gone.
     const live = new Set(targets.map((t) => t.key));
@@ -99,6 +102,17 @@ export class PrService implements vscode.Disposable {
         this.cache.delete(k);
         this.headShas.delete(k);
         pruned = true;
+      }
+    }
+    // A worktree that switched branches must not keep showing the old branch's
+    // PR (e.g. a merged one tied to a branch the worktree left). Drop its cached
+    // entry now so the stale PR clears on the next render, ahead of the refetch
+    // for the new branch below.
+    for (const t of targets) {
+      const prev = prevBranch.get(t.key);
+      if (prev !== undefined && prev !== t.branch) {
+        if (this.cache.delete(t.key)) pruned = true;
+        this.headShas.delete(t.key);
       }
     }
     if (pruned) this._onChange.fire();

@@ -1336,12 +1336,13 @@ button.busy {
 .bfilter.open .bfilter-btn {
   border-color: var(--vscode-focusBorder);
 }
-/* Open-PRs toggle: mirrors .bfilter-btn, with an "on" state using VS Code's
-   active-input-option tokens (the same accent used for search/find toggles). */
-.bfilter-toggle {
+/* Clear Filters: mirrors .bfilter-btn, pushed to the far right of the bar. Fades
+   to a disabled look when no filter is active. */
+.bfilter-clear {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  margin-left: auto;
   font-size: 11px;
   padding: 3px 7px;
   border-radius: 4px;
@@ -1349,17 +1350,16 @@ button.busy {
   background: transparent;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
 }
-.bfilter-toggle:hover {
+.bfilter-clear:hover:not(:disabled) {
   background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
 }
-.bfilter-toggle svg {
+.bfilter-clear svg {
   width: 12px;
   height: 12px;
 }
-.bfilter-toggle.on {
-  color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
-  background: var(--vscode-inputOption-activeBackground, rgba(14, 99, 156, 0.4));
-  border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
+.bfilter-clear:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .bfilter-label {
   color: var(--vscode-descriptionForeground);

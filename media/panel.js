@@ -79,9 +79,10 @@
   // reopening the overlay restores the last view. This view is git-first: `users`
   // is a list of committer names (the people who last updated each branch,
   // multi-select); `sort` is one of the SORT_OPTIONS keys (all git-based, no
-  // GitHub needed). `openPrsOnly` is the one PR-aware filter: an opt-in toggle
-  // (only shown when GitHub PR data is available) narrowing the list to branches
-  // with an open/draft PR.
+  // GitHub needed). `prStatus` is the one PR-aware filter: a single-select
+  // (only shown when GitHub PR data is available) narrowing the list by PR state
+  // — "all" (no filter), "open" (open, non-draft PR), or "draft" (draft PR). The
+  // PR fetch is open-only, so open and draft are the only states it can match.
   const savedState = vscode.getState() || {};
   const branchFilters = {
     // Prune on fetch. On by default; persisted so the checkbox stays set.
@@ -93,8 +94,14 @@
       typeof savedState.branchSort === "string"
         ? savedState.branchSort
         : "recentlyUpdated",
-    // Off by default so the branch list is complete until the user opts in.
-    openPrsOnly: savedState.branchOpenPrsOnly === true,
+    // "all" by default so the branch list is complete until the user narrows it.
+    // Migrate the old boolean openPrsOnly toggle: true -> "open".
+    prStatus:
+      typeof savedState.branchPrStatus === "string"
+        ? savedState.branchPrStatus
+        : savedState.branchOpenPrsOnly === true
+        ? "open"
+        : "all",
   };
   function persist() {
     vscode.setState({
@@ -102,7 +109,7 @@
       branchPrune: branchFilters.prune,
       branchUsers: branchFilters.users.slice(),
       branchSort: branchFilters.sort,
-      branchOpenPrsOnly: branchFilters.openPrsOnly,
+      branchPrStatus: branchFilters.prStatus,
     });
   }
 
@@ -1068,6 +1075,15 @@
     { id: "name", label: "Name (A–Z)" },
   ];
 
+  // Single-select PR Status filter. The per-branch fetch is open-only, so the
+  // only PR states a branch can carry are "open" and "draft"; "all" applies no
+  // PR filter. Only shown when GitHub PR data is available (prAvailable).
+  const PR_STATUS_OPTIONS = [
+    { id: "all", label: "All" },
+    { id: "open", label: "Open" },
+    { id: "draft", label: "Draft" },
+  ];
+
   /** True when the GitHub integration is connected and PR display is enabled.
    *  Gates only whether a branch's open PR is shown, never the branch list. */
   function prAvailable(data) {
@@ -1110,14 +1126,16 @@
     });
   }
 
-  /** A branch has an open PR when PR data is available and it carries one. The
-   *  fetch is open-only, so any attached PR is open/draft. */
-  function hasOpenPr(data, b) {
-    return !!(prAvailable(data) && b && b.pr);
+  /** Whether a branch's PR matches the active PR Status filter. "all" matches
+   *  everything; "open"/"draft" match a branch carrying a PR in that exact state.
+   *  The fetch is open-only, so any attached PR is open or draft. */
+  function matchesPrStatus(b, status) {
+    if (status === "all") return true;
+    return !!(b && b.pr && b.pr.state === status);
   }
 
-  /** Apply the active user + open-PR filters and sort to the branch list,
-   *  client-side. Sorting and the user filter are git-based; the open-PR filter
+  /** Apply the active user + PR-status filters and sort to the branch list,
+   *  client-side. Sorting and the user filter are git-based; the PR-status filter
    *  is the only one that consults GitHub data and is gated by prAvailable. */
   function visibleBranches(data) {
     const all = (data && data.branches) || [];
@@ -1133,10 +1151,10 @@
       rows = rows.filter((b) => b.lastUser && userSet.has(b.lastUser));
     }
 
-    // Open-PR filter: only honored when PR data is actually available, so a
-    // stale toggle can never hide every branch when the integration is off.
-    if (branchFilters.openPrsOnly && prAvailable(data)) {
-      rows = rows.filter((b) => hasOpenPr(data, b));
+    // PR-status filter: only honored when PR data is actually available, so a
+    // stale selection can never hide every branch when the integration is off.
+    if (branchFilters.prStatus !== "all" && prAvailable(data)) {
+      rows = rows.filter((b) => matchesPrStatus(b, branchFilters.prStatus));
     }
 
     const byName = (a, b) =>
@@ -1246,25 +1264,48 @@
         "</button>"
     ).join("");
 
-    // Open-PRs toggle: a one-click filter, only shown when GitHub PR data is
-    // available (no point offering it when no PRs can be matched). Pressed state
-    // is reflected with aria-pressed + the "on" class for styling.
-    const on = branchFilters.openPrsOnly;
-    const openPrsToggle = prAvailable(data)
-      ? '<button class="bfilter-toggle' +
-        (on ? " on" : "") +
-        '" data-action="toggleOpenPrs" aria-pressed="' +
-        on +
-        '" title="Show only branches with an open pull request">' +
-        icons.pr +
-        "<span>Open PRs</span></button>"
+    // PR Status single-select: only shown when GitHub PR data is available (no
+    // point offering it when no PRs can be matched). Narrows the list by PR
+    // state — All / Open / Draft.
+    const prStatusOpt =
+      PR_STATUS_OPTIONS.find((s) => s.id === branchFilters.prStatus) ||
+      PR_STATUS_OPTIONS[0];
+    const prStatusItems = PR_STATUS_OPTIONS.map(
+      (s) =>
+        '<button class="bfilter-item" role="menuitemradio" data-prstatus="' +
+        s.id +
+        '" aria-checked="' +
+        (branchFilters.prStatus === s.id) +
+        '"><span class="bcheck">' +
+        (branchFilters.prStatus === s.id ? icons.check : "") +
+        "</span>" +
+        esc(s.label) +
+        "</button>"
+    ).join("");
+    const prStatusMenu = prAvailable(data)
+      ? menu("prStatus", "PR Status", prStatusOpt.label, prStatusItems)
       : "";
+
+    // Clear Filters: resets the author + PR Status filters (Sort is an ordering,
+    // not a filter, so it is left alone). Disabled when nothing is filtering —
+    // the PR Status part only counts when PR data is actually available, mirroring
+    // visibleBranches so the button is live exactly when the list is narrowed.
+    const filterApplied =
+      branchFilters.users.length > 0 ||
+      (branchFilters.prStatus !== "all" && prAvailable(data));
+    const clearButton =
+      '<button class="bfilter-clear" data-action="clearFilters"' +
+      (filterApplied ? "" : " disabled") +
+      ' title="Clear the author and PR Status filters">' +
+      icons.cross +
+      "<span>Clear Filters</span></button>";
 
     return (
       '<div class="bfilter-bar">' +
       controls +
       menu("sort", "Sort", sortOpt.label, sortItems) +
-      openPrsToggle +
+      prStatusMenu +
+      clearButton +
       "</div>"
     );
   }
@@ -1630,10 +1671,26 @@
         renderBranches();
         return;
       }
-      // Open-PRs toggle: webview-only filter, no message to the extension.
-      const openPrs = e.target.closest("[data-action='toggleOpenPrs']");
-      if (openPrs) {
-        branchFilters.openPrsOnly = !branchFilters.openPrsOnly;
+      // PR Status single-select: webview-only filter, no message to the extension.
+      const prStatus = e.target.closest("[data-prstatus]");
+      if (prStatus) {
+        branchFilters.prStatus =
+          prStatus.getAttribute("data-prstatus") || "all";
+        openMenu = "";
+        branchPage = 0;
+        persist();
+        renderBranches();
+        return;
+      }
+      // Clear Filters: resets author + PR Status (not Sort). Webview-only; the
+      // disabled attribute is the rendered guard, re-checked here so a stale
+      // click can't fire when nothing is filtering.
+      const clearFilters = e.target.closest("[data-action='clearFilters']");
+      if (clearFilters) {
+        if (clearFilters.disabled) return;
+        branchFilters.users = [];
+        branchFilters.prStatus = "all";
+        openMenu = "";
         branchPage = 0;
         persist();
         renderBranches();
