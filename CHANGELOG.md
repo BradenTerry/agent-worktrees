@@ -2,6 +2,13 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.3.2
+
+- **Reviewer filter scoped to you** - the Branches filter bar's **Review
+  requested** option now keeps only branches whose pull request has a review
+  requested from the signed-in user, i.e. the pull requests you still have to
+  review, instead of any pull request with an outstanding reviewer.
+
 ## 3.3.1
 
 - **Reviewer filter** - the Branches filter bar gains a **Reviewer** single-select
