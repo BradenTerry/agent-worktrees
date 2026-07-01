@@ -115,7 +115,14 @@ read the extension's context).
 
 Each hook event runs the emitter, which derives the session's worktree from git
 and writes one small state file per session into the extension's **global
-storage**. When the extension launched the agent it passes `claude
+storage** (atomically, via tmp + rename, so the watcher never reads a
+half-written file). The worktree/branch resolution is cached in that state file
+keyed by the session's `cwd`: `PreToolUse` fires on every tool call and Claude
+Code blocks the tool until the hook exits, so follow-up events reuse the cached
+value instead of spawning `git rev-parse` twice per event — on Windows, where
+process spawns are expensive, that cache is the difference between hooks being
+free and every tool call paying a visible startup tax. `SessionStart`
+re-resolves from git. When the extension launched the agent it passes `claude
 --session-id <uuid>` and stamps that same uuid into the terminal env as
 `AGENT_WORKTREES_SID`; the emitter (a child of the Claude process) inherits it
 and keys the state file by it rather than by Claude's live `session_id`. That id
@@ -191,7 +198,11 @@ source-control scope changes. Each refresh spawns `git status` for every worktre
 (plus a `git diff --numstat HEAD` only for worktrees with tracked changes — a
 clean worktree skips it, halving its per-worktree spawns), so reacting to every
 raw event would peg the CPU - and noticeably worse on Windows, where every process
-spawn is far more expensive than on macOS.
+spawn is far more expensive than on macOS. The per-worktree statuses run at most
+4 at a time (`mapLimit`) so a many-worktree repo never fires an unbounded spawn
+burst, and a refresh only re-reads the Branches tab while that tab is actually
+visible — hidden behind another editor it skips the (git-heavy) branch listing
+and catches up when revealed.
 
 Deliberately absent is a workspace-wide `**/*` file watcher. Refreshing on every
 saved file is overkill, and because our own `git status` opportunistically
@@ -338,6 +349,14 @@ provider runs
 local tracking branch for a remote-only branch), starts a Claude agent in it via
 the existing `agent(dir)` flow in the current window, then refreshes the sidebar
 and re-posts the branch data so the row flips to the marker.
+
+Worktrees the extension creates (this action and the New Worktree command) are
+placed inside the primary worktree at `.claude/worktrees/<branch>` — the same
+location `claude -w` uses — rather than in the repo's parent directory
+(`worktreeUtils.worktreeDirFor`). The extension never edits the repo's ignore
+rules: exactly as with `claude -w`, the nested directory shows as an untracked
+entry in `git status` unless the user excludes it themselves (one
+`/.claude/worktrees/` line in `.git/info/exclude` or `.gitignore`).
 
 **Deleting branches.** Delete is local-only: every branch with a local ref shows
 a **Delete Local** action that removes the local branch and never touches the

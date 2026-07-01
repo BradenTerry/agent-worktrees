@@ -16,8 +16,8 @@
  * Per-session file: <dir>/<id>.json where <id> is the extension's launch id
  *   ($AGENT_WORKTREES_SID, stable across /resume) when present, else the live
  *   session_id.
- *   = { sessionId, worktree, branch, state, task, skills, subagents, model,
- *       startedAt, ts }
+ *   = { sessionId, worktree, branch, cwd, state, task, skills, subagents,
+ *       model, startedAt, ts }
  * SessionEnd removes the file so the agent disappears when its session exits.
  */
 import { execFileSync } from "node:child_process";
@@ -25,6 +25,7 @@ import {
   writeFileSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   openSync,
   fstatSync,
@@ -162,8 +163,13 @@ function main() {
   const event = payload.hook_event_name || argEvent || "Notification";
   const cwd = payload.cwd || process.cwd();
 
-  const top = git(cwd, ["rev-parse", "--show-toplevel"]) || cwd;
-  const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]) || "HEAD";
+  /** Resolve the worktree root + branch from git. Two process spawns, so hot
+   *  paths avoid this via the prior-state cache below. */
+  const resolveGit = () => ({
+    top: git(cwd, ["rev-parse", "--show-toplevel"]) || cwd,
+    branch: git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]) || "HEAD",
+  });
+  let resolved = null;
 
   // The file is keyed by a STABLE launch id so the panel row stays tied to its
   // terminal across `/resume`. The VS Code extension launches Claude with
@@ -175,11 +181,13 @@ function main() {
   // working after a resume. For sessions NOT launched by the extension (no env
   // marker) we key by the live session id, falling back to a sanitized worktree
   // name so a bare session that named no id still tracks.
-  const id =
-    safeId(process.env.AGENT_WORKTREES_SID) ||
-    safeId(payload.session_id) ||
-    safeId(basename(top).replace(/[^A-Za-z0-9._-]/g, "_")) ||
-    "session";
+  let id = safeId(process.env.AGENT_WORKTREES_SID) || safeId(payload.session_id);
+  if (!id) {
+    resolved = resolveGit();
+    id =
+      safeId(basename(resolved.top).replace(/[^A-Za-z0-9._-]/g, "_")) ||
+      "session";
+  }
 
   mkdirSync(SESSIONS_DIR, { recursive: true });
   const target = join(SESSIONS_DIR, id + ".json");
@@ -200,6 +208,32 @@ function main() {
     /* first event for this session, or unreadable */
   }
   const now = Date.now();
+
+  // Worktree + branch. A session's worktree never changes for a given cwd, so
+  // reuse what a previous event resolved (keyed by cwd) instead of spawning git
+  // twice per event. That matters because PreToolUse fires on EVERY tool call
+  // and Claude Code blocks the tool until this hook exits: on Windows, node
+  // startup plus two git.exe spawns per event is a visible per-tool-call lag.
+  // SessionStart re-resolves so a fresh/resumed session starts accurate.
+  // Caveat: `branch` is frozen with the cache, so a mid-session `git switch`
+  // in the same cwd leaves it stale until the next SessionStart. Harmless
+  // today — the panel groups agents by `worktree` only and never reads
+  // `branch` — but bear it in mind before surfacing `branch` anywhere.
+  if (
+    !resolved &&
+    event !== "SessionStart" &&
+    prior.cwd === cwd &&
+    typeof prior.worktree === "string" &&
+    prior.worktree
+  ) {
+    resolved = {
+      top: prior.worktree,
+      branch:
+        typeof prior.branch === "string" && prior.branch ? prior.branch : "HEAD",
+    };
+  }
+  if (!resolved) resolved = resolveGit();
+  const { top, branch } = resolved;
 
   // Accumulate the skills this session has invoked. PreToolUse fires the moment
   // a Skill tool starts, so this captures skills the agent has "started to use".
@@ -246,6 +280,9 @@ function main() {
     sessionId: id,
     worktree: top,
     branch,
+    // The cwd this worktree/branch was resolved for; the cache key that lets
+    // the next event skip the git spawns.
+    cwd,
     state,
     model: payload.model || "claude",
     startedAt,
@@ -255,7 +292,26 @@ function main() {
     ...(subagents ? { subagents } : {}),
   };
 
-  writeFileSync(target, JSON.stringify(ev) + "\n");
+  // Write via tmp + rename so the extension's watcher never reads a
+  // half-written file (a partial read makes that agent's row vanish for a
+  // refresh). The tmp name doesn't match the watcher's *.json pattern, and
+  // rename replaces an existing file on Windows too.
+  const tmp = target + "." + process.pid + ".tmp";
+  try {
+    writeFileSync(tmp, JSON.stringify(ev) + "\n");
+    renameSync(tmp, target);
+  } catch {
+    // Rename can fail while a reader holds the file open on Windows; fall back
+    // to the in-place write rather than dropping the event. The write comes
+    // first: cleaning up the tmp file can itself throw (`force` only suppresses
+    // ENOENT, not a scanner holding it open), and the event must land anyway.
+    writeFileSync(target, JSON.stringify(ev) + "\n");
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      /* tmp locked by a scanner: a leaked tmp file beats a dropped event */
+    }
+  }
 }
 
 main();

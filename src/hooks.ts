@@ -128,7 +128,9 @@ async function readSettings(): Promise<Settings> {
 
 async function writeSettings(settings: Settings): Promise<void> {
   await fs.promises.mkdir(path.dirname(SETTINGS_PATH), { recursive: true });
-  const tmp = SETTINGS_PATH + ".agent-worktrees.tmp";
+  // pid-suffixed so two VS Code windows activating at once (both syncing hooks)
+  // never interleave writes/renames on the same tmp file.
+  const tmp = `${SETTINGS_PATH}.agent-worktrees.${process.pid}.tmp`;
   await fs.promises.writeFile(tmp, JSON.stringify(settings, null, 2) + "\n");
   await fs.promises.rename(tmp, SETTINGS_PATH);
 }

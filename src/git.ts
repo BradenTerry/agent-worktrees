@@ -710,23 +710,27 @@ export async function unpushedCommitCount(
   }
 }
 
-/** Run `fn` over `items` with at most `limit` in flight at once. */
-async function mapLimit<T>(
+/** Run `fn` over `items` with at most `limit` in flight at once, preserving
+ *  result order. Exported so other spawn-heavy fan-outs (e.g. per-worktree
+ *  `git status`) can bound their process bursts the same way. */
+export async function mapLimit<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<void>
-): Promise<void> {
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
   let i = 0;
   const workers = Array.from(
     { length: Math.min(limit, items.length) },
     async () => {
       while (i < items.length) {
         const idx = i++;
-        await fn(items[idx]);
+        results[idx] = await fn(items[idx]);
       }
     }
   );
   await Promise.all(workers);
+  return results;
 }
 
 /** Parse `%(upstream:track,nobracket)` (e.g. "ahead 2, behind 1") into counts. */

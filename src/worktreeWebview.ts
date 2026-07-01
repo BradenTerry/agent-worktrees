@@ -11,6 +11,7 @@ import {
   WorktreeData,
   BranchData,
 } from "./worktreeData";
+import { worktreeDirFor } from "./worktreeUtils";
 import {
   addWorktree,
   addBranchWorktree,
@@ -309,7 +310,11 @@ export class WorktreeWebviewProvider
     // refresh the sidebar, so a worktree add/remove updates its rows. Never hit
     // the GitHub API here — branch PR data is fetched only by the explicit
     // Refresh GitHub button — so reuse whatever PR data is already cached.
-    if (this.branchesPanel) void this.postBranches(false);
+    // Only while the tab is actually visible: a hidden tab (retained behind
+    // another editor) would otherwise drive a full listBranches — dozens of git
+    // spawns on a many-branch repo — on every agent-activity refresh; it
+    // catches up via onDidChangeViewState when re-shown.
+    if (this.branchesPanel?.visible) void this.postBranches(false);
     const json = JSON.stringify(data);
     if (json === this.lastPosted) return;
     this.lastPosted = json;
@@ -944,6 +949,17 @@ export class WorktreeWebviewProvider
 
   // --- Worktree git operations -----------------------------------------------
 
+  /**
+   * Pre-flight for creating a nested worktree at `dir`: make sure the parent
+   * directory exists for `git worktree add`. We deliberately do NOT touch the
+   * repo's ignore rules: whether `.claude/worktrees/` is excluded from `git
+   * status` is the user's call (one line in `.git/info/exclude` or .gitignore),
+   * the same as when `claude -w` creates worktrees there.
+   */
+  private async prepareWorktreeDir(dir: string): Promise<void> {
+    await fs.promises.mkdir(path.dirname(dir), { recursive: true });
+  }
+
   /** Prompt for a branch name and create a worktree for it. */
   async newWorktree(): Promise<void> {
     const primary = await this.primaryWorktree();
@@ -960,12 +976,10 @@ export class WorktreeWebviewProvider
     });
     if (!branch) return;
 
-    const dir = path.join(
-      path.dirname(primary),
-      branch.trim().replace(/[^\w.-]+/g, "-")
-    );
+    const dir = worktreeDirFor(primary, branch);
 
     try {
+      await this.prepareWorktreeDir(dir);
       await addWorktree(primary, dir, branch.trim());
     } catch (err) {
       vscode.window.showErrorMessage(
@@ -1283,6 +1297,12 @@ export class WorktreeWebviewProvider
     panel.webview.onDidReceiveMessage((msg: ActionMessage) =>
       this.onBranchesMessage(msg)
     );
+    // Refreshes skip the panel while it is hidden (see refresh()), so re-post
+    // when it comes back into view to catch up on anything missed. PR data is
+    // reused from cache — becoming visible never hits the GitHub API.
+    panel.onDidChangeViewState(({ webviewPanel }) => {
+      if (webviewPanel.visible) void this.postBranches(false);
+    });
     panel.onDidDispose(() => {
       this.branchesPanel = undefined;
     });
@@ -1480,11 +1500,9 @@ export class WorktreeWebviewProvider
       vscode.window.showErrorMessage("No git repository in this window.");
       return;
     }
-    const dir = path.join(
-      path.dirname(primary),
-      name.replace(/[^\w.-]+/g, "-")
-    );
+    const dir = worktreeDirFor(primary, name);
     try {
+      await this.prepareWorktreeDir(dir);
       await addBranchWorktree(primary, dir, name, !!remoteOnly);
     } catch (err) {
       vscode.window.showErrorMessage(

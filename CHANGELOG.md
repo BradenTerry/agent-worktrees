@@ -2,6 +2,30 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## Unreleased
+
+- **Worktrees are created under `.claude/worktrees/`** - the New Worktree
+  command and the Branches view's Create worktree action now place worktrees
+  inside the repo at `.claude/worktrees/<branch>` (where `claude -w` puts
+  them) instead of the repo's parent directory. The extension does not touch
+  your ignore rules; add `/.claude/worktrees/` to `.git/info/exclude` or
+  `.gitignore` yourself if you don't want the folder listed as untracked.
+- **Hooks no longer slow down every tool call on Windows** - the status
+  emitter caches the session's worktree/branch in its state file and skips the
+  two `git rev-parse` spawns on follow-up events. `PreToolUse` blocks each
+  tool call until the hook exits, so on Windows (where process spawns are
+  expensive) this removes a per-tool-call lag.
+- **Agent rows no longer flicker during bursts of activity** - the emitter
+  writes its state file atomically (tmp + rename), so the panel's watcher can
+  never read a half-written file and briefly drop the agent's row.
+- **A hidden Branches tab no longer drives background git work** - refreshes
+  skip the branch listing while the tab is hidden behind another editor and
+  catch up when it becomes visible again, sparing a burst of git processes per
+  agent event on many-branch repos.
+- **Refreshes bound their git process burst** - per-worktree `git status`
+  calls now run at most 4 at a time, keeping refreshes smooth on repos with
+  many worktrees (most noticeable on Windows).
+
 ## 3.3.2
 
 - **Reviewer filter scoped to you** - the Branches filter bar's **Review
