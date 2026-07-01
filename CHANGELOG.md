@@ -2,7 +2,7 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## Unreleased
+## 3.3.3
 
 - **Worktrees are created under `.claude/worktrees/`** - the New Worktree
   command and the Branches view's Create worktree action now place worktrees
