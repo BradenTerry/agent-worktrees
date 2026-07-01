@@ -215,6 +215,10 @@ function main() {
   // and Claude Code blocks the tool until this hook exits: on Windows, node
   // startup plus two git.exe spawns per event is a visible per-tool-call lag.
   // SessionStart re-resolves so a fresh/resumed session starts accurate.
+  // Caveat: `branch` is frozen with the cache, so a mid-session `git switch`
+  // in the same cwd leaves it stale until the next SessionStart. Harmless
+  // today — the panel groups agents by `worktree` only and never reads
+  // `branch` — but bear it in mind before surfacing `branch` anywhere.
   if (
     !resolved &&
     event !== "SessionStart" &&
@@ -298,9 +302,15 @@ function main() {
     renameSync(tmp, target);
   } catch {
     // Rename can fail while a reader holds the file open on Windows; fall back
-    // to the in-place write rather than dropping the event.
-    rmSync(tmp, { force: true });
+    // to the in-place write rather than dropping the event. The write comes
+    // first: cleaning up the tmp file can itself throw (`force` only suppresses
+    // ENOENT, not a scanner holding it open), and the event must land anyway.
     writeFileSync(target, JSON.stringify(ev) + "\n");
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      /* tmp locked by a scanner: a leaked tmp file beats a dropped event */
+    }
   }
 }
 
