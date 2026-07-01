@@ -7,9 +7,9 @@ All notable changes to the Agent Worktrees extension are documented here.
 - **Worktrees are created under `.claude/worktrees/`** - the New Worktree
   command and the Branches view's Create worktree action now place worktrees
   inside the repo at `.claude/worktrees/<branch>` (where `claude -w` puts
-  them) instead of the repo's parent directory. The directory is added to
-  `.git/info/exclude` automatically so nested worktrees never show up as
-  uncommitted changes on the primary worktree's card.
+  them) instead of the repo's parent directory. The extension does not touch
+  your ignore rules; add `/.claude/worktrees/` to `.git/info/exclude` or
+  `.gitignore` yourself if you don't want the folder listed as untracked.
 - **Hooks no longer slow down every tool call on Windows** - the status
   emitter caches the session's worktree/branch in its state file and skips the
   two `git rev-parse` spawns on follow-up events. `PreToolUse` blocks each

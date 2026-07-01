@@ -13,7 +13,6 @@ const {
   deleteBranch,
   unpushedCommitCount,
   switchWorktreeBranch,
-  ensureWorktreesExcluded,
   setGitTracer,
 } = require("../out/git.js");
 
@@ -487,40 +486,4 @@ test("deleteBranch refuses an unmerged local branch unless forced", async () => 
 
   await deleteBranch(work, "topic", { local: true, force: true });
   assert.ok(!localBranches(work).includes("topic"), "force deletes it");
-});
-
-test("ensureWorktreesExcluded keeps a nested worktree out of git status", async () => {
-  const r = path.join(dir, "exclude");
-  fs.mkdirSync(r);
-  git(r, ["init", "-b", "main"]);
-  git(r, ["config", "user.email", "t@example.com"]);
-  git(r, ["config", "user.name", "Tester"]);
-  fs.writeFileSync(path.join(r, "a.txt"), "hello\n");
-  git(r, ["add", "."]);
-  git(r, ["commit", "-m", "init"]);
-
-  await ensureWorktreesExcluded(r);
-  const exclude = path.join(r, ".git", "info", "exclude");
-  const has = () =>
-    fs
-      .readFileSync(exclude, "utf8")
-      .split(/\r?\n/)
-      .filter((l) => l.trim() === "/.claude/worktrees/").length;
-  assert.strictEqual(has(), 1, "the pattern is appended once");
-
-  // Idempotent: a second call does not duplicate the pattern.
-  await ensureWorktreesExcluded(r);
-  assert.strictEqual(has(), 1);
-
-  // The point of the exclude: a worktree nested under .claude/worktrees does
-  // not surface as an untracked (dirty) entry in the primary worktree.
-  git(r, [
-    "worktree",
-    "add",
-    "-b",
-    "nested",
-    path.join(r, ".claude", "worktrees", "nested"),
-  ]);
-  const st = await getStatus(r);
-  assert.strictEqual(st.dirty, 0, "the nested worktree is ignored");
 });

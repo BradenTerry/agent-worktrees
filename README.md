@@ -353,10 +353,10 @@ and re-posts the branch data so the row flips to the marker.
 Worktrees the extension creates (this action and the New Worktree command) are
 placed inside the primary worktree at `.claude/worktrees/<branch>` — the same
 location `claude -w` uses — rather than in the repo's parent directory
-(`worktreeUtils.worktreeDirFor`). Before the `git worktree add`, the provider
-appends `/.claude/worktrees/` to the repo's `.git/info/exclude` (local-only,
-idempotent; see `git.ensureWorktreesExcluded`) so the nested worktree never
-shows up as an untracked "dirty" entry on the primary card.
+(`worktreeUtils.worktreeDirFor`). The extension never edits the repo's ignore
+rules: exactly as with `claude -w`, the nested directory shows as an untracked
+entry in `git status` unless the user excludes it themselves (one
+`/.claude/worktrees/` line in `.git/info/exclude` or `.gitignore`).
 
 **Deleting branches.** Delete is local-only: every branch with a local ref shows
 a **Delete Local** action that removes the local branch and never touches the

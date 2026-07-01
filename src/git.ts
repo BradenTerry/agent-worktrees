@@ -1,6 +1,4 @@
 import { execFile } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
@@ -740,42 +738,6 @@ function parseTrack(track: string): { ahead: number; behind: number } {
   const am = track.match(/ahead (\d+)/);
   const bm = track.match(/behind (\d+)/);
   return { ahead: am ? Number(am[1]) : 0, behind: bm ? Number(bm[1]) : 0 };
-}
-
-/**
- * Make sure git ignores the repo-nested worktree directory. Worktrees the
- * extension creates live inside the primary worktree (`.claude/worktrees/...`),
- * which `git status` would otherwise report as untracked — a phantom "dirty"
- * entry on the primary card. Appends the pattern to `.git/info/exclude`
- * (local-only; the repo's .gitignore is never touched). Ignore rules do not
- * affect tracked files, so a repo that commits other `.claude/` files is
- * unaffected. Best effort — never throws.
- */
-export async function ensureWorktreesExcluded(repoRoot: string): Promise<void> {
-  const PATTERN = "/.claude/worktrees/";
-  try {
-    // --git-common-dir so the exclude lands in the MAIN repo's git dir even if
-    // called from a linked worktree (info/exclude is shared repo-wide).
-    const { stdout } = await git(["rev-parse", "--git-common-dir"], {
-      cwd: repoRoot,
-    });
-    const gitDir = stdout.trim();
-    if (!gitDir) return;
-    const dir = path.isAbsolute(gitDir) ? gitDir : path.join(repoRoot, gitDir);
-    const exclude = path.join(dir, "info", "exclude");
-    let current = "";
-    try {
-      current = await fs.promises.readFile(exclude, "utf8");
-    } catch {
-      /* no exclude file yet */
-    }
-    if (current.split(/\r?\n/).some((l) => l.trim() === PATTERN)) return;
-    await fs.promises.mkdir(path.dirname(exclude), { recursive: true });
-    const sep = current && !current.endsWith("\n") ? "\n" : "";
-    await fs.promises.writeFile(exclude, current + sep + PATTERN + "\n");
-  } catch {
-    /* best effort: a failed exclude only means a phantom untracked entry */
-  }
 }
 
 /**

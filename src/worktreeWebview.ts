@@ -15,7 +15,6 @@ import { worktreeDirFor } from "./worktreeUtils";
 import {
   addWorktree,
   addBranchWorktree,
-  ensureWorktreesExcluded,
   switchWorktreeBranch,
   listBranches,
   BranchInfo,
@@ -951,13 +950,13 @@ export class WorktreeWebviewProvider
   // --- Worktree git operations -----------------------------------------------
 
   /**
-   * Pre-flight for creating a nested worktree at `dir`: make sure git excludes
-   * `.claude/worktrees/` (so the new worktree never shows as an untracked/dirty
-   * entry on the primary card) and that the parent directory exists for
-   * `git worktree add`.
+   * Pre-flight for creating a nested worktree at `dir`: make sure the parent
+   * directory exists for `git worktree add`. We deliberately do NOT touch the
+   * repo's ignore rules: whether `.claude/worktrees/` is excluded from `git
+   * status` is the user's call (one line in `.git/info/exclude` or .gitignore),
+   * the same as when `claude -w` creates worktrees there.
    */
-  private async prepareWorktreeDir(primary: string, dir: string): Promise<void> {
-    await ensureWorktreesExcluded(primary);
+  private async prepareWorktreeDir(dir: string): Promise<void> {
     await fs.promises.mkdir(path.dirname(dir), { recursive: true });
   }
 
@@ -980,7 +979,7 @@ export class WorktreeWebviewProvider
     const dir = worktreeDirFor(primary, branch);
 
     try {
-      await this.prepareWorktreeDir(primary, dir);
+      await this.prepareWorktreeDir(dir);
       await addWorktree(primary, dir, branch.trim());
     } catch (err) {
       vscode.window.showErrorMessage(
@@ -1503,7 +1502,7 @@ export class WorktreeWebviewProvider
     }
     const dir = worktreeDirFor(primary, name);
     try {
-      await this.prepareWorktreeDir(primary, dir);
+      await this.prepareWorktreeDir(dir);
       await addBranchWorktree(primary, dir, name, !!remoteOnly);
     } catch (err) {
       vscode.window.showErrorMessage(
