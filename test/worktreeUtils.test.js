@@ -2,7 +2,28 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const path = require("node:path");
-const { normalizePath } = require("../out/worktreeUtils.js");
+const { normalizePath, worktreeDirFor } = require("../out/worktreeUtils.js");
+
+test("worktreeDirFor nests under the primary's .claude/worktrees", () => {
+  const primary = path.join(path.sep, "home", "me", "repo");
+  assert.strictEqual(
+    worktreeDirFor(primary, "feature/my-change"),
+    path.join(primary, ".claude", "worktrees", "feature-my-change")
+  );
+});
+
+test("worktreeDirFor sanitizes path-hostile branch names", () => {
+  const primary = path.join(path.sep, "repo");
+  const base = path.join(primary, ".claude", "worktrees");
+  assert.strictEqual(
+    worktreeDirFor(primary, "  fix/v1.2 (hot) "),
+    path.join(base, "fix-v1.2-hot-")
+  );
+  assert.strictEqual(
+    worktreeDirFor(primary, "a\\b:c"),
+    path.join(base, "a-b-c")
+  );
+});
 
 test("normalizePath strips trailing slashes", () => {
   // Assert the behavior (trailing separators removed, idempotent) without

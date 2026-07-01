@@ -6,6 +6,7 @@ import {
   listBranches,
   getStatus,
   fetchRemotes,
+  mapLimit,
   GitStatus,
 } from "./git";
 import { normalizePath } from "./worktreeUtils";
@@ -139,9 +140,11 @@ export async function gatherWorktrees(
     )
   );
 
-  // Fetch git status for every worktree concurrently.
+  // Fetch git status for every worktree concurrently, but bounded: each status
+  // is 1-2 git spawns, and an unbounded burst over many worktrees is what makes
+  // a refresh visibly expensive on Windows.
   const startedAt = Date.now();
-  const statuses = await Promise.all(worktrees.map((wt) => getStatus(wt.path)));
+  const statuses = await mapLimit(worktrees, 4, (wt) => getStatus(wt.path));
   diag(
     `gatherWorktrees: ${worktrees.length} worktrees in ${
       Date.now() - startedAt

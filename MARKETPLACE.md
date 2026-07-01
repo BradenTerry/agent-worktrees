@@ -75,6 +75,12 @@ don't get a **Create worktree & start agent** button that builds the worktree
 right there in your current window and starts a Claude agent in it. Picking a
 remote-only branch checks it out as a new local tracking branch.
 
+Worktrees created here (and by the New Worktree command) live inside your repo
+under `.claude/worktrees/` — the same place Claude Code's own `claude -w` puts
+them — so they stay in one predictable spot instead of appearing next to your
+project folder, and git is told to ignore that directory so your repo never
+shows them as uncommitted changes.
+
 This view is git-first. Each branch row shows when it was **last updated** (the
 relative time of its latest commit) and **who** made that commit, and a filter and
 sort bar across the top lets you slice the list — all from local git, with no

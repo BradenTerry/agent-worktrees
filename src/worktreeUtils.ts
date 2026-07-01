@@ -4,6 +4,22 @@ import * as path from "path";
  * Pure helpers with no VS Code dependency, so they can be unit-tested directly.
  */
 
+/**
+ * Directory for a worktree the extension creates for `branch`: nested in the
+ * primary worktree under `.claude/worktrees/`, matching where Claude Code's own
+ * `claude -w` puts its worktrees, so every creation path lands in one place
+ * (instead of littering the repo's parent directory). Named after the branch
+ * with path-hostile characters collapsed to "-".
+ */
+export function worktreeDirFor(primary: string, branch: string): string {
+  return path.join(
+    primary,
+    ".claude",
+    "worktrees",
+    branch.trim().replace(/[^\w.-]+/g, "-")
+  );
+}
+
 /** Canonical absolute path: resolved, with any trailing slash removed. */
 export function normalizePath(p: string): string {
   const resolved = path.resolve(p).replace(/[\\/]+$/, "");

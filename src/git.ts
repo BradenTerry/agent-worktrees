@@ -1,4 +1,6 @@
 import { execFile } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
@@ -710,23 +712,27 @@ export async function unpushedCommitCount(
   }
 }
 
-/** Run `fn` over `items` with at most `limit` in flight at once. */
-async function mapLimit<T>(
+/** Run `fn` over `items` with at most `limit` in flight at once, preserving
+ *  result order. Exported so other spawn-heavy fan-outs (e.g. per-worktree
+ *  `git status`) can bound their process bursts the same way. */
+export async function mapLimit<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<void>
-): Promise<void> {
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
   let i = 0;
   const workers = Array.from(
     { length: Math.min(limit, items.length) },
     async () => {
       while (i < items.length) {
         const idx = i++;
-        await fn(items[idx]);
+        results[idx] = await fn(items[idx]);
       }
     }
   );
   await Promise.all(workers);
+  return results;
 }
 
 /** Parse `%(upstream:track,nobracket)` (e.g. "ahead 2, behind 1") into counts. */
@@ -734,6 +740,42 @@ function parseTrack(track: string): { ahead: number; behind: number } {
   const am = track.match(/ahead (\d+)/);
   const bm = track.match(/behind (\d+)/);
   return { ahead: am ? Number(am[1]) : 0, behind: bm ? Number(bm[1]) : 0 };
+}
+
+/**
+ * Make sure git ignores the repo-nested worktree directory. Worktrees the
+ * extension creates live inside the primary worktree (`.claude/worktrees/...`),
+ * which `git status` would otherwise report as untracked — a phantom "dirty"
+ * entry on the primary card. Appends the pattern to `.git/info/exclude`
+ * (local-only; the repo's .gitignore is never touched). Ignore rules do not
+ * affect tracked files, so a repo that commits other `.claude/` files is
+ * unaffected. Best effort — never throws.
+ */
+export async function ensureWorktreesExcluded(repoRoot: string): Promise<void> {
+  const PATTERN = "/.claude/worktrees/";
+  try {
+    // --git-common-dir so the exclude lands in the MAIN repo's git dir even if
+    // called from a linked worktree (info/exclude is shared repo-wide).
+    const { stdout } = await git(["rev-parse", "--git-common-dir"], {
+      cwd: repoRoot,
+    });
+    const gitDir = stdout.trim();
+    if (!gitDir) return;
+    const dir = path.isAbsolute(gitDir) ? gitDir : path.join(repoRoot, gitDir);
+    const exclude = path.join(dir, "info", "exclude");
+    let current = "";
+    try {
+      current = await fs.promises.readFile(exclude, "utf8");
+    } catch {
+      /* no exclude file yet */
+    }
+    if (current.split(/\r?\n/).some((l) => l.trim() === PATTERN)) return;
+    await fs.promises.mkdir(path.dirname(exclude), { recursive: true });
+    const sep = current && !current.endsWith("\n") ? "\n" : "";
+    await fs.promises.writeFile(exclude, current + sep + PATTERN + "\n");
+  } catch {
+    /* best effort: a failed exclude only means a phantom untracked entry */
+  }
 }
 
 /**

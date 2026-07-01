@@ -157,6 +157,54 @@ test("counts each Task tool call as a subagent and carries the tally forward", (
   assert.strictEqual(stateOf(sid).subagents, 2);
 });
 
+test("reuses the cached worktree from the prior state when cwd is unchanged", () => {
+  const sid = "session-cache";
+  run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo });
+  const first = stateOf(sid);
+  assert.strictEqual(first.cwd, repo, "the cwd cache key is persisted");
+
+  // Seed a fake worktree into the state file. If the next event re-ran git it
+  // would overwrite it with the real path; the cache must reuse it instead.
+  fs.writeFileSync(
+    path.join(sessions, sid + ".json"),
+    JSON.stringify({ ...first, worktree: "/cached/worktree" }) + "\n"
+  );
+  run({
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    cwd: repo,
+    tool_name: "Bash",
+  });
+  assert.strictEqual(stateOf(sid).worktree, "/cached/worktree");
+});
+
+test("re-resolves the worktree when cwd changes or on SessionStart", () => {
+  const sid = "session-cache-miss";
+  run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo });
+  const seed = (worktree) =>
+    fs.writeFileSync(
+      path.join(sessions, sid + ".json"),
+      JSON.stringify({ ...stateOf(sid), worktree }) + "\n"
+    );
+
+  // A different cwd misses the cache and resolves the real worktree again.
+  seed("/cached/worktree");
+  const other = path.join(repo, "sub");
+  fs.mkdirSync(other, { recursive: true });
+  run({
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    cwd: other,
+    tool_name: "Bash",
+  });
+  assert.match(stateOf(sid).worktree, /repo$/);
+
+  // SessionStart always re-resolves, even with a matching cwd.
+  seed("/cached/worktree");
+  run({ hook_event_name: "SessionStart", session_id: sid, cwd: other });
+  assert.match(stateOf(sid).worktree, /repo$/);
+});
+
 test("SessionEnd removes the state file", () => {
   const r = run({ hook_event_name: "SessionEnd", session_id: SID, cwd: repo });
   assert.strictEqual(r.status, 0);
