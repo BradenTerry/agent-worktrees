@@ -2,6 +2,17 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.3.4
+
+- **Stopping a Windows agent no longer leaves its worktree locked** - closing an
+  agent from the panel disposed its terminal before killing the process, so the
+  `claude -w` child (which drops the launch session id from its own argv) could
+  be orphaned and keep running, holding the worktree directory open and blocking
+  removal. The kill now runs first, by session id, while the id-bearing parent
+  is still alive so the tree kill reaches that child; the terminal is disposed
+  only afterward. Removing a worktree likewise waits for every agent's process
+  to be gone before git touches the directory.
+
 ## 3.3.3
 
 - **Worktrees are created under `.claude/worktrees/`** - the New Worktree
