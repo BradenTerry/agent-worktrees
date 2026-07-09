@@ -14,6 +14,9 @@ const {
   unpushedCommitCount,
   switchWorktreeBranch,
   setGitTracer,
+  removeWorktree,
+  claudeSessionLockPid,
+  releaseStaleClaudeLocks,
 } = require("../out/git.js");
 
 function git(cwd, args) {
@@ -486,4 +489,104 @@ test("deleteBranch refuses an unmerged local branch unless forced", async () => 
 
   await deleteBranch(work, "topic", { local: true, force: true });
   assert.ok(!localBranches(work).includes("topic"), "force deletes it");
+});
+
+// ---------------------------------------------------------------------------
+// Locked worktrees: stale Claude session locks and force removal.
+// ---------------------------------------------------------------------------
+
+/** A fresh repo with one locked worktree; returns { r, wt }. */
+function makeLockedWorktree(name, reason) {
+  const r = path.join(dir, name);
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hi\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  const wt = path.join(r, "wt");
+  git(r, ["worktree", "add", "-b", "work", wt]);
+  git(r, ["worktree", "lock", "--reason", reason, wt]);
+  return { r, wt };
+}
+
+test("listWorktrees parses the lock reason", async () => {
+  const { r } = makeLockedWorktree(
+    "lock-reason",
+    "claude session lovely-honking-blossom (pid 32656 start 6391918501785405900)"
+  );
+  const wt = (await listWorktrees(r)).find((w) => w.branch === "work");
+  assert.ok(wt.locked, "worktree is locked");
+  assert.strictEqual(
+    wt.lockReason,
+    "claude session lovely-honking-blossom (pid 32656 start 6391918501785405900)"
+  );
+});
+
+test("claudeSessionLockPid extracts the pid from claude lock reasons only", () => {
+  assert.strictEqual(
+    claudeSessionLockPid(
+      "claude session lovely-honking-blossom (pid 32656 start 6391918501785405900)"
+    ),
+    32656
+  );
+  assert.strictEqual(claudeSessionLockPid(undefined), undefined);
+  assert.strictEqual(claudeSessionLockPid(""), undefined);
+  assert.strictEqual(claudeSessionLockPid("on my USB drive"), undefined);
+  assert.strictEqual(
+    claudeSessionLockPid("session foo (pid 1 start 2)"),
+    undefined,
+    "reasons not starting with 'claude session' are not ours"
+  );
+});
+
+test("releaseStaleClaudeLocks unlocks a claude lock whose pid is dead", async () => {
+  const { r } = makeLockedWorktree(
+    "stale-lock",
+    "claude session gone-gone (pid 32656 start 123)"
+  );
+  const wts = await listWorktrees(r);
+  const released = await releaseStaleClaudeLocks(r, wts, () => false);
+  const wt = wts.find((w) => w.branch === "work");
+  assert.deepStrictEqual(released, [wt.path]);
+  assert.strictEqual(wt.locked, false, "the entry is updated in place");
+  const fresh = (await listWorktrees(r)).find((w) => w.branch === "work");
+  assert.strictEqual(fresh.locked, false, "the lock is gone from git");
+});
+
+test("releaseStaleClaudeLocks leaves live claude locks alone", async () => {
+  const { r } = makeLockedWorktree(
+    "live-lock",
+    `claude session busy-bee (pid ${process.pid} start 123)`
+  );
+  const wts = await listWorktrees(r);
+  const released = await releaseStaleClaudeLocks(r, wts);
+  assert.deepStrictEqual(released, []);
+  const fresh = (await listWorktrees(r)).find((w) => w.branch === "work");
+  assert.strictEqual(fresh.locked, true, "still locked");
+});
+
+test("releaseStaleClaudeLocks never touches non-claude locks", async () => {
+  const { r } = makeLockedWorktree("user-lock", "on my USB drive");
+  const wts = await listWorktrees(r);
+  const released = await releaseStaleClaudeLocks(r, wts, () => false);
+  assert.deepStrictEqual(released, []);
+  const fresh = (await listWorktrees(r)).find((w) => w.branch === "work");
+  assert.strictEqual(fresh.locked, true, "still locked");
+});
+
+test("removeWorktree without force refuses a locked worktree", async () => {
+  const { r, wt } = makeLockedWorktree("locked-remove", "claude session x (pid 1 start 2)");
+  await assert.rejects(() => removeWorktree(r, wt), /locked/i);
+  assert.ok(fs.existsSync(wt), "still on disk after refusal");
+});
+
+test("removeWorktree with force removes a locked worktree", async () => {
+  // git demands the force flag twice for locked trees ("use 'remove -f -f' to
+  // override or unlock first"); this is the regression test for passing it once.
+  const { r, wt } = makeLockedWorktree("locked-force", "claude session x (pid 1 start 2)");
+  await removeWorktree(r, wt, true);
+  assert.ok(!fs.existsSync(wt), "worktree directory removed");
+  assert.strictEqual((await listWorktrees(r)).length, 1, "only the primary remains");
 });

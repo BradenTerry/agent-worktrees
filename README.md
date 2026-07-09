@@ -53,11 +53,19 @@ state, and its running agents in one view.
   `git switch` in that worktree only (`git switch -c` when creating), so the other
   worktrees stay put; git's own error (a checkout conflict, say) is surfaced
   verbatim.
-- **Delete Worktree** — `git worktree remove` (offers `--force` when dirty, and
+- **Delete Worktree** — `git worktree remove` (offers a force option when dirty
+  or locked, passing `--force` twice as git requires for locked trees, and
   stops any agents running in the worktree first). Removing a worktree leaves its
   branch behind, so it then offers to delete that branch too (never the default
   branch); when the branch has commits not pushed to its upstream or the worktree
   had uncommitted changes, it confirms a second time before the force delete.
+- **Stale lock cleanup** — `claude -w` locks the worktree it creates for the
+  lifetime of the session ("claude session ... (pid ... start ...)"), and a
+  crashed or killed session leaves that lock behind: a `locked` badge with no
+  agents, and a worktree `git worktree remove` refuses to delete. On refresh
+  (and before a delete) the panel unlocks any worktree whose lock reason names
+  a claude pid that is no longer running. Locks with any other reason, or with
+  a live pid, are never touched.
 - **Skills used** — each agent row shows a chip with the count of Claude skills
   it has invoked; click it for the full list.
 - **Subagents used** — a robot glyph with a count tracks how many subagents each

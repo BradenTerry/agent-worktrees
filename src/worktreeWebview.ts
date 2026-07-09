@@ -19,6 +19,7 @@ import {
   listBranches,
   BranchInfo,
   removeWorktree,
+  releaseStaleClaudeLocks,
   deleteBranch,
   detachWorktreeHead,
   goneBranches,
@@ -1151,6 +1152,14 @@ export class WorktreeWebviewProvider
     // otherwise a still-live Claude (Windows) keeps the worktree locked.
     await Promise.all(agents.map((a) => this.stopSession(a.sessionId)));
     this.killClaudeInDir(fsPath);
+
+    // `claude -w` sessions lock their worktree; now that the session is dead
+    // (just killed above, or long gone) the lock is stale and would make the
+    // plain remove below fail. Release it so removal doesn't need the Force
+    // prompt. Locks with a non-claude reason or a live pid are left alone.
+    if (worktree?.locked) {
+      await releaseStaleClaudeLocks(primary, [worktree]);
+    }
 
     try {
       await removeWorktree(primary, fsPath);
