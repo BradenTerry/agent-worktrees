@@ -7,6 +7,7 @@ import {
   getStatus,
   fetchRemotes,
   mapLimit,
+  releaseStaleClaudeLocks,
   GitStatus,
 } from "./git";
 import { normalizePath } from "./worktreeUtils";
@@ -132,6 +133,18 @@ export async function gatherWorktrees(
       worktrees: [],
       hooksInstalled,
     };
+  }
+
+  // Clear locks left behind by dead Claude sessions. `claude -w` locks the
+  // worktree it creates and unlocks on exit, but a crashed or killed session
+  // never gets there -- the panel would show a LOCKED badge on a worktree with
+  // no agents, and removing it would fail. Only locks whose reason names a
+  // claude pid that is no longer running are touched.
+  try {
+    const released = await releaseStaleClaudeLocks(repoRoot, worktrees);
+    for (const p of released) diag(`gatherWorktrees: released stale claude lock on ${p}`);
+  } catch {
+    /* cleanup is best-effort; the badge just stays until the next refresh */
   }
 
   const openPaths = new Set(

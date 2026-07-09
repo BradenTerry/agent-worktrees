@@ -118,6 +118,9 @@ export interface Worktree {
   detached: boolean;
   /** True when the worktree is locked. */
   locked: boolean;
+  /** The lock reason, when locked with one (e.g. Claude Code locks the
+   *  worktrees it creates with "claude session <name> (pid <p> start <s>)"). */
+  lockReason?: string;
 }
 
 /**
@@ -876,7 +879,13 @@ export async function deleteBranch(
   }
 }
 
-/** Remove a worktree. Passes `--force` only when explicitly requested. */
+/**
+ * Remove a worktree. Passes `--force` only when explicitly requested. Force is
+ * given twice because that is what git requires to remove a *locked* worktree
+ * ("use 'remove -f -f' to override or unlock first"); a single --force only
+ * covers dirty/unclean trees. Doubling it is harmless when the tree is merely
+ * dirty, so one force flag serves both prompts.
+ */
 export async function removeWorktree(
   repoRoot: string,
   dir: string,
@@ -884,13 +893,88 @@ export async function removeWorktree(
 ): Promise<void> {
   try {
     await git(
-      ["worktree", "remove", ...(force ? ["--force"] : []), dir],
+      ["worktree", "remove", ...(force ? ["--force", "--force"] : []), dir],
       { cwd: repoRoot }
     );
   } catch (err) {
     const msg = String((err as { stderr?: string }).stderr ?? err);
     throw new Error(msg.trim());
   }
+}
+
+/** Unlock a locked worktree (`git worktree unlock`). */
+export async function unlockWorktree(
+  repoRoot: string,
+  dir: string
+): Promise<void> {
+  try {
+    await git(["worktree", "unlock", dir], { cwd: repoRoot });
+  } catch (err) {
+    const msg = String((err as { stderr?: string }).stderr ?? err);
+    throw new Error(msg.trim());
+  }
+}
+
+/**
+ * Extract the pid from a Claude Code worktree lock reason. `claude -w` locks
+ * the worktree it creates for the lifetime of the session, with a reason of the
+ * form "claude session <name> (pid <pid> start <starttime>)". Returns the pid,
+ * or undefined when the reason is not a Claude session lock (a lock the user or
+ * another tool placed deliberately, which we must never touch).
+ */
+export function claudeSessionLockPid(
+  reason: string | undefined
+): number | undefined {
+  if (!reason) return undefined;
+  const m = /^claude session .+\(pid (\d+) start \d+\)\s*$/.exec(reason.trim());
+  if (!m) return undefined;
+  const pid = Number(m[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+/** True when a process with this pid exists (signal 0 probe; EPERM = alive). */
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Unlock worktrees whose lock is a stale Claude session lock: the reason names
+ * a `claude` session pid that is no longer running, so the session died (crash,
+ * kill, reboot) without unlocking on exit. Such a lock only gets in the way --
+ * the panel shows a LOCKED badge on a worktree with no agents, and
+ * `git worktree remove` refuses to touch it. Locks with any other reason, or
+ * whose pid is still alive, are left strictly alone; if the pid was recycled by
+ * an unrelated process the lock survives too, which errs on the safe side.
+ *
+ * Mutates `locked`/`lockReason` on the entries it unlocks and returns the paths
+ * that were unlocked. Unlock failures are swallowed: this is opportunistic
+ * cleanup, and the worst case is the badge staying until the next pass.
+ */
+export async function releaseStaleClaudeLocks(
+  repoRoot: string,
+  worktrees: Worktree[],
+  isAlive: (pid: number) => boolean = pidIsAlive
+): Promise<string[]> {
+  const released: string[] = [];
+  for (const wt of worktrees) {
+    if (!wt.locked) continue;
+    const pid = claudeSessionLockPid(wt.lockReason);
+    if (pid === undefined || isAlive(pid)) continue;
+    try {
+      await unlockWorktree(repoRoot, wt.path);
+      wt.locked = false;
+      wt.lockReason = undefined;
+      released.push(wt.path);
+    } catch {
+      /* opportunistic; retried on the next refresh */
+    }
+  }
+  return released;
 }
 
 /**
@@ -905,6 +989,28 @@ export async function detachWorktreeHead(worktreePath: string): Promise<void> {
     const msg = String((err as { stderr?: string }).stderr ?? err);
     throw new Error(msg.trim());
   }
+}
+
+/**
+ * Undo git's C-style quoting of a porcelain value (used for lock reasons that
+ * contain control characters or non-ASCII bytes): strip the wrapping double
+ * quotes and decode backslash escapes. Unquoted values pass through unchanged.
+ */
+function unquotePorcelain(value: string): string {
+  if (!(value.startsWith('"') && value.endsWith('"') && value.length >= 2)) {
+    return value;
+  }
+  const escapes: Record<string, string> = {
+    a: "\x07", b: "\b", f: "\f", n: "\n",
+    r: "\r", t: "\t", v: "\v", '"': '"', "\\": "\\",
+  };
+  return value
+    .slice(1, -1)
+    .replace(/\\([0-7]{3}|.)/g, (_, esc: string) =>
+      /^[0-7]{3}$/.test(esc)
+        ? String.fromCharCode(parseInt(esc, 8))
+        : escapes[esc] ?? esc
+    );
 }
 
 /**
@@ -924,6 +1030,7 @@ export async function listWorktrees(cwd: string): Promise<Worktree[]> {
         head: current.head,
         detached: current.detached ?? false,
         locked: current.locked ?? false,
+        lockReason: current.lockReason,
         isPrimary: false,
       });
     }
@@ -952,6 +1059,9 @@ export async function listWorktrees(cwd: string): Promise<Worktree[]> {
       current.detached = true;
     } else if (line === "locked" || line.startsWith("locked ")) {
       current.locked = true;
+      if (line.startsWith("locked ")) {
+        current.lockReason = unquotePorcelain(line.slice("locked ".length));
+      }
     }
   }
   flush();
