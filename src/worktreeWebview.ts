@@ -708,33 +708,40 @@ export class WorktreeWebviewProvider
   }
 
   /** Stop an agent and remove its row. */
-  private stopAgent(sessionId?: string): void {
+  private async stopAgent(sessionId?: string): Promise<void> {
     if (!sessionId) return;
-    this.stopSession(sessionId);
+    await this.stopSession(sessionId);
     void this.refresh();
   }
 
   /**
    * Stop a session by every means we have, so it dies even if our in-memory
    * terminal handle was lost (e.g. the extension host reloaded since launch):
-   *  - dispose the terminal we launched it in, if we still hold it;
    *  - kill the Claude process by the session id we passed in its argv
    *    (`claude --session-id <id>`), which is reload-proof and works for idle
    *    agents that were never sent a prompt;
+   *  - dispose the terminal we launched it in, if we still hold it;
    *  - delete its state file so the row disappears immediately.
    */
-  private stopSession(sessionId: string): void {
+  private async stopSession(sessionId: string): Promise<void> {
     if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return;
-    this.terminals.get(sessionId)?.dispose();
     if (process.platform === "win32") {
-      // Windows has no `pkill -f`. Find the process whose command line carries
-      // the session id and tear down its whole tree with `taskkill /T`. The tree
-      // kill is what reaches a `claude -w` child (a descendant of the
-      // `--session-id` process that drops the id from its own argv), so Windows
-      // does not need the cwd-based killClaudeInDir fallback.
-      this.killTreeByCommandLine(sessionId);
+      // Windows has no `pkill -f`, and no process-group teardown: disposing the
+      // terminal kills the shell (and can take the `--session-id` parent with
+      // it) but leaves the `claude -w` child -- which drops our id from its own
+      // argv -- running, holding the worktree directory open. So tree-kill by
+      // the session id *first*, while the id-bearing parent is still alive and
+      // that child is still its descendant, so `taskkill /T` reaches the whole
+      // subtree. Disposing first would orphan the id-less child before the query
+      // runs, leaving it alive to keep the worktree locked -- the exact symptom
+      // this ordering fixes. Await so the terminal is not torn down mid-kill.
+      await this.killTreeByCommandLine(sessionId);
+      this.terminals.get(sessionId)?.dispose();
     } else {
-      // pkill -f matches the session id in the process's full command line.
+      // Disposing the terminal SIGHUPs the pty's foreground process group, which
+      // reaches the `claude -w` child too. pkill -f is the reload-proof backup:
+      // it matches the session id in the process's full command line.
+      this.terminals.get(sessionId)?.dispose();
       cp.execFile("pkill", ["-f", sessionId], () => {
         /* no match / pkill missing -> nothing to kill */
       });
@@ -801,9 +808,11 @@ export class WorktreeWebviewProvider
    * `-like` wildcards, so a path with `[`/`]` can't misfire), and our own
    * PowerShell is excluded by `$PID` because the needle is embedded in its
    * command line. Best-effort: a missing PowerShell or no match is a no-op.
+   * Resolves once the kill has run (or failed) so callers can order a terminal
+   * dispose after it rather than racing the query.
    */
-  private killTreeByCommandLine(needle: string): void {
-    if (process.platform !== "win32") return;
+  private killTreeByCommandLine(needle: string): Promise<void> {
+    if (process.platform !== "win32") return Promise.resolve();
     // Single-quote escape for the PowerShell string literal.
     const lit = needle.toLowerCase().replace(/'/g, "''");
     const script =
@@ -811,17 +820,17 @@ export class WorktreeWebviewProvider
       `$_.ProcessId -ne $PID -and $_.CommandLine -and ` +
       `$_.CommandLine.ToLower().Contains('${lit}') } | ` +
       "ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null }";
-    try {
-      cp.execFile(
-        "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-Command", script],
-        () => {
-          /* powershell missing / nothing to kill -> best effort */
-        }
-      );
-    } catch {
-      /* spawn failed -> nothing we can do */
-    }
+    return new Promise<void>((resolve) => {
+      try {
+        cp.execFile(
+          "powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-Command", script],
+          () => resolve() /* powershell missing / nothing to kill -> best effort */
+        );
+      } catch {
+        resolve(); /* spawn failed -> nothing we can do */
+      }
+    });
   }
 
   // --- Windows ---------------------------------------------------------------
@@ -1137,8 +1146,10 @@ export class WorktreeWebviewProvider
     // Stop the worktree's agents first so no Claude process holds the directory
     // open while git removes it (and they vanish from the panel). stopSession
     // cleans up the ones we track; killClaudeInDir catches any Claude running in
-    // the worktree by cwd (notably `claude -w` children that drop our id).
-    for (const a of agents) this.stopSession(a.sessionId);
+    // the worktree by cwd (notably `claude -w` children that drop our id). Await
+    // the stops so every process is gone before git touches the directory --
+    // otherwise a still-live Claude (Windows) keeps the worktree locked.
+    await Promise.all(agents.map((a) => this.stopSession(a.sessionId)));
     this.killClaudeInDir(fsPath);
 
     try {
