@@ -2,6 +2,20 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.3.5
+
+- **Stale claude session locks are cleared automatically** - `claude -w` locks
+  the worktree it creates and unlocks on exit, but a crashed or killed session
+  left the lock behind: a `locked` badge on a worktree with no agents, and a
+  worktree that refused to be deleted. On refresh (and before a delete) the
+  panel now unlocks any worktree whose lock reason names a claude pid that is
+  no longer running. Locks with any other reason, or a live pid, are never
+  touched.
+- **Force Remove now works on locked worktrees** - git requires the force flag
+  twice to remove a locked worktree, and the panel only passed it once, so the
+  Force Remove prompt always failed with "cannot remove a locked working
+  tree". Deleting still asks for confirmation first, exactly as before.
+
 ## 3.3.4
 
 - **Stopping a Windows agent no longer leaves its worktree locked** - closing an
