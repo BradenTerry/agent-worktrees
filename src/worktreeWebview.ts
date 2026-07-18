@@ -1099,30 +1099,43 @@ export class WorktreeWebviewProvider
     await this.postBranches();
   }
 
-  /** Confirm and remove a worktree from disk (offering --force when dirty). */
+  /**
+   * Remove a worktree from disk behind a single confirmation. Everything the
+   * removal touches — running agents, uncommitted changes, the branch and its
+   * unpushed commits — is gathered while the directory still exists and
+   * disclosed in one modal, whose buttons decide the whole operation (remove,
+   * or remove and delete the branch). No follow-up prompts: a dirty or locked
+   * worktree is force-removed because the modal already said the directory and
+   * any uncommitted changes go away, and the branch delete forces past "not
+   * fully merged" when the modal already disclosed the unpushed commits.
+   */
   private async removeWorktreeAction(fsPath?: string): Promise<void> {
     if (!fsPath) return;
     const primary = await this.primaryWorktree();
     if (!primary) return;
 
-    // Capture the branch this worktree is on (and whether it has uncommitted
-    // changes) before removal, so we can offer to delete the now-orphaned branch
-    // afterward. Removing the worktree directory discards uncommitted changes, so
-    // the dirty count has to be read while the directory still exists.
     const target = normalize(fsPath);
     const worktree = (await listWorktrees(primary)).find(
       (w) => normalize(w.path) === target
     );
     const branch =
       worktree && !worktree.detached ? worktree.branch : undefined;
-    let hadUncommitted = false;
+    let dirty = false;
     if (branch) {
       try {
-        hadUncommitted = (await getStatus(fsPath)).dirty > 0;
+        dirty = (await getStatus(fsPath)).dirty > 0;
       } catch {
         /* directory unreadable: treat as clean */
       }
     }
+    // The default branch is never offered for deletion.
+    const deletableBranch =
+      branch && branch !== (await defaultBranchName(primary))
+        ? branch
+        : undefined;
+    const unpushed = deletableBranch
+      ? await unpushedCommitCount(primary, deletableBranch)
+      : 0;
 
     // Every agent whose worktree is this path (or nested under it).
     const byPath = await readSessionsByWorktree(this.sessionsDir);
@@ -1132,17 +1145,33 @@ export class WorktreeWebviewProvider
         agents.push(...list);
       }
     }
-    const note = agents.length
-      ? ` This also stops ${agents.length} running agent${
-          agents.length === 1 ? "" : "s"
-        } in it.`
-      : "";
+
+    const consequences = [`Deletes ${fsPath}`];
+    if (agents.length) {
+      consequences.push(
+        `Stops ${agents.length} running agent${agents.length === 1 ? "" : "s"}`
+      );
+    }
+    if (dirty) consequences.push("Discards uncommitted changes");
+    if (deletableBranch) {
+      consequences.push(
+        unpushed > 0
+          ? `"Remove and Delete Branch" also deletes "${deletableBranch}", losing ${
+              unpushed === 1 ? "1 commit" : `${unpushed} commits`
+            } not pushed to its upstream`
+          : `"Remove and Delete Branch" also deletes "${deletableBranch}" (fully pushed, nothing lost)`
+      );
+    }
+
+    const buttons = deletableBranch
+      ? ["Remove", "Remove and Delete Branch"]
+      : ["Remove"];
     const choice = await vscode.window.showWarningMessage(
-      `Remove the worktree at ${fsPath}? This deletes the working directory.${note}`,
-      { modal: true },
-      "Remove"
+      `Remove the worktree${branch ? ` for "${branch}"` : ""}?`,
+      { modal: true, detail: consequences.join("\n") },
+      ...buttons
     );
-    if (choice !== "Remove") return;
+    if (!choice) return;
 
     // Stop the worktree's agents first so no Claude process holds the directory
     // open while git removes it (and they vanish from the panel). stopSession
@@ -1164,12 +1193,7 @@ export class WorktreeWebviewProvider
     try {
       await removeWorktree(primary, fsPath);
     } catch {
-      const force = await vscode.window.showWarningMessage(
-        "Worktree has changes or is locked. Force remove?",
-        { modal: true },
-        "Force Remove"
-      );
-      if (force !== "Force Remove") return;
+      // Dirty or locked; the modal already covered everything a force discards.
       try {
         await removeWorktree(primary, fsPath, true);
       } catch (err) {
@@ -1179,62 +1203,31 @@ export class WorktreeWebviewProvider
         return;
       }
     }
-    // Removing a worktree leaves its branch behind; offer to delete it too.
-    await this.offerDeleteOrphanedBranch(primary, branch, hadUncommitted);
+
+    if (choice === "Remove and Delete Branch" && deletableBranch) {
+      await this.deleteOrphanedBranch(primary, deletableBranch, unpushed);
+    }
     await this.refresh();
     await this.postBranches();
   }
 
   /**
-   * After a worktree is removed, ask whether to also delete the branch it was
-   * on. The default branch is never offered. When deleting would lose work (the
-   * branch has commits not pushed to its upstream, or the worktree had
-   * uncommitted changes discarded with it), confirm a second time before the
-   * force delete.
+   * Delete the branch left behind by a worktree removal the user already
+   * confirmed. Forces when the confirmation disclosed unpushed commits. When it
+   * promised nothing would be lost but git still refuses (the upstream count
+   * missed something, e.g. a gone upstream), re-confirm before forcing — the
+   * one case a second prompt is warranted.
    */
-  private async offerDeleteOrphanedBranch(
+  private async deleteOrphanedBranch(
     repoRoot: string,
-    branch: string | undefined,
-    hadUncommitted: boolean
+    branch: string,
+    unpushed: number
   ): Promise<void> {
-    if (!branch) return;
-    if (branch === (await defaultBranchName(repoRoot))) return;
-
-    const keep = await vscode.window.showInformationMessage(
-      `Also delete the branch "${branch}"? The worktree is gone but the branch remains.`,
-      { modal: true },
-      "Delete Branch"
-    );
-    if (keep !== "Delete Branch") return;
-
-    // Second prompt when the branch carries work the delete would discard.
-    const unpushed = await unpushedCommitCount(repoRoot, branch);
-    const lose: string[] = [];
-    if (unpushed > 0) {
-      lose.push(
-        `${unpushed === 1 ? "1 commit" : `${unpushed} commits`} not pushed to its upstream`
-      );
-    }
-    if (hadUncommitted) {
-      lose.push("uncommitted changes that were discarded with the worktree");
-    }
-    const force = unpushed > 0;
-    if (lose.length) {
-      const confirm = await vscode.window.showWarningMessage(
-        `"${branch}" has ${lose.join(" and ")}. Deleting the branch loses this work. Delete anyway?`,
-        { modal: true },
-        "Delete Branch"
-      );
-      if (confirm !== "Delete Branch") return;
-    }
-
     try {
-      await deleteBranch(repoRoot, branch, { local: true, force });
+      await deleteBranch(repoRoot, branch, { local: true, force: unpushed > 0 });
     } catch (err) {
       const msg = (err as Error).message;
-      // git -d refused an unmerged branch we didn't already force; confirm once
-      // more, then force.
-      if (!force && /not fully merged/i.test(msg)) {
+      if (unpushed === 0 && /not fully merged/i.test(msg)) {
         const retry = await vscode.window.showWarningMessage(
           `Local branch "${branch}" is not fully merged. Force delete it?`,
           { modal: true },
