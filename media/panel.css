@@ -176,6 +176,12 @@ button.accept {
 .card.open {
   border-color: var(--vscode-focusBorder);
 }
+/* The worktree whose agent owns the active terminal: same focus border as the
+   in-workspace card, so the worktree being talked to stands out in the list.
+   The row highlight and Agents-bar glyph pin down the exact agent. */
+.card.terminal-open {
+  border-color: var(--vscode-focusBorder);
+}
 
 .card-top {
   display: flex;
@@ -283,27 +289,26 @@ button.accept {
   align-items: center;
   gap: 4px;
 }
-/* Source-control scope button: leftmost in the gitline, tucked toward the
-   card edge so the diff totals keep their start position. */
+/* Source-control scope button: leftmost in the gitline, a labeled pill on
+   every worktree (identical geometry active or not, so toggling the scope
+   never shifts the layout). Quiet outline until active. */
 .gitline .scm-scope {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  margin-left: -2px;
-  margin-right: -2px;
-}
-/* Scope is set: this worktree's repo is the one shown in Source Control. The
-   button grows into a labeled pill so the active worktree reads at a glance
-   instead of relying on a small highlighted glyph. */
-.gitline .scm-scope.active {
   width: auto;
+  height: 18px;
   padding: 0 7px 0 5px;
   gap: 4px;
   border-radius: 999px;
   font-size: 11px;
   white-space: nowrap;
+  margin-left: -2px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+}
+/* Scope is set: this worktree's repo is the one shown in Source Control. */
+.gitline .scm-scope.active {
   color: var(--vscode-button-foreground, #ffffff);
   background: var(--vscode-button-background, #0e639c);
+  border-color: transparent;
 }
 .gitline .scm-scope.active:hover {
   background: var(
