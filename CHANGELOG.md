@@ -2,6 +2,46 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.4.0
+
+- **Deleting a worktree is one confirmation instead of up to five** - the
+  dialog gathers everything upfront (agents that will be stopped, uncommitted
+  changes, unpushed commits on the branch) and offers Remove or Remove and
+  Delete Branch. Because the consequences are disclosed, there are no
+  follow-up prompts: dirty or locked worktrees force-remove, and the branch
+  delete forces past "not fully merged" when the unpushed commits were already
+  shown.
+- **Know which agent you are talking to** - the agent whose terminal is
+  currently open is highlighted with a blue outline and terminal glyph, and
+  its worktree's Agents bar is marked so collapsed cards still show it.
+  Switching terminals updates the highlight instantly.
+- **Location filter in the Branches view** - a multi-select alongside Updated
+  by that narrows the list to Local only, Local + remote, or Remote only
+  branches, matching the tag on each row.
+- **Explicitly titled sessions show their title** - Claude Code records
+  manually set session titles as custom-title transcript entries, which the
+  status hook ignored; such agents fell back to "Claude 1" style rows. Both
+  title kinds are read now, latest wins.
+- **Source Control scope is readable at a glance** - the scope button is a
+  labeled "Source Control" pill on every worktree with identical geometry
+  active or not, so toggling never shifts the layout; the scoped worktree
+  fills blue.
+- **Destructive buttons are set apart** - the card-header delete and the
+  branches-view Delete gone sit behind a divider with a red-tinted hover, and
+  Delete gone moved to the end of the toolbar instead of between the fetch
+  buttons.
+- **Quieter git stats** - zero-value counters (`+/- 0`, up/down 0) are hidden,
+  a fully quiet worktree shows a green Clean segment, and the Agents bar drops
+  zero-count statuses (a single agent shows just its status dot).
+- **Status is shape-coded** - active agents are a filled circle, waiting a
+  filled diamond, idle a hollow ring, so state never relies on color alone.
+- **Smaller polish** - the branches-view create button is secondary until
+  hovered so the list is not a wall of blue; the settings token form collapses
+  behind Replace token once connected, with Disconnect beside it; the
+  add-agent button is labeled New agent; the switch-branch pencil and Delete
+  gone use the panel's fast tooltip; Replace token and Disconnect are spaced
+  apart.
+
 ## 3.3.5
 
 - **Stale claude session locks are cleared automatically** - `claude -w` locks
