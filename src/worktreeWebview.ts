@@ -220,6 +220,12 @@ export class WorktreeWebviewProvider
       vscode.window.onDidOpenTerminal((t) => this.reclaimTerminal(t)),
       // Clean up our terminal handle when its terminal is closed by any means.
       vscode.window.onDidCloseTerminal((t) => this.forgetTerminal(t)),
+      // Highlight the agent whose terminal the user is looking at. A
+      // lightweight message (not a full refresh) so switching terminals
+      // repaints instantly without re-running git.
+      vscode.window.onDidChangeActiveTerminal(() =>
+        this.postActiveTerminal()
+      ),
       // Catch external/agent edits and commits when the window regains focus.
       vscode.window.onDidChangeWindowState((s) => {
         if (s.focused) this.scheduleRefresh();
@@ -300,6 +306,7 @@ export class WorktreeWebviewProvider
     data.traceEnabled = vscode.workspace
       .getConfiguration()
       .get<boolean>(TRACE_SETTING, false);
+    data.activeSessionId = this.activeSessionId();
     if (!installed) {
       data.hooks = HOOKS.map((h) => ({
         label: h.label,
@@ -911,6 +918,25 @@ export class WorktreeWebviewProvider
         this.appliedTerminalNames.delete(id);
       }
     }
+  }
+
+  /** Session id of the agent owning the currently active terminal, or "". */
+  private activeSessionId(): string {
+    const active = vscode.window.activeTerminal;
+    if (!active) return "";
+    for (const [id, term] of this.terminals) {
+      if (term === active) return id;
+    }
+    return "";
+  }
+
+  /** Tell the sidebar which agent's terminal is active so it can highlight the
+   *  row. Sent on every active-terminal change; "" clears the highlight. */
+  private postActiveTerminal(): void {
+    void this.view?.webview.postMessage({
+      type: "activeTerminal",
+      sessionId: this.activeSessionId(),
+    });
   }
 
   /**

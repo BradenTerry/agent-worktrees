@@ -475,6 +475,38 @@ button.accept {
   outline: 1px solid var(--vscode-charts-yellow, #cca700);
   outline-offset: -1px;
 }
+/* The agent whose terminal is currently active in the terminal panel — the one
+   the user is talking to. Blue outline + tint plus a terminal glyph; declared
+   after .attention so the blue outline wins when a row is both. */
+.agent-row.terminal-open {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, #007fd4) 12%,
+    var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.06))
+  );
+}
+/* Terminal chips are always in the markup so the highlight can be toggled with
+   classes alone; CSS shows them only where relevant. */
+.terminal-chip,
+.agents-bar-terminal {
+  display: none;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--vscode-focusBorder, #3794ff);
+}
+.terminal-chip svg,
+.agents-bar-terminal svg {
+  width: 13px;
+  height: 13px;
+}
+.agent-row.terminal-open .terminal-chip {
+  display: inline-flex;
+}
+.agents-bar.terminal-open .agents-bar-terminal {
+  display: inline-flex;
+}
 .agent-label {
   flex: 1;
   white-space: nowrap;

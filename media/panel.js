@@ -27,6 +27,8 @@
     focus:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 3h4v4M13 3l-5 5M7 13H3V9M3 13l5-5"/></svg>',
     stop: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+    terminal:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2.5 2-2.5 2M8.5 10.5H12"/></svg>',
     trash:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 4h10M6 4V3h4v1M5 4l.5 9h5L11 4"/></svg>',
     edit:
@@ -134,6 +136,12 @@
   // Last data we rendered, so the relative-time tick can re-render in place.
   let lastData = null;
 
+  // Session id of the agent whose terminal is currently active in the terminal
+  // panel. Seeded from each full update; the extension also posts lightweight
+  // {type:"activeTerminal"} messages on every terminal switch so the highlight
+  // tracks instantly without a full re-render.
+  let activeSessionId = "";
+
   function esc(s) {
     return String(s).replace(
       /[&<>"]/g,
@@ -234,6 +242,7 @@
           return (
             '<div class="agent-row' +
             (s === "waiting" ? " attention" : "") +
+            (a.sessionId === activeSessionId ? " terminal-open" : "") +
             '" data-action="focusAgent" data-session="' +
             esc(a.sessionId) +
             '" role="button" tabindex="0" title="Click to reveal terminal">' +
@@ -244,6 +253,11 @@
             esc(fullInfo) +
             '">' +
             esc(a.label) +
+            "</span>" +
+            // Present on every row but shown (via CSS) only on .terminal-open,
+            // so the live class toggle needs no structural DOM changes.
+            '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
+            icons.terminal +
             "</span>" +
             subChip +
             skillChip +
@@ -313,8 +327,13 @@
           '"></span></span>'
         : stat("active") + stat("waiting") + stat("idle");
 
+    const hasActiveTerminal =
+      !!activeSessionId &&
+      agents.some((a) => a.sessionId === activeSessionId);
     return (
-      '<div class="agents-bar" data-toggle="' +
+      '<div class="agents-bar' +
+      (hasActiveTerminal ? " terminal-open" : "") +
+      '" data-toggle="' +
       esc(path) +
       '" role="button" tabindex="0">' +
       '<span class="chevron">' +
@@ -323,6 +342,11 @@
       '<span class="agents-bar-label">Agents</span>' +
       '<span class="agents-bar-count">' +
       agents.length +
+      "</span>" +
+      // Shown (via CSS) only while this worktree holds the active terminal, so
+      // a collapsed card still says its agent is the one being talked to.
+      '<span class="agents-bar-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
+      icons.terminal +
       "</span>" +
       subStat +
       '<span class="agents-bar-stats">' +
@@ -2034,12 +2058,39 @@
     }
     // Sidebar. Ignore any {type:"branches"} meant for the branches tab.
     if (msg.type === "update") {
+      activeSessionId = (msg.data && msg.data.activeSessionId) || "";
       render(msg.data);
       maybeRefreshSettings(msg.data);
+    } else if (msg.type === "activeTerminal") {
+      // Terminal switch: retint the rows in place — no full re-render, so an
+      // open menu/modal or the scroll position is never disturbed.
+      activeSessionId = msg.sessionId || "";
+      applyActiveTerminal();
     } else if (msg.type === "openSettings") {
       openSettings();
     }
   });
+
+  /** Sync the .terminal-open classes to activeSessionId without re-rendering.
+   *  The chips are always in the markup and CSS-gated, so this is pure class
+   *  toggling on the existing DOM. */
+  function applyActiveTerminal() {
+    const rows = root.querySelectorAll(".agent-row[data-session]");
+    let activeRow = null;
+    rows.forEach((row) => {
+      const on =
+        !!activeSessionId &&
+        row.getAttribute("data-session") === activeSessionId;
+      row.classList.toggle("terminal-open", on);
+      if (on) activeRow = row;
+    });
+    root
+      .querySelectorAll(".agents-bar.terminal-open")
+      .forEach((bar) => bar.classList.remove("terminal-open"));
+    const card = activeRow && activeRow.closest(".card");
+    const bar = card && card.querySelector(".agents-bar");
+    if (bar) bar.classList.add("terminal-open");
+  }
 
   // --- Custom hover tooltip --------------------------------------------------
   // Native `title` tooltips have a long, browser-fixed delay. For the agent
