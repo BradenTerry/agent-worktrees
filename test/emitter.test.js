@@ -102,6 +102,33 @@ test("prefers Claude's ai-title from the transcript over the raw prompt", () => 
   assert.strictEqual(s.task, "Refactor the auth flow");
 });
 
+test("reads a custom-title from the transcript, latest of either kind wins", () => {
+  const sid = "session-customtitle";
+  const transcript = path.join(dir, sid + ".jsonl");
+  fs.writeFileSync(
+    transcript,
+    [
+      JSON.stringify({ type: "ai-title", aiTitle: "Auto title", sessionId: sid }),
+      JSON.stringify({ type: "assistant", sessionId: sid }),
+      JSON.stringify({
+        type: "custom-title",
+        customTitle: "Worktree UX improvements",
+        sessionId: sid,
+      }),
+    ].join("\n") + "\n"
+  );
+  const r = run({
+    hook_event_name: "UserPromptSubmit",
+    session_id: sid,
+    cwd: repo,
+    prompt: "next task",
+    transcript_path: transcript,
+  });
+  assert.strictEqual(r.status, 0);
+  // The custom title was written last, so it wins over the earlier ai-title.
+  assert.strictEqual(stateOf(sid).task, "Worktree UX improvements");
+});
+
 test("leaves the task empty when the transcript has no ai-title", () => {
   const sid = "session-notitle";
   const transcript = path.join(dir, sid + ".jsonl");
