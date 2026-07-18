@@ -68,6 +68,8 @@ function overviewData() {
     repoName: "acme-web",
     hooksInstalled: true,
     prEnabled: true,
+    // The agent whose terminal is open, shown highlighted in the panel.
+    activeSessionId: "s-co-2",
     github: { hasToken: true, connected: true, login: "acme-dev", tokenType: "fine-grained" },
     worktrees: [
       {

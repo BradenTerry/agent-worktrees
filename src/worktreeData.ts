@@ -83,6 +83,9 @@ export interface WorktreeData {
   scmEnabled?: boolean;
   /** Whether debug tracing (the diagnostics output channel) is enabled. */
   traceEnabled?: boolean;
+  /** Session id of the agent whose terminal is currently active in the
+   *  terminal panel, so the webview can highlight who the user is talking to. */
+  activeSessionId?: string;
 }
 
 export function normalize(p: string): string {

@@ -45,6 +45,10 @@ The **Branches view** opens as a full editor tab listing every branch with when 
   leaving the panel.
 - **Live agent status** — each agent shows as **active**, **waiting**, or
   **idle**, driven by Claude Code hook events.
+- **Know who you're talking to** — the agent whose terminal is currently open is
+  highlighted in the panel (and its worktree's Agents bar is marked when the
+  card is collapsed), so switching between several worktrees never leaves you
+  typing to the wrong agent.
 - **Skills used** — see which Claude skills each agent has invoked.
 - **Subagents used** — a robot count shows how many subagents each agent has
   spawned, plus the total across the worktree.
