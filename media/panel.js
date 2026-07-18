@@ -78,8 +78,9 @@
   // Branches-overlay filter/sort selections, persisted alongside `expanded` so
   // reopening the overlay restores the last view. This view is git-first: `users`
   // is a list of committer names (the people who last updated each branch,
-  // multi-select); `sort` is one of the SORT_OPTIONS keys (all git-based, no
-  // GitHub needed). `prStatus` and `reviewer` are the PR-aware filters: each a
+  // multi-select); `locations` is a multi-select of where a branch lives (local
+  // only / local + remote / remote only, LOCATION_OPTIONS ids); `sort` is one of
+  // the SORT_OPTIONS keys (all git-based, no GitHub needed). `prStatus` and `reviewer` are the PR-aware filters: each a
   // single-select (only shown when GitHub PR data is available). `prStatus`
   // narrows by PR state — "all" (no filter), "open" (open, non-draft PR), or
   // "draft" (draft PR); the PR fetch is open-only, so open and draft are the
@@ -91,6 +92,14 @@
     prune: savedState.branchPrune !== false,
     users: Array.isArray(savedState.branchUsers)
       ? savedState.branchUsers.slice()
+      : [],
+    // Location multi-select (local only / local + remote / remote only), empty
+    // meaning no filter, mirroring `users`. Unknown persisted ids are dropped
+    // so a stale selection can never hide every branch.
+    locations: Array.isArray(savedState.branchLocations)
+      ? savedState.branchLocations.filter((l) =>
+          ["local", "both", "remote-only"].includes(l)
+        )
       : [],
     sort:
       typeof savedState.branchSort === "string"
@@ -115,6 +124,7 @@
       expanded: Array.from(expanded),
       branchPrune: branchFilters.prune,
       branchUsers: branchFilters.users.slice(),
+      branchLocations: branchFilters.locations.slice(),
       branchSort: branchFilters.sort,
       branchPrStatus: branchFilters.prStatus,
       branchReviewer: branchFilters.reviewer,
@@ -1117,6 +1127,14 @@
     { id: "name", label: "Name (A–Z)" },
   ];
 
+  // Multi-select Location filter: where a branch lives. Ids match branchKind()
+  // so a selection filters rows by the same tag they display. Empty = no filter.
+  const LOCATION_OPTIONS = [
+    { id: "local", label: "Local only" },
+    { id: "both", label: "Local + remote" },
+    { id: "remote-only", label: "Remote only" },
+  ];
+
   // Single-select PR Status filter. The per-branch fetch is open-only, so the
   // only PR states a branch can carry are "open" and "draft"; "all" applies no
   // PR filter. Only shown when GitHub PR data is available (prAvailable).
@@ -1208,6 +1226,13 @@
     // known committer is dropped only while a filter is active.
     if (userSet.size) {
       rows = rows.filter((b) => b.lastUser && userSet.has(b.lastUser));
+    }
+
+    // Location filter: keep branches whose locality tag (local only /
+    // local + remote / remote only) is among the selected ones.
+    const locSet = new Set(branchFilters.locations);
+    if (locSet.size) {
+      rows = rows.filter((b) => locSet.has(branchKind(b)));
     }
 
     // PR-status filter: only honored when PR data is actually available, so a
@@ -1316,6 +1341,30 @@
       : "Anyone";
     const controls = menu("user", "Updated by", userSummary, userItems);
 
+    // Location multi-select, mirroring Updated by: toggling an entry keeps the
+    // menu open, empty selection means no filter.
+    const locSelected = new Set(branchFilters.locations);
+    const locItems = LOCATION_OPTIONS.map(
+      (o) =>
+        '<button class="bfilter-item" role="menuitemcheckbox" data-loc="' +
+        o.id +
+        '" aria-checked="' +
+        locSelected.has(o.id) +
+        '"><span class="bcheck">' +
+        (locSelected.has(o.id) ? icons.check : "") +
+        "</span>" +
+        esc(o.label) +
+        "</button>"
+    ).join("");
+    const locSummary =
+      branchFilters.locations.length === 1
+        ? LOCATION_OPTIONS.find((o) => o.id === branchFilters.locations[0])
+            .label
+        : branchFilters.locations.length
+        ? branchFilters.locations.length + " selected"
+        : "All";
+    const locationMenu = menu("location", "Location", locSummary, locItems);
+
     const sortItems = SORT_OPTIONS.map(
       (s) =>
         '<button class="bfilter-item" role="menuitemradio" data-sort="' +
@@ -1380,18 +1429,20 @@
     // list is narrowed.
     const filterApplied =
       branchFilters.users.length > 0 ||
+      branchFilters.locations.length > 0 ||
       (branchFilters.prStatus !== "all" && prAvailable(data)) ||
       (branchFilters.reviewer !== "all" && prAvailable(data));
     const clearButton =
       '<button class="bfilter-clear" data-action="clearFilters"' +
       (filterApplied ? "" : " disabled") +
-      ' title="Clear the author, PR Status and Reviewer filters">' +
+      ' title="Clear the author, Location, PR Status and Reviewer filters">' +
       icons.cross +
       "<span>Clear Filters</span></button>";
 
     return (
       '<div class="bfilter-bar">' +
       controls +
+      locationMenu +
       menu("sort", "Sort", sortOpt.label, sortItems) +
       prStatusMenu +
       reviewerMenu +
@@ -1759,6 +1810,18 @@
         renderBranches();
         return;
       }
+      // Location multi-select: toggle like Updated by (menu stays open).
+      const loc = e.target.closest("[data-loc]");
+      if (loc) {
+        const id = loc.getAttribute("data-loc");
+        const i = branchFilters.locations.indexOf(id);
+        if (i === -1) branchFilters.locations.push(id);
+        else branchFilters.locations.splice(i, 1);
+        branchPage = 0;
+        persist();
+        renderBranches();
+        return;
+      }
       const sort = e.target.closest("[data-sort]");
       if (sort) {
         branchFilters.sort =
@@ -1791,13 +1854,14 @@
         renderBranches();
         return;
       }
-      // Clear Filters: resets author + PR Status + Reviewer (not Sort).
-      // Webview-only; the disabled attribute is the rendered guard, re-checked
-      // here so a stale click can't fire when nothing is filtering.
+      // Clear Filters: resets author + Location + PR Status + Reviewer (not
+      // Sort). Webview-only; the disabled attribute is the rendered guard,
+      // re-checked here so a stale click can't fire when nothing is filtering.
       const clearFilters = e.target.closest("[data-action='clearFilters']");
       if (clearFilters) {
         if (clearFilters.disabled) return;
         branchFilters.users = [];
+        branchFilters.locations = [];
         branchFilters.prStatus = "all";
         branchFilters.reviewer = "all";
         openMenu = "";
