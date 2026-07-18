@@ -97,6 +97,8 @@ listed until you make a selection:
 - **Updated by** — pick one or more people (the committers of the listed branches)
   to show only the branches they last touched. You are pinned to the top of the
   list.
+- **Location** — pick where a branch lives: **Local only**, **Local + remote**,
+  or **Remote only** (multi-select, matching the tag on each row).
 - **Sort** — Recently updated, Least recently updated, or Name (A–Z).
 - **PR Status** — a single-select (shown only once a GitHub token is connected)
   that narrows the list by pull request state: **All** (no filter), **Open**, or
@@ -105,8 +107,9 @@ listed until you make a selection:
   that narrows the list to branches whose PR has a review requested from you,
   i.e. the PRs you still have to review: **All** (no filter) or
   **Review requested**.
-- **Clear Filters** — resets the author, PR Status and Reviewer filters in one
-  click; enabled only while a filter is active. (Sort is left as you set it.)
+- **Clear Filters** — resets the author, Location, PR Status and Reviewer filters
+  in one click; enabled only while a filter is active. (Sort is left as you set
+  it.)
 
 Your filter and sort choices are remembered the next time you open the view. Close
 it like any editor tab; the Branches button reopens it.

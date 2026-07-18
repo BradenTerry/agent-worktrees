@@ -89,7 +89,8 @@ state, and its running agents in one view.
   the remote). The view is **git-first**: each row carries a "last updated" line
   (the tip commit's committer date as a relative time, and who made it), and the
   client-side controls are an **Updated by** user filter (the committers of the
-  listed branches) and a **Sort** by most/least recently updated or name — all
+  listed branches), a **Location** multi-select (local only / local + remote /
+  remote only) and a **Sort** by most/least recently updated or name — all
   derived from git, so they work with or without a token. When a GitHub token is
   stored, PR/CI status is refreshed automatically when the tab opens (the
   **Fetch Open PRs** button spins until it lands) and can be re-polled on demand
@@ -98,7 +99,8 @@ state, and its running agents in one view.
   (no filter), **Open**, or **Draft** — alongside a **Reviewer** single-select
   that narrows to branches whose PR has a review requested from one or more
   person (**All** or **Review requested**). A **Clear Filters** button resets the
-  author, PR Status and Reviewer filters (enabled only while one is active). A branch's
+  author, Location, PR Status and Reviewer filters (enabled only while one is
+  active). A branch's
   **open** (or draft) PR rollup is shown when one exists, as a hint on the branch
   row — a dedicated PR view may come later.
 
@@ -325,11 +327,15 @@ fetch each PR's checks and reviews) unchanged, so the two are separate code
 paths — and the cards still show CI checks and review status that the branches
 view does not.
 
-The view is git-first, so its **Updated by** filter and **Sort** are git-based
-and run entirely client-side over the cached payload — changing either issues no
-network request, and both work with no token at all. The **Updated by** filter is
+The view is git-first, so its **Updated by** and **Location** filters and
+**Sort** are git-based and run entirely client-side over the cached payload —
+changing any of them issues no network request, and all work with no token at
+all. The **Updated by** filter is
 a multi-select of the branches' tip-commit committers (`userOptions`, viewer
-pinned first when a committer name matches the GitHub login); the **Sort** is
+pinned first when a committer name matches the GitHub login); the **Location**
+filter is a multi-select over where a branch lives — `Local only` /
+`Local + remote` / `Remote only`, matching the tag each row displays
+(`branchKind`), with an empty selection meaning no filter; the **Sort** is
 single-select over `Recently updated` / `Least recently updated` (tip-commit
 `committerdate`) and `Name (A–Z)`. Two **PR-aware** single-selects round out the
 bar, each shown **only** when GitHub PR data is available (and ignored if their
@@ -340,10 +346,11 @@ list): **PR Status** narrows by PR state — `All` (no filter), `Open`, or `Draf
 signed-in user (`reviewRequestedFromViewer`), i.e. the PRs they still have to
 review — `All` (no filter) or `Review requested`. A
 **Clear Filters** button (right-aligned, `data-action="clearFilters"`) resets the
-**Updated by**, **PR Status** and **Reviewer** filters in one click (Sort is an
-ordering, not a filter, so it is left alone); it is `disabled` unless a filter is
-actually narrowing the list (`users.length > 0 || (prStatus !== "all" &&
-prAvailable) || (reviewer !== "all" && prAvailable)`), the same predicate
+**Updated by**, **Location**, **PR Status** and **Reviewer** filters in one click
+(Sort is an ordering, not a filter, so it is left alone); it is `disabled` unless
+a filter is actually narrowing the list (`users.length > 0 ||
+locations.length > 0 || (prStatus !== "all" && prAvailable) ||
+(reviewer !== "all" && prAvailable)`), the same predicate
 `visibleBranches` filters on. A
 branch's open (or draft) PR rollup is rendered as a hint on its row when one
 exists; the fetch is open-only, so merged/closed PRs are not loaded. Deleting a
@@ -478,7 +485,7 @@ flowchart TD
     WV --> LB["git.listBranches<br/>local + remote-only,<br/>worktree association"]
     WV --> FPB["github.fetchPrsByBranch<br/>GET /pulls?state=open,<br/>open PRs (no checks/reviews)"]
     WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
-    BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Sort (last commit / name) · PR Status select: All/Open/Draft (when PR data available) · Clear Filters (when a filter is active)"]
+    BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Location (local / local + remote / remote only) · Sort (last commit / name) · PR Status select: All/Open/Draft (when PR data available) · Clear Filters (when a filter is active)"]
     FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]
     CS --> PG["Client-side pagination<br/>25/page, Prev/Next"]
     PG --> ROWS[Branch rows]
