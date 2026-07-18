@@ -598,11 +598,6 @@
 
   function card(wt) {
     const isCollapsed = !expanded.has(wt.path);
-    // The card holding the agent whose terminal is open gets a border like the
-    // in-workspace card, so the worktree being talked to stands out at a glance.
-    const hasActiveTerminal =
-      !!activeSessionId &&
-      (wt.agents || []).some((a) => a.sessionId === activeSessionId);
     const badges = [];
     if (wt.isPrimary) badges.push('<span class="badge primary">Primary</span>');
     if (wt.detached) badges.push('<span class="badge warn">detached</span>');
@@ -662,7 +657,6 @@
     return (
       '<div class="card' +
       (wt.inWorkspace ? " open" : "") +
-      (hasActiveTerminal ? " terminal-open" : "") +
       (isCollapsed ? " collapsed" : "") +
       '">' +
       '<div class="card-top">' +
@@ -2089,14 +2083,11 @@
       if (on) activeRow = row;
     });
     root
-      .querySelectorAll(".agents-bar.terminal-open, .card.terminal-open")
-      .forEach((el) => el.classList.remove("terminal-open"));
+      .querySelectorAll(".agents-bar.terminal-open")
+      .forEach((bar) => bar.classList.remove("terminal-open"));
     const card = activeRow && activeRow.closest(".card");
-    if (card) {
-      card.classList.add("terminal-open");
-      const bar = card.querySelector(".agents-bar");
-      if (bar) bar.classList.add("terminal-open");
-    }
+    const bar = card && card.querySelector(".agents-bar");
+    if (bar) bar.classList.add("terminal-open");
   }
 
   // --- Custom hover tooltip --------------------------------------------------
