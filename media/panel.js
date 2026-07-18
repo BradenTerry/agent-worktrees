@@ -1672,7 +1672,7 @@
       // the remote). Prompts before deleting; never touches the remote. Last in
       // the row, behind a divider, so the destructive action is not sandwiched
       // between the routine fetch buttons.
-      '<button class="branches-refresh branches-danger" data-action="deleteGoneBranches" title="Delete every local branch whose upstream branch is gone (merged or deleted on the remote). The remote is left untouched.">' +
+      '<button class="branches-refresh branches-danger" data-action="deleteGoneBranches" data-tip="Delete every local branch whose remote branch no longer exists (merged or deleted on the remote). The remote is never touched, and branches with unmerged work get an extra confirmation.">' +
       icons.trash +
       " Delete gone</button>" +
       "</div>" +
