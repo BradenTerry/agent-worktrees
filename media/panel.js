@@ -362,9 +362,9 @@
     // Integrations); sits to the left of the diff totals when enabled. The
     // active state marks the worktree whose repo is currently shown in Source
     // Control (the scope is already set).
-    // The active worktree (the one Source Control is scoped to) shows a labeled
-    // pill instead of a bare highlighted icon, so which worktree the diff view
-    // is on can be read at a glance instead of hunting for a small blue glyph.
+    // Labeled on every worktree (not just the active one) so toggling the
+    // scope never shifts the layout; the active worktree's pill fills blue,
+    // making which worktree the diff view is on readable at a glance.
     const scopeBtn =
       lastData && lastData.scmEnabled
         ? '<button class="iconbtn scm-scope' +
@@ -377,9 +377,7 @@
             : "Show only this worktree in Source Control") +
           '">' +
           icons.branch +
-          (scmActive
-            ? '<span class="scm-scope-label">Source Control</span>'
-            : "") +
+          '<span class="scm-scope-label">Source Control</span>' +
           "</button>"
         : "";
     if (!g) return scopeBtn ? '<div class="gitline">' + scopeBtn + "</div>" : "";
@@ -600,6 +598,11 @@
 
   function card(wt) {
     const isCollapsed = !expanded.has(wt.path);
+    // The card holding the agent whose terminal is open gets a border like the
+    // in-workspace card, so the worktree being talked to stands out at a glance.
+    const hasActiveTerminal =
+      !!activeSessionId &&
+      (wt.agents || []).some((a) => a.sessionId === activeSessionId);
     const badges = [];
     if (wt.isPrimary) badges.push('<span class="badge primary">Primary</span>');
     if (wt.detached) badges.push('<span class="badge warn">detached</span>');
@@ -659,6 +662,7 @@
     return (
       '<div class="card' +
       (wt.inWorkspace ? " open" : "") +
+      (hasActiveTerminal ? " terminal-open" : "") +
       (isCollapsed ? " collapsed" : "") +
       '">' +
       '<div class="card-top">' +
@@ -2085,11 +2089,14 @@
       if (on) activeRow = row;
     });
     root
-      .querySelectorAll(".agents-bar.terminal-open")
-      .forEach((bar) => bar.classList.remove("terminal-open"));
+      .querySelectorAll(".agents-bar.terminal-open, .card.terminal-open")
+      .forEach((el) => el.classList.remove("terminal-open"));
     const card = activeRow && activeRow.closest(".card");
-    const bar = card && card.querySelector(".agents-bar");
-    if (bar) bar.classList.add("terminal-open");
+    if (card) {
+      card.classList.add("terminal-open");
+      const bar = card.querySelector(".agents-bar");
+      if (bar) bar.classList.add("terminal-open");
+    }
   }
 
   // --- Custom hover tooltip --------------------------------------------------

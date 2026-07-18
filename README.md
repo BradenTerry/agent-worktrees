@@ -39,10 +39,10 @@ state, and its running agents in one view.
 - **Agent** — start one or more Claude CLI sessions in a worktree, each in its
   own terminal. Sessions can be revealed (focus) or stopped from the panel, and
   closing a terminal removes its row. The agent whose terminal is currently
-  active is highlighted (blue outline + terminal glyph on its row, and a marker
-  on its worktree's Agents bar for collapsed cards), driven by
-  `onDidChangeActiveTerminal` as a lightweight class toggle — no re-render, no
-  git spawns.
+  active is highlighted (blue outline + terminal glyph on its row, the same
+  focus border on its worktree card as an in-workspace card, and a marker on
+  the Agents bar for collapsed cards), driven by `onDidChangeActiveTerminal`
+  as a lightweight class toggle — no re-render, no git spawns.
 - **Agent & Worktree** — create a new worktree with Claude (`claude -w`) and
   start an agent in it in a single step.
 - **Open in new window** — open any worktree in its own VS Code window from the
