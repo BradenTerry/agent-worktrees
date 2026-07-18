@@ -1178,6 +1178,12 @@ button.busy {
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.22));
 }
 
+/* Account actions (Replace token / Disconnect) under the connection status. */
+.gh-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .gh-disconnect {
   align-self: flex-start;
 }
