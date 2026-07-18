@@ -573,7 +573,7 @@
       '" title="Start a Claude session in this worktree">' +
       '<span class="agent-plus">+</span>' +
       icons.agentMark +
-      "</button>";
+      "<span>New agent</span></button>";
 
     // Change the branch this worktree has checked out: pick an existing branch
     // or create a new one. Detached worktrees have no branch to swap from, but
@@ -822,6 +822,9 @@
   let settingsOpen = false;
   let settingsTab = "github";
   let lastGhSig = "";
+  // Once a token is connected, the token input and its how-to text are hidden
+  // behind a "Replace token" toggle; this tracks whether that form is open.
+  let ghTokenFormOpen = false;
 
   function ghSig(data) {
     return JSON.stringify([
@@ -868,8 +871,16 @@
         "</div>";
     }
 
-    const disconnect = gh.hasToken
-      ? '<button class="gh-disconnect" data-gh="disconnect">Disconnect</button>'
+    // With a token stored, the entry form collapses behind "Replace token" and
+    // the account actions sit right under the connection status they act on.
+    const showForm = !gh.hasToken || ghTokenFormOpen;
+    const accountActions = gh.hasToken
+      ? '<div class="gh-actions">' +
+        '<button data-gh="replaceToken">' +
+        (showForm ? "Cancel" : "Replace token") +
+        "</button>" +
+        '<button class="gh-disconnect" data-gh="disconnect">Disconnect</button>' +
+        "</div>"
       : "";
 
     const tokenField =
@@ -932,9 +943,8 @@
       "state, CI checks, review status and comments — refreshed as your agents work.</p>" +
       toggle +
       status +
-      tokenField +
-      links +
-      disconnect +
+      accountActions +
+      (showForm ? tokenField + links : "") +
       "</section>"
     );
   }
@@ -1051,6 +1061,7 @@
     const token = input && input.value.trim();
     if (!token) return;
     send("setGithubToken", { token });
+    ghTokenFormOpen = false;
     input.value = "";
     const btn = root.querySelector('[data-gh="save"]');
     if (btn) {
@@ -1062,6 +1073,7 @@
   function closeSettings() {
     if (!settingsOpen) return;
     settingsOpen = false;
+    ghTokenFormOpen = false;
     render(lastData);
   }
 
@@ -1469,7 +1481,7 @@
             icons.agentMark +
             "Start agent</button>"
           : "")
-      : '<button class="bcreate primary" data-action="worktreeFromBranch" data-branch="' +
+      : '<button class="bcreate" data-action="worktreeFromBranch" data-branch="' +
         esc(b.name) +
         '" data-remote="' +
         (b.remoteOnly ? "1" : "0") +
@@ -1695,7 +1707,13 @@
     if (gh) {
       const kind = gh.getAttribute("data-gh");
       if (kind === "save") saveToken();
-      else if (kind === "disconnect") send("clearGithubToken");
+      else if (kind === "disconnect") {
+        ghTokenFormOpen = false;
+        send("clearGithubToken");
+      } else if (kind === "replaceToken") {
+        ghTokenFormOpen = !ghTokenFormOpen;
+        renderSettings();
+      }
       return;
     }
     // Settings tab switch (webview-only; no round trip).
