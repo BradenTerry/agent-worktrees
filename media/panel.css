@@ -176,12 +176,6 @@ button.accept {
 .card.open {
   border-color: var(--vscode-focusBorder);
 }
-/* The worktree whose agent owns the active terminal: same focus border as the
-   in-workspace card, so the worktree being talked to stands out in the list.
-   The row highlight and Agents-bar glyph pin down the exact agent. */
-.card.terminal-open {
-  border-color: var(--vscode-focusBorder);
-}
 
 .card-top {
   display: flex;
