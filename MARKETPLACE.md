@@ -48,10 +48,11 @@ The **Branches view** opens as a full editor tab listing every branch with when 
 - **Skills used** — see which Claude skills each agent has invoked.
 - **Subagents used** — a robot count shows how many subagents each agent has
   spawned, plus the total across the worktree.
-- **Delete worktrees** — remove a worktree (`git worktree remove`, with a force
-  option that also overrides locks) without leaving the panel, then optionally
-  delete its leftover branch in the same step, with an extra confirmation when
-  that would lose unpushed or uncommitted work.
+- **Delete worktrees** — remove a worktree without leaving the panel, in one
+  confirmation. The dialog tells you upfront what the removal touches (running
+  agents, uncommitted changes, unpushed commits on the branch) and lets you
+  remove the worktree alone or remove it and delete its leftover branch in the
+  same step. No chain of follow-up prompts.
 - **Stale lock cleanup** — Claude locks the worktrees it creates while a session
   runs; if a session crashes or is killed, the leftover lock used to leave a
   `locked` badge on a worktree with no agents and block deleting it. The panel

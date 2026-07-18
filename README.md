@@ -53,12 +53,15 @@ state, and its running agents in one view.
   `git switch` in that worktree only (`git switch -c` when creating), so the other
   worktrees stay put; git's own error (a checkout conflict, say) is surfaced
   verbatim.
-- **Delete Worktree** — `git worktree remove` (offers a force option when dirty
-  or locked, passing `--force` twice as git requires for locked trees, and
-  stops any agents running in the worktree first). Removing a worktree leaves its
-  branch behind, so it then offers to delete that branch too (never the default
-  branch); when the branch has commits not pushed to its upstream or the worktree
-  had uncommitted changes, it confirms a second time before the force delete.
+- **Delete Worktree** — `git worktree remove` behind a single confirmation. The
+  modal gathers everything upfront — agents that will be stopped, uncommitted
+  changes that will be discarded, the branch left behind and its unpushed commit
+  count — and offers **Remove** or **Remove and Delete Branch** (never the
+  default branch). Because the consequences were disclosed, no follow-up prompts:
+  a dirty or locked worktree is force-removed (passing `--force` twice, as git
+  requires for locked trees), and the branch delete forces past "not fully
+  merged" when the unpushed commits were already shown. The only second prompt
+  is the rare case where git refuses a delete the modal claimed was loss-free.
 - **Stale lock cleanup** — `claude -w` locks the worktree it creates for the
   lifetime of the session ("claude session ... (pid ... start ...)"), and a
   crashed or killed session leaves that lock behind: a `locked` badge with no

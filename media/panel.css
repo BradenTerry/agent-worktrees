@@ -306,6 +306,10 @@ button.accept {
 .gitline .clean {
   color: var(--vscode-charts-green, #89d185);
 }
+.gitline .clean svg {
+  width: 12px;
+  height: 12px;
+}
 .gitline .dirty {
   color: var(--vscode-charts-yellow, #cca700);
 }
@@ -332,7 +336,10 @@ button.accept {
   background: currentColor;
 }
 
-/* Status colors, sourced from VS Code chart variables with safe fallbacks. */
+/* Status colors, sourced from VS Code chart variables with safe fallbacks.
+   Each status also gets its own shape — active: filled circle, waiting:
+   filled diamond, idle: hollow ring — so state never rides on color alone
+   (color-blind users see the same distinctions). */
 .status-dot {
   --c-active: var(--vscode-charts-green, #89d185);
   --c-waiting: var(--vscode-charts-yellow, #cca700);
@@ -351,6 +358,8 @@ button.accept {
 .status-dot.waiting {
   background: var(--c-waiting);
   --pulse: var(--c-waiting);
+  border-radius: 2px;
+  transform: rotate(45deg) scale(0.9);
 }
 .status-dot.idle {
   background: transparent;
@@ -358,14 +367,14 @@ button.accept {
 }
 /* Active (green) and waiting (yellow) agent dots pulse so in-progress and
    needs-attention agents read at a glance. Scoped to the agent rows and the
-   non-zero agents-bar stats: the settings connection dots stay static, and a
-   zero-count stat (already dimmed) does not pulse. Animates the dot's own
-   opacity plus an expanding glow ring so the pulse is clearly visible (the old
+   agents-bar stats (zero-count stats are not rendered at all): the settings
+   connection dots stay static. Animates the dot's own opacity plus an
+   expanding glow ring so the pulse is clearly visible (the old
    box-shadow-only ring faded out before it ever became perceptible). */
 .agent-row .status-dot.active,
 .agent-row .status-dot.waiting,
-.agents-bar .stat.active:not(.zero) .status-dot,
-.agents-bar .stat.waiting:not(.zero) .status-dot {
+.agents-bar .stat.active .status-dot,
+.agents-bar .stat.waiting .status-dot {
   animation: status-pulse 1.4s ease-in-out infinite;
 }
 @keyframes status-pulse {
@@ -429,9 +438,6 @@ button.accept {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-.stat.zero {
-  opacity: 0.4;
 }
 
 .agents {
@@ -545,8 +551,27 @@ button.accept {
   padding: 3px 5px;
 }
 .act.ghost.danger:hover {
+  background: var(
+    --vscode-inputValidation-errorBackground,
+    rgba(241, 76, 76, 0.15)
+  );
   color: var(--vscode-errorForeground, #f14c4c);
   border-color: var(--vscode-errorForeground, #f14c4c);
+}
+/* Separate the destructive delete from the routine header actions with a
+   divider and extra gap, so it cannot be hit by a near-miss on refresh or
+   open-in-window. */
+.card-top .act.danger {
+  margin-left: 8px;
+  position: relative;
+}
+.card-top .act.danger::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 3px;
+  bottom: 3px;
+  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
 }
 button {
   display: inline-flex;
@@ -1231,8 +1256,21 @@ button.busy {
   width: 14px;
   height: 14px;
 }
-/* Destructive header action (Delete gone): red accent on hover so it reads as
-   distinct from the neutral Fetch / Refresh buttons. */
+/* Destructive header action (Delete gone): last in the row behind a divider,
+   with a red accent on hover, so it reads as distinct from the neutral Fetch /
+   Refresh buttons. */
+.branches-danger {
+  margin-left: 10px;
+  position: relative;
+}
+.branches-danger::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 2px;
+  bottom: 2px;
+  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+}
 .branches-danger:hover {
   background: var(--vscode-inputValidation-errorBackground, rgba(241, 76, 76, 0.15));
   color: var(--vscode-errorForeground, #f14c4c);

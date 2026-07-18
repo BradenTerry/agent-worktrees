@@ -254,8 +254,9 @@
 
   /**
    * Collapsible "Agents" bar at the bottom of a card: it toggles the agent list
-   * and carries the per-status counts. Zero-count statuses are dimmed so the row
-   * reads at a glance.
+   * and carries the per-status counts. Zero-count statuses are dropped rather
+   * than dimmed, and a single agent shows just its status dot — the "Agents 1"
+   * count already says how many there are, so a "1" breakdown adds nothing.
    */
   function agentsBar(agents, path) {
     const counts = { active: 0, waiting: 0, idle: 0 };
@@ -277,16 +278,30 @@
       : "";
 
     const stat = (key) =>
-      '<span class="stat ' +
-      key +
-      (counts[key] ? "" : " zero") +
-      '" title="' +
-      STATUS[key].label +
-      '"><span class="status-dot ' +
-      key +
-      '"></span>' +
-      counts[key] +
-      "</span>";
+      counts[key]
+        ? '<span class="stat ' +
+          key +
+          '" title="' +
+          counts[key] +
+          " " +
+          STATUS[key].label.toLowerCase() +
+          '"><span class="status-dot ' +
+          key +
+          '"></span>' +
+          counts[key] +
+          "</span>"
+        : "";
+    const single = statusOf(agents[0]);
+    const stats =
+      agents.length === 1
+        ? '<span class="stat ' +
+          single +
+          '" title="' +
+          STATUS[single].label +
+          '"><span class="status-dot ' +
+          single +
+          '"></span></span>'
+        : stat("active") + stat("waiting") + stat("idle");
 
     return (
       '<div class="agents-bar" data-toggle="' +
@@ -301,9 +316,7 @@
       "</span>" +
       subStat +
       '<span class="agents-bar-stats">' +
-      stat("active") +
-      stat("waiting") +
-      stat("idle") +
+      stats +
       "</span>" +
       "</div>"
     );
@@ -338,22 +351,29 @@
           (g.dirty === 1 ? " change" : " changes") +
           "</span>"
       );
+    // Zero-value segments are hidden: the nonzero counts are the signal, and a
+    // row of zeros just buries them. A fully quiet worktree gets a single
+    // "Clean" segment instead of an empty line.
     if (g.insertions || g.deletions) {
       segs.push('<span class="seg ins">+' + (g.insertions || 0) + "</span>");
       segs.push('<span class="seg del">−' + (g.deletions || 0) + "</span>");
-    } else {
-      segs.push('<span class="seg none">+/- 0</span>');
     }
-    segs.push(
-      '<span class="seg ahead" title="Commits to push">↑' +
-        (g.ahead || 0) +
-        "</span>"
-    );
-    segs.push(
-      '<span class="seg behind" title="Commits to pull">↓' +
-        (g.behind || 0) +
-        "</span>"
-    );
+    if (g.ahead)
+      segs.push(
+        '<span class="seg ahead" title="Commits to push">↑' + g.ahead + "</span>"
+      );
+    if (g.behind)
+      segs.push(
+        '<span class="seg behind" title="Commits to pull">↓' +
+          g.behind +
+          "</span>"
+      );
+    if (!segs.length)
+      segs.push(
+        '<span class="seg clean" title="No local changes, in sync with upstream">' +
+          icons.check +
+          "Clean</span>"
+      );
     return '<div class="gitline">' + scopeBtn + segs.join("") + "</div>";
   }
 
@@ -1615,11 +1635,6 @@
       (branchFilters.prune ? " checked" : "") +
       " /> Prune</label>" +
       "</div>" +
-      // Bulk-delete local branches whose upstream is gone (merged or deleted on
-      // the remote). Prompts before deleting; never touches the remote.
-      '<button class="branches-refresh branches-danger" data-action="deleteGoneBranches" title="Delete every local branch whose upstream branch is gone (merged or deleted on the remote). The remote is left untouched.">' +
-      icons.trash +
-      " Delete gone</button>" +
       // Fetch Open PRs is the API-only counterpart to the git-only Fetch: it
       // re-polls open PR/CI status without a git fetch. Only useful (and only
       // shown) when a token is stored. PR/CI status is fetched on open and on
@@ -1639,6 +1654,13 @@
           "</span>" +
           "</div>"
         : "") +
+      // Bulk-delete local branches whose upstream is gone (merged or deleted on
+      // the remote). Prompts before deleting; never touches the remote. Last in
+      // the row, behind a divider, so the destructive action is not sandwiched
+      // between the routine fetch buttons.
+      '<button class="branches-refresh branches-danger" data-action="deleteGoneBranches" title="Delete every local branch whose upstream branch is gone (merged or deleted on the remote). The remote is left untouched.">' +
+      icons.trash +
+      " Delete gone</button>" +
       "</div>" +
       "</div>" +
       '<div class="branches-body">' +
