@@ -96,11 +96,13 @@ function normalizeSkill(raw) {
 }
 
 /**
- * Claude's own generated session title, read from the transcript. Claude Code
- * writes `{ "type": "ai-title", "aiTitle": "…" }` lines into the session JSONL
- * as it summarizes the work, updating it as the conversation evolves. That title
- * is a far better "what is this agent doing" summary than the raw last prompt,
- * so we use it when present.
+ * The session's title, read from the transcript. Claude Code writes
+ * `{ "type": "ai-title", "aiTitle": "…" }` lines into the session JSONL as it
+ * summarizes the work, and `{ "type": "custom-title", "customTitle": "…" }`
+ * when the title is set explicitly (a rename, or the app titling the session).
+ * Whichever kind was written last wins. That title is a far better "what is
+ * this agent doing" summary than the raw last prompt, so we use it when
+ * present.
  *
  * Reads only the tail of the file (the latest title sits near the end) so the
  * cost stays bounded no matter how large the transcript grows. Returns "" when
@@ -117,17 +119,23 @@ function readAiTitle(transcriptPath) {
     const buf = Buffer.alloc(want);
     readSync(fd, buf, 0, want, size - want);
     const lines = buf.toString("utf8").split("\n");
-    // Scan from the end for the most recent ai-title. The first line may be a
-    // partial record (we started mid-file); JSON.parse just skips it.
+    // Scan from the end for the most recent title of either kind. The first
+    // line may be a partial record (we started mid-file); JSON.parse skips it.
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i].trim();
-      if (!line || line.indexOf("ai-title") === -1) continue;
+      if (!line) continue;
+      if (line.indexOf("ai-title") === -1 && line.indexOf("custom-title") === -1)
+        continue;
       try {
         const o = JSON.parse(line);
-        if (o && o.type === "ai-title" && typeof o.aiTitle === "string") {
-          const t = o.aiTitle.replace(/\s+/g, " ").trim();
-          if (t) return t.slice(0, 120);
-        }
+        const title =
+          o && o.type === "ai-title" && typeof o.aiTitle === "string"
+            ? o.aiTitle
+            : o && o.type === "custom-title" && typeof o.customTitle === "string"
+            ? o.customTitle
+            : "";
+        const t = title.replace(/\s+/g, " ").trim();
+        if (t) return t.slice(0, 120);
       } catch {
         /* partial / non-JSON line — keep scanning */
       }
