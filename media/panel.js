@@ -338,18 +338,24 @@
     // Integrations); sits to the left of the diff totals when enabled. The
     // active state marks the worktree whose repo is currently shown in Source
     // Control (the scope is already set).
+    // The active worktree (the one Source Control is scoped to) shows a labeled
+    // pill instead of a bare highlighted icon, so which worktree the diff view
+    // is on can be read at a glance instead of hunting for a small blue glyph.
     const scopeBtn =
       lastData && lastData.scmEnabled
         ? '<button class="iconbtn scm-scope' +
           (scmActive ? " active" : "") +
           '" data-action="scopeScm" data-path="' +
           esc(path) +
-          '" title="' +
+          '" data-tip="' +
           (scmActive
-            ? "Showing in Source Control. Click to re-scope to this worktree."
+            ? "This worktree is shown in Source Control. Click to re-scope."
             : "Show only this worktree in Source Control") +
           '">' +
           icons.branch +
+          (scmActive
+            ? '<span class="scm-scope-label">Source Control</span>'
+            : "") +
           "</button>"
         : "";
     if (!g) return scopeBtn ? '<div class="gitline">' + scopeBtn + "</div>" : "";
