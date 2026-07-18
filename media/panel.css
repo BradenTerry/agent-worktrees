@@ -1578,6 +1578,15 @@ button.busy {
 .bagent {
   white-space: nowrap;
 }
+/* Create-worktree CTA: secondary at rest — a page of branch rows must not read
+   as a wall of primary buttons — going primary blue on hover/focus so the
+   action still asserts itself when targeted. */
+.bcreate:hover,
+.bcreate:focus-visible {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border-color: var(--vscode-button-border, transparent);
+}
 .bcreate svg,
 .bagent svg {
   width: 13px;
