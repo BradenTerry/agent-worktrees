@@ -578,10 +578,12 @@
     // Change the branch this worktree has checked out: pick an existing branch
     // or create a new one. Detached worktrees have no branch to swap from, but
     // the action still lets you switch onto one, so it is always offered.
+    // data-tip (the snappy custom tooltip) rather than title: the native
+    // tooltip's long delay makes an icon-only button feel unlabeled.
     const editBranchBtn =
       '<button class="act ghost iconact" data-action="changeBranch" data-path="' +
       esc(wt.path) +
-      '" title="Switch this worktree to another branch (or create one)">' +
+      '" data-tip="Switch this worktree to another branch (or create one)" aria-label="Switch branch">' +
       icons.edit +
       "</button>";
 
