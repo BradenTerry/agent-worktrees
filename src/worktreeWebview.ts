@@ -11,7 +11,7 @@ import {
   WorktreeData,
   BranchData,
 } from "./worktreeData";
-import { worktreeDirFor } from "./worktreeUtils";
+import { countWaitingAgents, worktreeDirFor } from "./worktreeUtils";
 import {
   addWorktree,
   addBranchWorktree,
@@ -323,6 +323,20 @@ export class WorktreeWebviewProvider
     // spawns on a many-branch repo — on every agent-activity refresh; it
     // catches up via onDidChangeViewState when re-shown.
     if (this.branchesPanel?.visible) void this.postBranches(false);
+    // Waiting agents surface as a number badge on the Activity Bar icon, so a
+    // blocked agent is visible even while the panel is hidden behind another
+    // view. Set before the unchanged-payload early return: a freshly resolved
+    // view starts with no badge regardless of what was last posted.
+    const waiting = countWaitingAgents(data.worktrees);
+    this.view.badge = waiting
+      ? {
+          value: waiting,
+          tooltip:
+            waiting === 1
+              ? "1 agent waiting for you"
+              : `${waiting} agents waiting for you`,
+        }
+      : undefined;
     const json = JSON.stringify(data);
     if (json === this.lastPosted) return;
     this.lastPosted = json;
