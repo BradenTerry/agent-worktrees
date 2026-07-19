@@ -278,7 +278,7 @@ test("idle_prompt notification stays active while background subagents run", () 
   assert.strictEqual(stateOf(sid).state, "active");
 });
 
-test("idle_prompt notification marks waiting when nothing is pending", () => {
+test("idle_prompt notification keeps the prior state when nothing is pending", () => {
   const sid = "session-idle-nudge";
   const transcript = path.join(dir, sid + ".jsonl");
   fs.writeFileSync(
@@ -290,6 +290,27 @@ test("idle_prompt notification marks waiting when nothing is pending", () => {
     }) + "\n"
   );
   const base = { session_id: sid, cwd: repo, transcript_path: transcript };
+
+  // A finished turn stays idle: the idle nudge fires a minute after every
+  // turn ends, so mapping it to waiting flagged every done agent as waiting
+  // on the user forever (a permanent Activity Bar badge).
+  run({ hook_event_name: "Stop", ...base });
+  assert.strictEqual(stateOf(sid).state, "idle");
+  run({
+    hook_event_name: "Notification",
+    notification_type: "idle_prompt",
+    ...base,
+  });
+  assert.strictEqual(stateOf(sid).state, "idle");
+
+  // An unanswered permission prompt sitting there stays waiting through the
+  // idle nudge.
+  run({
+    hook_event_name: "Notification",
+    notification_type: "permission_prompt",
+    ...base,
+  });
+  assert.strictEqual(stateOf(sid).state, "waiting");
   run({
     hook_event_name: "Notification",
     notification_type: "idle_prompt",

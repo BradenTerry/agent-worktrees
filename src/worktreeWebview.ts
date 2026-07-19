@@ -376,16 +376,18 @@ export class WorktreeWebviewProvider
     // blocked agent is visible even while the panel is hidden behind another
     // view. Set before the unchanged-payload early return: a freshly resolved
     // view starts with no badge regardless of what was last posted.
+    // Clear with a zero-value badge, never `undefined`: once a number badge
+    // has been shown, VS Code ignores `badge = undefined` and the stale count
+    // stays on the icon forever (microsoft/vscode#162900; still reproduces
+    // for webview views). A `{value: 0}` badge applies and renders as none.
     const waiting = countWaitingAgents(data.worktrees);
-    this.view.badge = waiting
-      ? {
-          value: waiting,
-          tooltip:
-            waiting === 1
-              ? "1 agent waiting for you"
-              : `${waiting} agents waiting for you`,
-        }
-      : undefined;
+    this.view.badge = {
+      value: waiting,
+      tooltip:
+        waiting === 1
+          ? "1 agent waiting for you"
+          : `${waiting} agents waiting for you`,
+    };
     // lastActivity is a per-hook-event heartbeat the panel never renders;
     // including it in the signature would defeat this guard on every tool call
     // and rebuild the webview DOM for a byte-identical render.

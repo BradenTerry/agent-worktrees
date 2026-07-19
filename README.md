@@ -130,17 +130,20 @@ panel:
 | `SessionEnd`                                                    | removed from panel |
 
 `Notification` is not always "waiting": the emitter reads the payload's
-`notification_type` and keeps the agent **active** for `agent_completed` (a
-background subagent finished; the parent is about to pick the result up) and
-for `idle_prompt` while background subagents are still running. The pending
-count comes from the transcript's latest `turn_duration` record
-(`pendingBackgroundAgentCount`), which Claude Code appends at every turn end —
-after the `Stop` hook has already run, so only `Notification` (which fires much
-later) trusts it. Without this, a parent agent that fanned work out to
-background subagents would sit "waiting on you" (and pollute the Activity Bar
-badge) the whole time its subagents were busy. All other notification types —
-permission prompts, a subagent needing input, or an older Claude Code that
-sends no type — mark **waiting** as before.
+`notification_type`. `agent_completed` (a background subagent finished; the
+parent is about to pick the result up) keeps the agent **active**.
+`idle_prompt` — fired ~60s after any turn ends with no user input — is not a
+"needs you" signal at all: it also fires when a session simply finished and is
+sitting idle, which used to flag every done agent as waiting and pin a
+permanent count on the Activity Bar badge. It now keeps the agent **active**
+while background subagents are still running, and otherwise preserves the
+prior state (an unanswered permission prompt stays waiting, a finished turn
+stays idle). The pending count comes from the transcript's latest
+`turn_duration` record (`pendingBackgroundAgentCount`), which Claude Code
+appends at every turn end — after the `Stop` hook has already run, so only
+`Notification` (which fires much later) trusts it. All other notification
+types — permission prompts, a subagent needing input, or an older Claude Code
+that sends no type — mark **waiting** as before.
 
 Installing the hooks edits your global `~/.claude/settings.json`, so it is always
 gated behind **explicit consent** in the panel — nothing is written until you
