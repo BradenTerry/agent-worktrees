@@ -31,7 +31,8 @@ export function activate(context: vscode.ExtensionContext) {
   // Apply the saved debug-tracing preference, and keep it in sync if changed.
   applyTraceSetting();
 
-  // Refresh/repair already-accepted hooks; never installs without consent.
+  // Refresh/repair/complete already-accepted hooks (including events a new
+  // version adds); never installs from scratch without consent.
   void syncHooks(context);
 
   const provider = new WorktreeWebviewProvider(context);

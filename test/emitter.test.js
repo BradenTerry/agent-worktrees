@@ -175,6 +175,19 @@ test("PreToolUse/PostToolUse skip the transcript read; turn boundaries pick the 
   assert.strictEqual(stateOf(sid).task, "Newer title", "Stop reads the latest title");
 });
 
+test("PostToolUse flips a waiting agent back to active", () => {
+  // The badge regression: Notification (permission prompt / question) marks
+  // waiting, and the approved tool finishing is the first event afterwards.
+  // Without it the agent stays "waiting" while it is visibly working.
+  const sid = "session-approve";
+  const base = { session_id: sid, cwd: repo };
+  run({ hook_event_name: "PreToolUse", tool_name: "Bash", ...base });
+  run({ hook_event_name: "Notification", ...base });
+  assert.strictEqual(stateOf(sid).state, "waiting");
+  run({ hook_event_name: "PostToolUse", tool_name: "Bash", ...base });
+  assert.strictEqual(stateOf(sid).state, "active");
+});
+
 test("Stop marks idle", () => {
   run({ hook_event_name: "Stop", session_id: SID, cwd: repo });
   const s = stateOf(SID);

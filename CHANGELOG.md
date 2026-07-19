@@ -2,6 +2,18 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.4.3
+
+- **Waiting badge now clears when an agent resumes working** - the PostToolUse
+  hook was never installed, so after you approved a permission prompt or
+  answered an agent's question nothing marked the session active again until
+  its next tool call started: the agent (and the Activity Bar count) stayed
+  "waiting" while it was visibly working. The emitter always mapped
+  PostToolUse to active; it is now actually installed, flipping the status
+  back the moment the approved tool finishes. Existing installs pick the new
+  hook up automatically on activation (all hooks run the same consented
+  emitter), without re-showing the consent page.
+
 ## 3.4.2
 
 - **Hook events no longer sweep git across every worktree** - agent activity
