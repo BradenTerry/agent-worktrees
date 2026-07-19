@@ -82,6 +82,13 @@ export const HOOKS: HookSpec[] = [
       "Keeps an agent marked Active while it is running tools and doing work.",
   },
   {
+    event: "PostToolUse",
+    matcher: "*",
+    label: "PostToolUse",
+    description:
+      "Marks an agent Active again when a tool finishes — the first signal after you approve a permission prompt or answer its question.",
+  },
+  {
     event: "Notification",
     label: "Notification",
     description:
@@ -167,8 +174,16 @@ function addHook(settings: Settings, spec: HookSpec, command: string): void {
  *  the mtime and re-reads. */
 let installedCache: { mtimeMs: number; installed: boolean } | undefined;
 
+/** The in-flight activation repair (syncHooks). hooksInstalled awaits it so the
+ *  panel's first render cannot race the repair: without this, an update that
+ *  adds a new managed event could read settings.json before syncHooks has
+ *  completed the install and flash the consent page at an already-consented
+ *  user. */
+let syncPending: Promise<void> = Promise.resolve();
+
 /** True only when every managed hook is present in global settings.json. */
 export async function hooksInstalled(): Promise<boolean> {
+  await syncPending;
   let mtimeMs = -1;
   try {
     mtimeMs = (await fs.promises.stat(SETTINGS_PATH)).mtimeMs;
@@ -222,29 +237,37 @@ export async function installHooks(
 
 /**
  * On activation, if the hooks are already installed, refresh the stable emitter
- * copy and repair any command path drift from a prior extension version. Never
- * installs anything the user has not already accepted.
+ * copy, repair any command path drift from a prior extension version, and add
+ * any events this version newly manages (all hooks run the same consented
+ * emitter; without this, an update that adds an event would flip
+ * hooksInstalled to false and re-show the consent page to a user who already
+ * accepted). Never installs from scratch — a user who has not consented has no
+ * emitter hooks at all, and none are added.
  */
-export async function syncHooks(
-  context: vscode.ExtensionContext
-): Promise<void> {
-  try {
-    const settings = await readSettings();
-    const anyInstalled = HOOKS.some((spec) => !!findHook(settings, spec));
-    if (!anyInstalled) return;
-    await ensureEmitter(context);
-    const command = hookCommand(context);
-    let changed = false;
-    for (const spec of HOOKS) {
-      const existing = findHook(settings, spec);
-      if (existing && existing.command !== command) {
-        existing.command = command;
-        changed = true;
+export function syncHooks(context: vscode.ExtensionContext): Promise<void> {
+  syncPending = (async () => {
+    try {
+      const settings = await readSettings();
+      const anyInstalled = HOOKS.some((spec) => !!findHook(settings, spec));
+      if (!anyInstalled) return;
+      await ensureEmitter(context);
+      const command = hookCommand(context);
+      let changed = false;
+      for (const spec of HOOKS) {
+        const existing = findHook(settings, spec);
+        if (!existing) {
+          addHook(settings, spec, command);
+          changed = true;
+        } else if (existing.command !== command) {
+          existing.command = command;
+          changed = true;
+        }
       }
+      if (changed) await writeSettings(settings);
+      await cleanupLegacy();
+    } catch {
+      /* best effort: a repair failure shouldn't block activation */
     }
-    if (changed) await writeSettings(settings);
-    await cleanupLegacy();
-  } catch {
-    /* best effort: a repair failure shouldn't block activation */
-  }
+  })();
+  return syncPending;
 }
