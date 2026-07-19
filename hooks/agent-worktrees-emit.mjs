@@ -197,7 +197,6 @@ function main() {
       "session";
   }
 
-  mkdirSync(SESSIONS_DIR, { recursive: true });
   const target = join(SESSIONS_DIR, id + ".json");
 
   // A genuine exit retires the agent immediately.
@@ -270,10 +269,18 @@ function main() {
   // the user's raw prompt: the title lands shortly after the first prompt, so
   // until then the panel row and terminal keep their default "Claude N" /
   // "Claude · <worktree>" label rather than echoing the prompt text.
+  // Skipped on PreToolUse/PostToolUse: those fire on every tool call and
+  // Claude Code blocks the tool until this hook exits, so a transcript tail
+  // read + parse per tool call is real latency on every agent. Titles land at
+  // turn boundaries, which the remaining events (UserPromptSubmit, Stop,
+  // Notification, SubagentStop, SessionStart) bracket; until one fires the
+  // prior title is carried forward.
   let task = typeof prior.task === "string" ? prior.task : "";
-  const aiTitle = readAiTitle(payload.transcript_path);
-  if (aiTitle) {
-    task = aiTitle;
+  if (event !== "PreToolUse" && event !== "PostToolUse") {
+    const aiTitle = readAiTitle(payload.transcript_path);
+    if (aiTitle) {
+      task = aiTitle;
+    }
   }
 
   let startedAt = typeof prior.startedAt === "number" ? prior.startedAt : now;
@@ -304,20 +311,33 @@ function main() {
   // half-written file (a partial read makes that agent's row vanish for a
   // refresh). The tmp name doesn't match the watcher's *.json pattern, and
   // rename replaces an existing file on Windows too.
+  const json = JSON.stringify(ev) + "\n";
   const tmp = target + "." + process.pid + ".tmp";
-  try {
-    writeFileSync(tmp, JSON.stringify(ev) + "\n");
+  const writeAtomic = () => {
+    writeFileSync(tmp, json);
     renameSync(tmp, target);
+  };
+  try {
+    writeAtomic();
   } catch {
-    // Rename can fail while a reader holds the file open on Windows; fall back
-    // to the in-place write rather than dropping the event. The write comes
-    // first: cleaning up the tmp file can itself throw (`force` only suppresses
-    // ENOENT, not a scanner holding it open), and the event must land anyway.
-    writeFileSync(target, JSON.stringify(ev) + "\n");
     try {
-      rmSync(tmp, { force: true });
+      // The sessions dir may not exist yet (first event on this machine).
+      // Created lazily here instead of unconditionally per event: PreToolUse
+      // blocks every tool call, so the hot path skips the mkdir syscall.
+      mkdirSync(SESSIONS_DIR, { recursive: true });
+      writeAtomic();
     } catch {
-      /* tmp locked by a scanner: a leaked tmp file beats a dropped event */
+      // Rename can fail while a reader holds the file open on Windows; fall
+      // back to the in-place write rather than dropping the event. The write
+      // comes first: cleaning up the tmp file can itself throw (`force` only
+      // suppresses ENOENT, not a scanner holding it open), and the event must
+      // land anyway.
+      writeFileSync(target, json);
+      try {
+        rmSync(tmp, { force: true });
+      } catch {
+        /* tmp locked by a scanner: a leaked tmp file beats a dropped event */
+      }
     }
   }
 }

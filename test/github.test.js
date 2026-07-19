@@ -376,3 +376,206 @@ test("fetchPrsByBranch: a transport error resolves to an empty map", async () =>
     globalThis.fetch = original;
   }
 });
+
+// --- completePrInfo / prUnchanged / fetchOpenPrsByHead -----------------------
+
+const {
+  completePrInfo,
+  prUnchanged,
+  fetchOpenPrsByHead,
+} = require("../out/github.js");
+
+const REPO2 = { owner: "o", repo: "r" };
+
+function rawPr(over) {
+  return {
+    number: 7,
+    title: "T",
+    html_url: "https://github.com/o/r/pull/7",
+    state: "open",
+    updated_at: "2026-01-01T00:00:00Z",
+    head: { sha: "sha1", ref: "feat" },
+    requested_reviewers: [],
+    ...over,
+  };
+}
+
+function priorInfo(over) {
+  return {
+    number: 7,
+    title: "T",
+    url: "https://github.com/o/r/pull/7",
+    state: "open",
+    checks: "pass",
+    checksPass: 3,
+    checksFail: 0,
+    checksPending: 0,
+    review: "approved",
+    approvals: 1,
+    changesRequested: 0,
+    reviewsPending: 0,
+    comments: 4,
+    mergeState: "clean",
+    autoMerge: false,
+    updatedAt: "2026-01-01T00:00:00Z",
+    headSha: "sha1",
+    ...over,
+  };
+}
+
+test("prUnchanged: same number, updated_at and head sha", () => {
+  assert.strictEqual(prUnchanged(priorInfo(), rawPr()), true);
+  assert.strictEqual(
+    prUnchanged(priorInfo(), rawPr({ updated_at: "2026-01-02T00:00:00Z" })),
+    false
+  );
+  assert.strictEqual(
+    prUnchanged(priorInfo(), rawPr({ head: { sha: "sha2", ref: "feat" } })),
+    false
+  );
+  assert.strictEqual(prUnchanged(null, rawPr()), false);
+  assert.strictEqual(prUnchanged(undefined, rawPr()), false);
+});
+
+test("completePrInfo: unchanged + settled + no aux makes zero requests", async () => {
+  resetGithubCache();
+  await withFetch(
+    () => {
+      throw new Error("no request expected");
+    },
+    async (calls) => {
+      const info = await completePrInfo(
+        "tok",
+        REPO2,
+        rawPr({ title: "fresher title" }),
+        priorInfo(),
+        false
+      );
+      assert.strictEqual(calls.length, 0);
+      assert.strictEqual(info.title, "fresher title");
+      assert.strictEqual(info.comments, 4);
+      assert.strictEqual(info.checks, "pass");
+    }
+  );
+});
+
+test("completePrInfo: unchanged with pending checks refetches only checks + status", async () => {
+  resetGithubCache();
+  await withFetch(
+    (url) => {
+      if (url.includes("/check-runs")) {
+        return jsonResponse(200, {
+          check_runs: [{ status: "completed", conclusion: "success" }],
+        });
+      }
+      if (url.includes("/status")) {
+        return jsonResponse(200, { state: "success", total_count: 0 });
+      }
+      throw new Error("unexpected request: " + url);
+    },
+    async (calls) => {
+      const info = await completePrInfo(
+        "tok",
+        REPO2,
+        rawPr(),
+        priorInfo({ checks: "pending", checksPending: 1, checksPass: 0 }),
+        false
+      );
+      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(info.checks, "pass");
+      // Reviews and detail were reused from prior.
+      assert.strictEqual(info.review, "approved");
+      assert.strictEqual(info.comments, 4);
+      assert.strictEqual(info.mergeState, "clean");
+    }
+  );
+});
+
+test("completePrInfo: aux refresh refetches detail + checks but not reviews", async () => {
+  resetGithubCache();
+  await withFetch(
+    (url) => {
+      if (url.endsWith("/pulls/7")) {
+        return jsonResponse(200, {
+          comments: 9,
+          review_comments: 1,
+          mergeable_state: "behind",
+          auto_merge: null,
+        });
+      }
+      if (url.includes("/check-runs")) {
+        return jsonResponse(200, {
+          check_runs: [{ status: "completed", conclusion: "success" }],
+        });
+      }
+      if (url.includes("/status")) {
+        return jsonResponse(200, { state: "success", total_count: 0 });
+      }
+      throw new Error("unexpected request: " + url);
+    },
+    async (calls) => {
+      const info = await completePrInfo("tok", REPO2, rawPr(), priorInfo(), true);
+      assert.strictEqual(calls.length, 3);
+      assert.ok(!calls.some((c) => c.url.includes("/reviews")));
+      // The base moved: the aux refresh catches the out-of-date flag.
+      assert.strictEqual(info.mergeState, "behind");
+      assert.strictEqual(info.comments, 10);
+      assert.strictEqual(info.review, "approved");
+    }
+  );
+});
+
+test("completePrInfo: a changed PR refetches everything", async () => {
+  resetGithubCache();
+  await withFetch(
+    (url) => {
+      if (url.endsWith("/pulls/7")) {
+        return jsonResponse(200, {
+          comments: 1,
+          review_comments: 0,
+          mergeable_state: "clean",
+        });
+      }
+      if (url.includes("/reviews")) return jsonResponse(200, []);
+      if (url.includes("/check-runs")) return jsonResponse(200, { check_runs: [] });
+      if (url.includes("/status")) return jsonResponse(200, { state: "pending", total_count: 0 });
+      throw new Error("unexpected request: " + url);
+    },
+    async (calls) => {
+      await completePrInfo(
+        "tok",
+        REPO2,
+        rawPr({ updated_at: "2026-01-03T00:00:00Z" }),
+        priorInfo(),
+        false
+      );
+      assert.strictEqual(calls.length, 4);
+    }
+  );
+});
+
+test("fetchOpenPrsByHead: maps by head ref, undefined on first-page failure", async () => {
+  resetGithubCache();
+  await withFetch(
+    () =>
+      jsonResponse(200, [
+        rawPr({ number: 1, head: { sha: "a", ref: "feat-a" } }),
+        rawPr({ number: 2, head: { sha: "b", ref: "feat-b" } }),
+        // Same head ref again (older, list is updated-desc): first one wins.
+        rawPr({ number: 3, head: { sha: "c", ref: "feat-a" } }),
+      ]),
+    async () => {
+      const map = await fetchOpenPrsByHead("tok", REPO2);
+      assert.strictEqual(map.size, 2);
+      assert.strictEqual(map.get("feat-a").number, 1);
+      assert.strictEqual(map.get("feat-b").number, 2);
+    }
+  );
+  resetGithubCache();
+  await withFetch(
+    () => jsonResponse(403, { message: "nope" }),
+    async () => {
+      assert.strictEqual(await fetchOpenPrsByHead("tok", REPO2), undefined);
+    }
+  );
+});

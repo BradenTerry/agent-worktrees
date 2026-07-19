@@ -1,6 +1,14 @@
 import * as vscode from "vscode";
 import { RemoteInfo } from "./git";
-import { PrInfo, fetchPr, getToken } from "./github";
+import {
+  PrInfo,
+  RawPr,
+  completePrInfo,
+  fetchOpenPrsByHead,
+  fetchPr,
+  getToken,
+  prUnchanged,
+} from "./github";
 
 /**
  * Background PR-status service.
@@ -30,6 +38,11 @@ const PUSH_MS = 7_000;
 const PUSH_WINDOW_MS = 90_000;
 /** Refuse to refetch within this window unless forced. */
 const THROTTLE_MS = 4_000;
+/** How often an unchanged open PR still refetches its detail + checks. The PR
+ *  `updated_at` misses two kinds of movement — the base branch advancing (the
+ *  "Out of date" pill) and a re-run of a completed check — so an otherwise
+ *  request-free unchanged PR pays a periodic aux refresh to catch them. */
+const AUX_REFRESH_MS = 5 * 60_000;
 
 export class PrService implements vscode.Disposable {
   private readonly _onChange = new vscode.EventEmitter<void>();
@@ -46,6 +59,8 @@ export class PrService implements vscode.Disposable {
   private inFlight = false;
   /** Last seen head SHA per target, to detect a push between fetches. */
   private headShas = new Map<string, string | undefined>();
+  /** Epoch ms of each target's last detail/checks (aux) fetch; see AUX_REFRESH_MS. */
+  private lastAuxAt = new Map<string, number>();
   /** While now < this, poll on the fast push cadence. */
   private fastUntil = 0;
 
@@ -101,6 +116,7 @@ export class PrService implements vscode.Disposable {
       if (!live.has(k)) {
         this.cache.delete(k);
         this.headShas.delete(k);
+        this.lastAuxAt.delete(k);
         pruned = true;
       }
     }
@@ -113,6 +129,7 @@ export class PrService implements vscode.Disposable {
       if (prev !== undefined && prev !== t.branch) {
         if (this.cache.delete(t.key)) pruned = true;
         this.headShas.delete(t.key);
+        this.lastAuxAt.delete(t.key);
       }
     }
     if (pruned) this._onChange.fire();
@@ -132,6 +149,7 @@ export class PrService implements vscode.Disposable {
   reauth(): void {
     this.cache.clear();
     this.headShas.clear();
+    this.lastAuxAt.clear();
     this.fastUntil = 0;
     this._onChange.fire();
     void this.refresh(true);
@@ -150,8 +168,14 @@ export class PrService implements vscode.Disposable {
     if (!this.enabled || !this.visible || this.timer || !this.targets.length) {
       return;
     }
+    // Only live PRs count toward the fast cadence: a merged/closed PR's checks
+    // can never settle, so one stale terminal entry must not pin the whole
+    // board at the active poll rate.
     const anyPending = [...this.cache.values()].some(
-      (p) => p && p.checks === "pending"
+      (p) =>
+        p &&
+        (p.state === "open" || p.state === "draft") &&
+        p.checks === "pending"
     );
     const pushing = Date.now() < this.fastUntil;
     const delay = pushing ? PUSH_MS : anyPending ? ACTIVE_MS : IDLE_MS;
@@ -191,20 +215,30 @@ export class PrService implements vscode.Disposable {
     let changed = false;
     try {
       const targets = this.targets;
-      const results = await Promise.all(
-        targets.map(async (t) => {
-          try {
-            return await fetchPr(token, t.repo, t.branch);
-          } catch {
-            // Hard failure on one branch — keep whatever we had for it.
-            return this.cache.has(t.key)
-              ? (this.cache.get(t.key) as PrInfo | null)
-              : null;
-          }
+      // One bulk open-PR list per repo (worktrees of one repo share it), then
+      // per-target follow-ups only where something can have changed. This
+      // replaces the old shape of one `?head=` list call per worktree.
+      const groups = new Map<string, { repo: RemoteInfo; ts: PrTarget[] }>();
+      for (const t of targets) {
+        const gk = `${t.repo.owner}/${t.repo.repo}`;
+        const g = groups.get(gk) ?? { repo: t.repo, ts: [] };
+        g.ts.push(t);
+        groups.set(gk, g);
+      }
+      const results = new Map<string, PrInfo | null>();
+      await Promise.all(
+        [...groups.values()].map(async ({ repo, ts }) => {
+          const open = await fetchOpenPrsByHead(token, repo);
+          await Promise.all(
+            ts.map(async (t) => {
+              results.set(t.key, await this.nextFor(token, t, open, now));
+            })
+          );
         })
       );
-      targets.forEach((t, i) => {
-        const next = results[i];
+      targets.forEach((t) => {
+        if (!results.has(t.key)) return;
+        const next = results.get(t.key) ?? null;
         if (sigOf(this.cache.get(t.key)) !== sigOf(next)) changed = true;
         this.cache.set(t.key, next);
         // A new head SHA means a push landed; the fresh checks may not exist
@@ -224,6 +258,49 @@ export class PrService implements vscode.Disposable {
   }
 
   /**
+   * Next PR status for one target given the repo's bulk open-PR map:
+   * - open PR listed: assemble via completePrInfo, which reuses the cached
+   *   value when the PR is provably unchanged (zero follow-up requests) and
+   *   pays a periodic aux (detail + checks) refresh per AUX_REFRESH_MS.
+   * - bulk list failed: keep whatever we had; per-branch calls would fail the
+   *   same way.
+   * - not listed, never looked up OR cached as open: one per-branch
+   *   `state=all` lookup to learn its (probably terminal) state.
+   * - cached merged/closed or known-absent: zero requests. A merged/closed PR
+   *   never changes again, and a brand-new PR is open, so the bulk list is the
+   *   signal that ends this quiet state.
+   */
+  private async nextFor(
+    token: string,
+    t: PrTarget,
+    open: Map<string, RawPr> | undefined,
+    now: number
+  ): Promise<PrInfo | null> {
+    const prior = this.cache.has(t.key)
+      ? (this.cache.get(t.key) as PrInfo | null)
+      : undefined;
+    try {
+      const raw = open?.get(t.branch);
+      if (raw) {
+        const refreshAux =
+          !prUnchanged(prior, raw) ||
+          now - (this.lastAuxAt.get(t.key) ?? 0) >= AUX_REFRESH_MS;
+        if (refreshAux) this.lastAuxAt.set(t.key, now);
+        return await completePrInfo(token, t.repo, raw, prior, refreshAux);
+      }
+      if (open === undefined) return prior ?? null;
+      if (prior === undefined || prior?.state === "open" || prior?.state === "draft") {
+        this.lastAuxAt.set(t.key, now);
+        return await fetchPr(token, t.repo, t.branch, prior, true);
+      }
+      return prior;
+    } catch {
+      // Hard failure on one branch — keep whatever we had for it.
+      return prior ?? null;
+    }
+  }
+
+  /**
    * Force-refresh a single tracked target (the per-worktree refresh button), so
    * one card's GitHub call doesn't have to re-poll the whole board. No-op when
    * disabled, hidden, tokenless, or the key isn't a current target. Fires a
@@ -237,7 +314,13 @@ export class PrService implements vscode.Disposable {
     if (!token) return;
     let next: PrInfo | null;
     try {
-      next = await fetchPr(token, target.repo, target.branch);
+      // Forced by the user, so always refresh detail + checks (refreshAux);
+      // prior still lets an unchanged PR skip the reviews call.
+      const prior = this.cache.has(key)
+        ? (this.cache.get(key) as PrInfo | null)
+        : undefined;
+      this.lastAuxAt.set(key, Date.now());
+      next = await fetchPr(token, target.repo, target.branch, prior, true);
     } catch {
       // Keep whatever we had on a hard failure.
       next = this.cache.has(key) ? (this.cache.get(key) as PrInfo | null) : null;

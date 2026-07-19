@@ -28,6 +28,7 @@ import {
   getStatus,
   fetchRemotes,
   listWorktrees,
+  mapLimit,
   getRemoteInfo,
   RemoteInfo,
 } from "./git";
@@ -127,6 +128,20 @@ export class WorktreeWebviewProvider
 
   /** Last payload posted, to skip redundant re-renders. */
   private lastPosted = "";
+  /** The last fully gathered payload. The agent-only refresh path (session
+   *  watcher events) swaps fresh agent VMs into this instead of re-running git
+   *  for every worktree; a full gather replaces it. */
+  private lastData?: WorktreeData;
+  /** Session ids whose state files changed since the last agent refresh, so
+   *  that refresh re-reads git only for the worktrees those sessions live in. */
+  private readonly pendingSessionIds = new Set<string>();
+  /** Monotonic token claimed by every refresh before it reads the session
+   *  files; postData only accepts the newest claim. Full and agent-only
+   *  refreshes overlap (separate coalescers), and a slow full refresh that
+   *  read its session snapshot before a faster agent refresh must not land
+   *  after it — that stale post is what left the Activity Bar badge showing a
+   *  waiting agent that had already gone active. */
+  private updateSeq = 0;
   /** Monotonic token for branch posts. A refresh fires its gatherBranches before
    *  awaiting; a slow one started before a delete could otherwise resolve late
    *  and re-post the deleted branch. Each post claims the latest token and only
@@ -142,6 +157,9 @@ export class WorktreeWebviewProvider
   /** Coalesces session-state writes into one (already throttled) PR nudge, so an
    *  agent streaming hook events doesn't poke the GitHub poller on every event. */
   private readonly prNudge: Coalescer;
+  /** Coalesces session-state writes into one agent-only refresh (no full git
+   *  sweep); see refreshAgents. */
+  private readonly agentsDebounce: Coalescer;
   /** Terminals we launched, keyed by the session id we started Claude with. */
   private terminals = new Map<string, vscode.Terminal>();
   /** Env var stamped on each agent terminal carrying its session id. VS Code
@@ -174,6 +192,10 @@ export class WorktreeWebviewProvider
       () => this.prService.refresh(false),
       REFRESH_DEBOUNCE_MS
     );
+    this.agentsDebounce = new Coalescer(
+      () => this.refreshAgents(),
+      REFRESH_DEBOUNCE_MS
+    );
     this.sessionsDir = sessionsDir(context);
     // Ensure the sessions dir exists so the watcher attaches even before the
     // first hook fires.
@@ -186,13 +208,16 @@ export class WorktreeWebviewProvider
       new vscode.RelativePattern(vscode.Uri.file(this.sessionsDir), "*.json")
     );
     // A session-state file changing is a Claude hook firing (a prompt, a tool
-    // run, a stop). Besides re-rendering, nudge the PR service: this is the
-    // signal that an agent may have just run `gh pr create`/merge, so PR status
-    // is worth a (throttled) refresh without waiting for the poll timer. An
-    // active agent fires many hooks in quick succession, so both are coalesced
-    // rather than run per event (each refresh spawns git for every worktree).
-    const onChange = () => {
-      this.refreshDebounce.trigger();
+    // run, a stop). It goes down the agent-only refresh path: agent VMs are
+    // re-read and git is re-run only for the worktrees whose sessions fired,
+    // not every worktree (see refreshAgents). It also nudges the PR service:
+    // this is the signal that an agent may have just run `gh pr create`/merge,
+    // so PR status is worth a (throttled) refresh without waiting for the poll
+    // timer. An active agent fires many hooks in quick succession, so both are
+    // coalesced rather than run per event.
+    const onChange = (uri: vscode.Uri) => {
+      this.pendingSessionIds.add(path.basename(uri.fsPath, ".json"));
+      this.agentsDebounce.trigger();
       this.prNudge.trigger();
     };
     this.watcher.onDidCreate(onChange);
@@ -238,6 +263,7 @@ export class WorktreeWebviewProvider
     this.branchesPanel?.dispose();
     this.refreshDebounce.cancel();
     this.prNudge.cancel();
+    this.agentsDebounce.cancel();
   }
 
   /** Coalesce bursts of discrete events (window focus, SCM scope changes) into a
@@ -293,6 +319,7 @@ export class WorktreeWebviewProvider
    */
   async refresh(force = false): Promise<void> {
     if (!this.view) return;
+    const seq = ++this.updateSeq;
     const installed = await hooksInstalled();
     const agents = installed
       ? await readSessionsByWorktree(this.sessionsDir)
@@ -313,7 +340,15 @@ export class WorktreeWebviewProvider
         description: h.description,
       }));
     }
-    await this.attachPrStatus(data, force);
+    if (this.view.visible) {
+      await this.attachPrStatus(data, force);
+    } else {
+      // Hidden view: the PR badges are not rendered and the poller is paused
+      // (setVisible), so skip the token/remote/target work. The git gather
+      // above still ran for the Activity Bar badge, and onDidChangeVisibility
+      // forces a full refresh on re-show.
+      data.prEnabled = this.prService.isEnabled();
+    }
     // Keep the branches editor tab (if open) in sync with the same signals that
     // refresh the sidebar, so a worktree add/remove updates its rows. Never hit
     // the GitHub API here — branch PR data is fetched only by the explicit
@@ -323,6 +358,20 @@ export class WorktreeWebviewProvider
     // spawns on a many-branch repo — on every agent-activity refresh; it
     // catches up via onDidChangeViewState when re-shown.
     if (this.branchesPanel?.visible) void this.postBranches(false);
+    this.postData(data, seq);
+  }
+
+  /**
+   * Shared tail of the full and agent-only refreshes: remember the payload for
+   * the agent-only path, update the Activity Bar badge, and post to the webview
+   * unless nothing render-relevant changed. `seq` is the claim the caller took
+   * before reading session state; anything but the newest claim is dropped so a
+   * slow refresh can never overwrite newer agent state (and badge) with its
+   * stale snapshot.
+   */
+  private postData(data: WorktreeData, seq: number): void {
+    if (!this.view || seq !== this.updateSeq) return;
+    this.lastData = data;
     // Waiting agents surface as a number badge on the Activity Bar icon, so a
     // blocked agent is visible even while the panel is hidden behind another
     // view. Set before the unchanged-payload early return: a freshly resolved
@@ -337,10 +386,54 @@ export class WorktreeWebviewProvider
               : `${waiting} agents waiting for you`,
         }
       : undefined;
-    const json = JSON.stringify(data);
+    // lastActivity is a per-hook-event heartbeat the panel never renders;
+    // including it in the signature would defeat this guard on every tool call
+    // and rebuild the webview DOM for a byte-identical render.
+    const json = JSON.stringify(data, (k, v) =>
+      k === "lastActivity" ? undefined : v
+    );
     if (json === this.lastPosted) return;
     this.lastPosted = json;
     void this.view.webview.postMessage({ type: "update", data });
+  }
+
+  /**
+   * Agent-only refresh for session-watcher events. A hook firing means agent
+   * state changed and files may have changed in that agent's worktree — but
+   * not in the others. So: re-read the session files, swap the agent VMs into
+   * the last gathered payload, and re-run git status only for the worktrees
+   * whose sessions actually fired, instead of spawning git for every worktree
+   * on every hook burst. Falls back to a full refresh when there is no cached
+   * payload yet, or when a session appeared in a worktree the cache does not
+   * know (an agent just created one with `claude -w`).
+   */
+  private async refreshAgents(): Promise<void> {
+    const data = this.lastData;
+    if (!this.view || !data || !data.hooksInstalled) {
+      this.pendingSessionIds.clear();
+      return this.refresh();
+    }
+    const seq = ++this.updateSeq;
+    const changed = new Set(this.pendingSessionIds);
+    this.pendingSessionIds.clear();
+    const agents = await readSessionsByWorktree(this.sessionsDir);
+    await this.syncTerminalNames(agents);
+    const known = new Set(data.worktrees.map((wt) => normalize(wt.path)));
+    for (const key of agents.keys()) {
+      if (!known.has(key)) return this.refresh();
+    }
+    const touched = data.worktrees.filter((wt) =>
+      (agents.get(normalize(wt.path)) ?? []).some((a) =>
+        changed.has(a.sessionId)
+      )
+    );
+    const statuses = await mapLimit(touched, 4, (wt) => getStatus(wt.path));
+    touched.forEach((wt, i) => (wt.git = statuses[i]));
+    for (const wt of data.worktrees) {
+      wt.agents = agents.get(normalize(wt.path)) ?? [];
+    }
+    data.activeSessionId = this.activeSessionId();
+    this.postData(data, seq);
   }
 
   /**
@@ -381,12 +474,15 @@ export class WorktreeWebviewProvider
     data.prEnabled = enabled;
 
     const targets: PrTarget[] = [];
-    if (enabled && github.hasToken) {
-      for (const wt of data.worktrees) {
-        if (!wt.branch || wt.detached) continue;
-        const repo = await this.remoteFor(wt.path);
-        if (!repo) continue;
-        targets.push({ key: normalize(wt.path), branch: wt.branch, repo });
+    if (enabled && github.hasToken && data.repoRoot) {
+      // Every worktree of a repo shares its origin, so resolve it once at the
+      // repo root instead of spawning `git remote get-url` per worktree.
+      const repo = await this.remoteFor(data.repoRoot);
+      if (repo) {
+        for (const wt of data.worktrees) {
+          if (!wt.branch || wt.detached) continue;
+          targets.push({ key: normalize(wt.path), branch: wt.branch, repo });
+        }
       }
     }
     this.prService.setTargets(targets);

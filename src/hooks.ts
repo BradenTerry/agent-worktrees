@@ -161,10 +161,27 @@ function addHook(settings: Settings, spec: HookSpec, command: string): void {
 
 // --- public API -------------------------------------------------------------
 
+/** hooksInstalled runs on every panel refresh; cache its verdict keyed on the
+ *  settings file's mtime so the steady state is one stat() instead of a full
+ *  read + JSON.parse each time. Any write (ours or an external edit) changes
+ *  the mtime and re-reads. */
+let installedCache: { mtimeMs: number; installed: boolean } | undefined;
+
 /** True only when every managed hook is present in global settings.json. */
 export async function hooksInstalled(): Promise<boolean> {
+  let mtimeMs = -1;
+  try {
+    mtimeMs = (await fs.promises.stat(SETTINGS_PATH)).mtimeMs;
+  } catch {
+    /* missing file: mtime stays -1, still a valid cache key */
+  }
+  if (installedCache && installedCache.mtimeMs === mtimeMs) {
+    return installedCache.installed;
+  }
   const settings = await readSettings();
-  return HOOKS.every((spec) => !!findHook(settings, spec));
+  const installed = HOOKS.every((spec) => !!findHook(settings, spec));
+  installedCache = { mtimeMs, installed };
+  return installed;
 }
 
 /** Copy the bundled emitter into the stable hooks dir, overwriting in place so

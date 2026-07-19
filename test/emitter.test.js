@@ -147,6 +147,34 @@ test("leaves the task empty when the transcript has no ai-title", () => {
   assert.ok(!stateOf(sid).task, "the prompt is never used as a fallback summary");
 });
 
+test("PreToolUse/PostToolUse skip the transcript read; turn boundaries pick the title up", () => {
+  // The tool-blocking events must not pay the transcript tail read, so a title
+  // that lands mid-turn is ignored until the next non-hot event. The prior task
+  // is still carried forward.
+  const sid = "session-hotpath";
+  const transcript = path.join(dir, sid + ".jsonl");
+  fs.writeFileSync(
+    transcript,
+    JSON.stringify({ type: "ai-title", aiTitle: "First title", sessionId: sid }) +
+      "\n"
+  );
+  const base = { session_id: sid, cwd: repo, transcript_path: transcript };
+  run({ hook_event_name: "UserPromptSubmit", ...base });
+  assert.strictEqual(stateOf(sid).task, "First title");
+
+  fs.appendFileSync(
+    transcript,
+    JSON.stringify({ type: "ai-title", aiTitle: "Newer title", sessionId: sid }) +
+      "\n"
+  );
+  run({ hook_event_name: "PreToolUse", tool_name: "Bash", ...base });
+  assert.strictEqual(stateOf(sid).task, "First title", "PreToolUse keeps the prior title");
+  run({ hook_event_name: "PostToolUse", tool_name: "Bash", ...base });
+  assert.strictEqual(stateOf(sid).task, "First title", "PostToolUse keeps the prior title");
+  run({ hook_event_name: "Stop", ...base });
+  assert.strictEqual(stateOf(sid).task, "Newer title", "Stop reads the latest title");
+});
+
 test("Stop marks idle", () => {
   run({ hook_event_name: "Stop", session_id: SID, cwd: repo });
   const s = stateOf(SID);

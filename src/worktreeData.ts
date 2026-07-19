@@ -92,6 +92,17 @@ export function normalize(p: string): string {
   return normalizePath(p);
 }
 
+/** Repo root per workspace folder. A folder's containing repository cannot
+ *  change within a session, and this lookup is a git spawn that used to run on
+ *  every refresh (twice with the branches tab open). Only hits are cached, so
+ *  a folder that becomes a repo later (git init) is still discovered. */
+const repoRootCache = new Map<string, string>();
+
+/** Primary worktree path per repo root (invariant for the repo's lifetime).
+ *  Populated by gatherWorktrees so gatherBranches can name the repo without
+ *  its own `git worktree list` spawn. */
+const primaryPathCache = new Map<string, string>();
+
 /**
  * First workspace folder that lives in a git repository, with its repo root.
  */
@@ -99,8 +110,13 @@ async function findRepo(): Promise<
   { cwd: string; repoRoot: string } | undefined
 > {
   for (const f of vscode.workspace.workspaceFolders ?? []) {
-    const root = await findRepoRoot(f.uri.fsPath);
-    if (root) return { cwd: f.uri.fsPath, repoRoot: root };
+    const key = f.uri.fsPath;
+    let root = repoRootCache.get(key);
+    if (!root) {
+      root = (await findRepoRoot(key)) ?? undefined;
+      if (root) repoRootCache.set(key, root);
+    }
+    if (root) return { cwd: key, repoRoot: root };
   }
   return undefined;
 }
@@ -191,6 +207,7 @@ export async function gatherWorktrees(
   // Name the repo after its primary worktree so the header is stable even when
   // the open folder is a linked worktree.
   const primary = worktrees.find((wt) => wt.isPrimary);
+  if (primary) primaryPathCache.set(repoRoot, primary.path);
   return {
     repoRoot,
     repoName: path.basename(primary?.path ?? repoRoot),
@@ -313,13 +330,19 @@ export async function gatherBranches(): Promise<BranchData> {
   });
 
   // Name the repo after its primary worktree so the header matches the sidebar
-  // even when the open folder is a linked worktree.
-  let primaryPath: string | undefined;
-  try {
-    const wts = await listWorktrees(repoRoot);
-    primaryPath = wts.find((wt) => wt.isPrimary)?.path;
-  } catch {
-    /* fall back to repoRoot basename */
+  // even when the open folder is a linked worktree. The path is invariant, so
+  // reuse what gatherWorktrees already learned instead of a second
+  // `git worktree list` in the same refresh; the spawn happens at most once,
+  // when the branches tab loads before any sidebar gather.
+  let primaryPath = primaryPathCache.get(repoRoot);
+  if (!primaryPath) {
+    try {
+      const wts = await listWorktrees(repoRoot);
+      primaryPath = wts.find((wt) => wt.isPrimary)?.path;
+      if (primaryPath) primaryPathCache.set(repoRoot, primaryPath);
+    } catch {
+      /* fall back to repoRoot basename */
+    }
   }
   return {
     repoRoot,

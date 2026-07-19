@@ -375,24 +375,45 @@ button.accept {
 /* Active (green) and waiting (yellow) agent dots pulse so in-progress and
    needs-attention agents read at a glance. Scoped to the agent rows and the
    agents-bar stats (zero-count stats are not rendered at all): the settings
-   connection dots stay static. Animates the dot's own opacity plus an
-   expanding glow ring so the pulse is clearly visible (the old
-   box-shadow-only ring faded out before it ever became perceptible). */
+   connection dots stay static. The dot fades while a pseudo-element ring
+   expands; both animate only transform/opacity so the (infinite) pulse stays
+   on the compositor. The previous box-shadow-spread ring forced a full repaint
+   of every animating dot each frame for as long as any agent was active. */
 .agent-row .status-dot.active,
 .agent-row .status-dot.waiting,
 .agents-bar .stat.active .status-dot,
 .agents-bar .stat.waiting .status-dot {
-  animation: status-pulse 1.4s ease-in-out infinite;
+  position: relative;
+  animation: status-fade 1.4s ease-in-out infinite;
 }
-@keyframes status-pulse {
+.agent-row .status-dot.active::after,
+.agent-row .status-dot.waiting::after,
+.agents-bar .stat.active .status-dot::after,
+.agents-bar .stat.waiting .status-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--pulse);
+  animation: status-ring 1.4s ease-in-out infinite;
+}
+@keyframes status-fade {
   0%,
   100% {
     opacity: 1;
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--pulse) 55%, transparent);
   }
   50% {
     opacity: 0.5;
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--pulse) 0%, transparent);
+  }
+}
+@keyframes status-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
   }
 }
 /* Honor reduced-motion: keep the dots colored, just stop them pulsing. */
@@ -400,6 +421,9 @@ button.accept {
   .status-dot,
   .pr-seg.pending svg {
     animation: none;
+  }
+  .status-dot::after {
+    display: none;
   }
 }
 
