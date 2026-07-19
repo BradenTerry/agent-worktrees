@@ -194,18 +194,19 @@ test("Stop marks idle", () => {
   assert.strictEqual(s.state, "idle");
 });
 
-test("counts each Task tool call as a subagent and carries the tally forward", () => {
+test("counts each Agent/Task tool call as a subagent and carries the tally forward", () => {
   const sid = "session-subagents";
   // No subagents yet: a plain prompt leaves the count off the state file.
   run({ hook_event_name: "UserPromptSubmit", session_id: sid, cwd: repo });
   assert.strictEqual(stateOf(sid).subagents, undefined);
 
-  // Two Task spawns -> two subagents, accumulated across events.
+  // One Agent spawn (the tool's current name) and one Task spawn (its name
+  // before Claude Code 2.1.63) -> two subagents, accumulated across events.
   run({
     hook_event_name: "PreToolUse",
     session_id: sid,
     cwd: repo,
-    tool_name: "Task",
+    tool_name: "Agent",
   });
   run({
     hook_event_name: "PreToolUse",
@@ -215,7 +216,7 @@ test("counts each Task tool call as a subagent and carries the tally forward", (
   });
   assert.strictEqual(stateOf(sid).subagents, 2);
 
-  // A non-Task tool does not bump the count, but keeps the carried tally.
+  // A non-subagent tool does not bump the count, but keeps the carried tally.
   run({
     hook_event_name: "PreToolUse",
     session_id: sid,
@@ -223,6 +224,83 @@ test("counts each Task tool call as a subagent and carries the tally forward", (
     tool_name: "Bash",
   });
   assert.strictEqual(stateOf(sid).subagents, 2);
+});
+
+test("SubagentStop marks active", () => {
+  const sid = "session-substop";
+  run({ hook_event_name: "Stop", session_id: sid, cwd: repo });
+  assert.strictEqual(stateOf(sid).state, "idle");
+  run({ hook_event_name: "SubagentStop", session_id: sid, cwd: repo });
+  assert.strictEqual(stateOf(sid).state, "active");
+});
+
+// A turn that ends with background subagents still running writes a
+// turn_duration record with their count; the idle nudge that follows must not
+// flag the agent as waiting on the user.
+test("idle_prompt notification stays active while background subagents run", () => {
+  const sid = "session-delegating";
+  const transcript = path.join(dir, sid + ".jsonl");
+  fs.writeFileSync(
+    transcript,
+    [
+      JSON.stringify({ type: "system", subtype: "stop_hook_summary" }),
+      JSON.stringify({
+        type: "system",
+        subtype: "turn_duration",
+        pendingBackgroundAgentCount: 2,
+      }),
+    ].join("\n") + "\n"
+  );
+  const base = { session_id: sid, cwd: repo, transcript_path: transcript };
+  run({ hook_event_name: "Stop", ...base });
+  assert.strictEqual(stateOf(sid).state, "idle");
+  run({
+    hook_event_name: "Notification",
+    notification_type: "idle_prompt",
+    ...base,
+  });
+  assert.strictEqual(stateOf(sid).state, "active");
+
+  // A permission prompt genuinely needs the user, subagents or not.
+  run({
+    hook_event_name: "Notification",
+    notification_type: "permission_prompt",
+    ...base,
+  });
+  assert.strictEqual(stateOf(sid).state, "waiting");
+
+  // A background subagent finishing re-invokes the parent: active, not waiting.
+  run({
+    hook_event_name: "Notification",
+    notification_type: "agent_completed",
+    ...base,
+  });
+  assert.strictEqual(stateOf(sid).state, "active");
+});
+
+test("idle_prompt notification marks waiting when nothing is pending", () => {
+  const sid = "session-idle-nudge";
+  const transcript = path.join(dir, sid + ".jsonl");
+  fs.writeFileSync(
+    transcript,
+    JSON.stringify({
+      type: "system",
+      subtype: "turn_duration",
+      pendingBackgroundAgentCount: 0,
+    }) + "\n"
+  );
+  const base = { session_id: sid, cwd: repo, transcript_path: transcript };
+  run({
+    hook_event_name: "Notification",
+    notification_type: "idle_prompt",
+    ...base,
+  });
+  assert.strictEqual(stateOf(sid).state, "waiting");
+
+  // No transcript at all (or an old Claude Code with no notification_type):
+  // default to waiting, the pre-existing behavior.
+  run({ hook_event_name: "Notification", session_id: sid, cwd: repo });
+  assert.strictEqual(stateOf(sid).state, "waiting");
 });
 
 test("reuses the cached worktree from the prior state when cwd is unchanged", () => {

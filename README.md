@@ -76,7 +76,8 @@ state, and its running agents in one view.
 - **Skills used** — each agent row shows a chip with the count of Claude skills
   it has invoked; click it for the full list.
 - **Subagents used** — a robot glyph with a count tracks how many subagents each
-  agent has spawned (every `Task` tool call is one subagent). The Agents bar sums
+  agent has spawned (every `Agent` tool call is one subagent; the tool was named
+  `Task` before Claude Code 2.1.63 and both names count). The Agents bar sums
   it across the worktree; each agent row shows its own.
 - **Collapsible agent lists** with per-status counts, so a card reads at a glance
   and expands to the individual sessions on demand.
@@ -121,12 +122,25 @@ fire exactly on those transitions, so the extension installs one small emitter
 script wired to a handful of events. The events map to a status shown in the
 panel:
 
-| Hook                                              | Status            |
-| ------------------------------------------------- | ----------------- |
-| `SessionStart`, `Stop`                            | idle              |
-| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`   | active            |
-| `Notification` (permission / question)            | waiting           |
-| `SessionEnd`                                       | removed from panel |
+| Hook                                                            | Status            |
+| --------------------------------------------------------------- | ----------------- |
+| `SessionStart`, `Stop`                                          | idle              |
+| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStop` | active            |
+| `Notification` (permission / question)                          | waiting           |
+| `SessionEnd`                                                    | removed from panel |
+
+`Notification` is not always "waiting": the emitter reads the payload's
+`notification_type` and keeps the agent **active** for `agent_completed` (a
+background subagent finished; the parent is about to pick the result up) and
+for `idle_prompt` while background subagents are still running. The pending
+count comes from the transcript's latest `turn_duration` record
+(`pendingBackgroundAgentCount`), which Claude Code appends at every turn end —
+after the `Stop` hook has already run, so only `Notification` (which fires much
+later) trusts it. Without this, a parent agent that fanned work out to
+background subagents would sit "waiting on you" (and pollute the Activity Bar
+badge) the whole time its subagents were busy. All other notification types —
+permission prompts, a subagent needing input, or an older Claude Code that
+sends no type — mark **waiting** as before.
 
 Installing the hooks edits your global `~/.claude/settings.json`, so it is always
 gated behind **explicit consent** in the panel — nothing is written until you

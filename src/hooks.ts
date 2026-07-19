@@ -89,6 +89,12 @@ export const HOOKS: HookSpec[] = [
       "Marks an agent Active again when a tool finishes — the first signal after you approve a permission prompt or answer its question.",
   },
   {
+    event: "SubagentStop",
+    label: "SubagentStop",
+    description:
+      "Marks an agent Active when one of its subagents finishes — it is about to pick the result up, not waiting on you.",
+  },
+  {
     event: "Notification",
     label: "Notification",
     description:

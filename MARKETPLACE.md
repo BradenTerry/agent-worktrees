@@ -47,7 +47,9 @@ The **Branches view** opens as a full editor tab listing every branch with when 
   **idle**, driven by Claude Code hook events.
 - **A badge when an agent needs you** — the Activity Bar icon shows a count of
   the agents waiting on a permission prompt or question, so a blocked agent is
-  visible even while the panel is hidden behind another view.
+  visible even while the panel is hidden behind another view. An agent that is
+  only waiting for its background subagents to finish stays **active**, not
+  waiting, so the badge means you specifically.
 - **Know who you're talking to** — the agent whose terminal is currently open is
   highlighted in the panel (and its worktree's Agents bar is marked when the
   card is collapsed), so switching between several worktrees never leaves you
@@ -193,7 +195,7 @@ by editing that settings file.
 | Status      | When                                                        |
 | ----------- | ----------------------------------------------------------- |
 | **idle**    | session started, or finished responding and awaiting you    |
-| **active**  | processing a prompt or running tools                        |
+| **active**  | processing a prompt, running tools, or waiting on its own background subagents |
 | **waiting** | needs you — a permission prompt or a question               |
 
 ## Requirements

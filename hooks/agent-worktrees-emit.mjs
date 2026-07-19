@@ -68,6 +68,8 @@ function git(cwd, args) {
 }
 
 // Hook event -> agent status. Anything not listed falls back to "active".
+// Notification is refined further in main(): not every notification means the
+// agent needs the user (see notificationState).
 const EVENT_STATE = {
   SessionStart: "idle",
   UserPromptSubmit: "active",
@@ -77,6 +79,25 @@ const EVENT_STATE = {
   Notification: "waiting",
   Stop: "idle",
 };
+
+/**
+ * Status for a Notification event. Claude Code stamps a machine-readable
+ * `notification_type` on the payload:
+ *  - "agent_completed": a background subagent finished and the parent is about
+ *    to be re-invoked with its result — the agent is working, not blocked.
+ *  - "idle_prompt": fired after ~60s of no user input. When background
+ *    subagents are still running (`pendingAgents` > 0, read from the
+ *    transcript) the parent is merely waiting on THEM, so flagging it
+ *    "waiting on you" is a false positive — it stays active.
+ *  Everything else (permission_prompt, agent_needs_input, an older Claude Code
+ *  that sends no type, ...) genuinely needs the user: waiting.
+ */
+function notificationState(payload, pendingAgents) {
+  const type = payload.notification_type;
+  if (type === "agent_completed") return "active";
+  if (type === "idle_prompt" && pendingAgents > 0) return "active";
+  return "waiting";
+}
 
 /** File-name safe ids only; anything else is rejected so we never write
  *  outside the sessions dir. */
@@ -96,46 +117,68 @@ function normalizeSkill(raw) {
 }
 
 /**
- * The session's title, read from the transcript. Claude Code writes
- * `{ "type": "ai-title", "aiTitle": "…" }` lines into the session JSONL as it
- * summarizes the work, and `{ "type": "custom-title", "customTitle": "…" }`
- * when the title is set explicitly (a rename, or the app titling the session).
- * Whichever kind was written last wins. That title is a far better "what is
- * this agent doing" summary than the raw last prompt, so we use it when
- * present.
+ * Session facts read from the tail of the transcript, in one bounded read:
  *
- * Reads only the tail of the file (the latest title sits near the end) so the
- * cost stays bounded no matter how large the transcript grows. Returns "" when
- * there is no transcript or no title yet.
+ * - `title`: Claude Code writes `{ "type": "ai-title", "aiTitle": "…" }` lines
+ *   into the session JSONL as it summarizes the work, and
+ *   `{ "type": "custom-title", "customTitle": "…" }` when the title is set
+ *   explicitly (a rename, or the app titling the session). Whichever kind was
+ *   written last wins. That title is a far better "what is this agent doing"
+ *   summary than the raw last prompt, so we use it when present.
+ * - `pendingAgents`: every turn ends with a `turn_duration` system record
+ *   carrying `pendingBackgroundAgentCount` — how many background subagents
+ *   were still running when the turn ended. The latest record wins. Caveat:
+ *   the record is appended AFTER the Stop hook has run, so during a Stop event
+ *   this reflects the PREVIOUS turn — only Notification (which fires much
+ *   later) may trust it.
+ *
+ * Reads only the tail of the file (the latest of both records sits near the
+ * end) so the cost stays bounded no matter how large the transcript grows.
  */
-function readAiTitle(transcriptPath) {
-  if (typeof transcriptPath !== "string" || !transcriptPath) return "";
+function readTranscriptTail(transcriptPath) {
+  const out = { title: "", pendingAgents: 0 };
+  if (typeof transcriptPath !== "string" || !transcriptPath) return out;
   let fd;
   try {
     fd = openSync(transcriptPath, "r");
     const { size } = fstatSync(fd);
     const want = Math.min(size, 65536);
-    if (want <= 0) return "";
+    if (want <= 0) return out;
     const buf = Buffer.alloc(want);
     readSync(fd, buf, 0, want, size - want);
     const lines = buf.toString("utf8").split("\n");
-    // Scan from the end for the most recent title of either kind. The first
+    let sawTitle = false;
+    let sawPending = false;
+    // Scan from the end for the most recent record of each kind. The first
     // line may be a partial record (we started mid-file); JSON.parse skips it.
-    for (let i = lines.length - 1; i >= 0; i--) {
+    for (let i = lines.length - 1; i >= 0 && !(sawTitle && sawPending); i--) {
       const line = lines[i].trim();
       if (!line) continue;
-      if (line.indexOf("ai-title") === -1 && line.indexOf("custom-title") === -1)
-        continue;
+      const isTitle =
+        !sawTitle &&
+        (line.indexOf("ai-title") !== -1 || line.indexOf("custom-title") !== -1);
+      const isPending =
+        !sawPending && line.indexOf("pendingBackgroundAgentCount") !== -1;
+      if (!isTitle && !isPending) continue;
       try {
         const o = JSON.parse(line);
-        const title =
-          o && o.type === "ai-title" && typeof o.aiTitle === "string"
-            ? o.aiTitle
-            : o && o.type === "custom-title" && typeof o.customTitle === "string"
-            ? o.customTitle
-            : "";
-        const t = title.replace(/\s+/g, " ").trim();
-        if (t) return t.slice(0, 120);
+        if (isTitle) {
+          const title =
+            o && o.type === "ai-title" && typeof o.aiTitle === "string"
+              ? o.aiTitle
+              : o && o.type === "custom-title" && typeof o.customTitle === "string"
+              ? o.customTitle
+              : "";
+          const t = title.replace(/\s+/g, " ").trim();
+          if (t) {
+            out.title = t.slice(0, 120);
+            sawTitle = true;
+          }
+        }
+        if (isPending && o && typeof o.pendingBackgroundAgentCount === "number") {
+          out.pendingAgents = o.pendingBackgroundAgentCount;
+          sawPending = true;
+        }
       } catch {
         /* partial / non-JSON line — keep scanning */
       }
@@ -151,7 +194,7 @@ function readAiTitle(transcriptPath) {
       }
     }
   }
-  return "";
+  return out;
 }
 
 function main() {
@@ -253,34 +296,44 @@ function main() {
     if (skill && !skills.includes(skill)) skills.push(skill);
   }
 
-  // Count subagents this session has spawned. The Task tool launches one
-  // subagent per call and PreToolUse fires the moment it starts, so this is a
-  // running tally of "subagents used". Carried forward across events.
+  // Count subagents this session has spawned. The Agent tool (named Task
+  // before Claude Code 2.1.63) launches one subagent per call and PreToolUse
+  // fires the moment it starts, so this is a running tally of "subagents
+  // used". Carried forward across events.
   let subagents =
     typeof prior.subagents === "number" && prior.subagents >= 0
       ? prior.subagents
       : 0;
-  if (event === "PreToolUse" && payload.tool_name === "Task") subagents++;
+  if (
+    event === "PreToolUse" &&
+    (payload.tool_name === "Agent" || payload.tool_name === "Task")
+  )
+    subagents++;
 
-  const state = EVENT_STATE[event] || "active";
+  // The transcript tail is read only at turn boundaries: PreToolUse/PostToolUse
+  // fire on every tool call and Claude Code blocks the tool until this hook
+  // exits, so a tail read + parse per tool call is real latency on every agent.
+  // The remaining events (UserPromptSubmit, Stop, Notification, SubagentStop,
+  // SessionStart) bracket the boundaries where its records land.
+  const tail =
+    event !== "PreToolUse" && event !== "PostToolUse"
+      ? readTranscriptTail(payload.transcript_path)
+      : { title: "", pendingAgents: 0 };
+
+  const state =
+    event === "Notification"
+      ? notificationState(payload, tail.pendingAgents)
+      : EVENT_STATE[event] || "active";
 
   // The summary: Claude's own generated title from the transcript, which tracks
   // what the agent is actually working on. We deliberately do NOT fall back to
   // the user's raw prompt: the title lands shortly after the first prompt, so
   // until then the panel row and terminal keep their default "Claude N" /
-  // "Claude · <worktree>" label rather than echoing the prompt text.
-  // Skipped on PreToolUse/PostToolUse: those fire on every tool call and
-  // Claude Code blocks the tool until this hook exits, so a transcript tail
-  // read + parse per tool call is real latency on every agent. Titles land at
-  // turn boundaries, which the remaining events (UserPromptSubmit, Stop,
-  // Notification, SubagentStop, SessionStart) bracket; until one fires the
-  // prior title is carried forward.
+  // "Claude · <worktree>" label rather than echoing the prompt text. Until the
+  // next boundary event fires, the prior title is carried forward.
   let task = typeof prior.task === "string" ? prior.task : "";
-  if (event !== "PreToolUse" && event !== "PostToolUse") {
-    const aiTitle = readAiTitle(payload.transcript_path);
-    if (aiTitle) {
-      task = aiTitle;
-    }
+  if (tail.title) {
+    task = tail.title;
   }
 
   let startedAt = typeof prior.startedAt === "number" ? prior.startedAt : now;
