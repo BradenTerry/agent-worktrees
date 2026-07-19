@@ -11,7 +11,7 @@ interface SessionState {
   task?: string;
   /** Bare names of skills this session has invoked (deduped, in first-use order). */
   skills?: string[];
-  /** Count of subagents this session has spawned via the Task tool. */
+  /** Count of subagents this session has spawned via the Agent (Task) tool. */
   subagents?: number;
   /** Epoch ms when the session was first seen. */
   startedAt?: number;

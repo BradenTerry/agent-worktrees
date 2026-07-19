@@ -2,6 +2,25 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.4.4
+
+- **An agent delegating to background subagents no longer shows as waiting on
+  you** - when a session's turn ended with background subagents still running,
+  Claude Code's idle nudge a minute later flipped it to "waiting" (and lit the
+  Activity Bar badge) even though it needed nothing from you. The emitter now
+  reads the notification's machine-readable type and the transcript's pending
+  background agent count: an idle nudge while subagents are still working, or
+  a "subagent finished" notification, keeps the agent active. Permission
+  prompts and questions still mark waiting, as does anything from an older
+  Claude Code that sends no notification type.
+- **Subagent counts work again on current Claude Code** - the robot chip
+  counted spawns of the Task tool, which Claude Code renamed to Agent in
+  2.1.63, so newer versions always showed no subagents. Both names now count.
+- **SubagentStop hook installed** - a finishing subagent immediately marks its
+  parent active (it is about to pick the result up). Existing installs pick
+  the new hook up automatically on activation, without re-showing the consent
+  page.
+
 ## 3.4.3
 
 - **Waiting badge now clears when an agent resumes working** - the PostToolUse
