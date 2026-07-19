@@ -80,6 +80,11 @@ state, and its running agents in one view.
   it across the worktree; each agent row shows its own.
 - **Collapsible agent lists** with per-status counts, so a card reads at a glance
   and expands to the individual sessions on demand.
+- **Waiting-agent badge** — every refresh sets a number badge on the view's
+  Activity Bar icon (`WebviewView.badge`) with the count of agents in the
+  **waiting** state, so a blocked agent surfaces while the panel is hidden.
+  Webview views resolve lazily, so the badge appears once the panel has been
+  opened in the window.
 - **Branches view** — a toolbar button opens a dedicated editor tab listing every
   branch (local plus remote-only `origin/*`). Each row shows whether a worktree
   already exists, ahead/behind vs the branch's base, a

@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.4.1
+
+- **A badge when an agent needs you** - the Activity Bar icon now shows a count
+  of the agents waiting on a permission prompt or question, so a blocked agent
+  is visible even while the panel is hidden behind another view. The badge
+  clears when no agent is waiting, and appears once the panel has been opened
+  in the window.
+
 ## 3.4.0
 
 - **Deleting a worktree is one confirmation instead of up to five** - the

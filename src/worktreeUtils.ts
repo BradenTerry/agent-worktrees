@@ -20,6 +20,20 @@ export function worktreeDirFor(primary: string, branch: string): string {
   );
 }
 
+/**
+ * Count of agents that need the user (status "waiting") across all worktrees.
+ * Drives the number badge on the panel's Activity Bar icon.
+ */
+export function countWaitingAgents(
+  worktrees: ReadonlyArray<{ agents: ReadonlyArray<{ status: string }> }>
+): number {
+  let n = 0;
+  for (const wt of worktrees) {
+    for (const a of wt.agents) if (a.status === "waiting") n++;
+  }
+  return n;
+}
+
 /** Canonical absolute path: resolved, with any trailing slash removed. */
 export function normalizePath(p: string): string {
   const resolved = path.resolve(p).replace(/[\\/]+$/, "");

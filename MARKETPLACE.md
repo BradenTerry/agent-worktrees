@@ -45,6 +45,9 @@ The **Branches view** opens as a full editor tab listing every branch with when 
   leaving the panel.
 - **Live agent status** — each agent shows as **active**, **waiting**, or
   **idle**, driven by Claude Code hook events.
+- **A badge when an agent needs you** — the Activity Bar icon shows a count of
+  the agents waiting on a permission prompt or question, so a blocked agent is
+  visible even while the panel is hidden behind another view.
 - **Know who you're talking to** — the agent whose terminal is currently open is
   highlighted in the panel (and its worktree's Agents bar is marked when the
   card is collapsed), so switching between several worktrees never leaves you
