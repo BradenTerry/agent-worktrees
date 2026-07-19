@@ -115,18 +115,37 @@ export interface PrInfo {
   headSha?: string;
 }
 
+/** Memoized SecretStorage read. getToken runs on every refresh and every PR
+ *  poll; without this each call is an async IPC round trip to the secret store.
+ *  Invalidated on any token change, including one made from another VS Code
+ *  window (SecretStorage is shared; onDidChange fires in every window). */
+let tokenCache: Thenable<string | undefined> | undefined;
+
 export function initGithub(context: vscode.ExtensionContext): void {
   ctx = context;
+  tokenCache = undefined;
+  context.subscriptions.push(
+    context.secrets.onDidChange((e) => {
+      if (e.key === PAT_KEY) {
+        tokenCache = undefined;
+        probeCache = undefined;
+        resetGithubCache();
+      }
+    })
+  );
 }
 
 /** The stored token, or undefined when none is set. */
 export async function getToken(): Promise<string | undefined> {
-  return ctx?.secrets.get(PAT_KEY);
+  if (!ctx) return undefined;
+  tokenCache ??= ctx.secrets.get(PAT_KEY);
+  return tokenCache;
 }
 
 /** Store a token and re-probe; returns the fresh connection summary. */
 export async function setToken(token: string): Promise<GithubConnection> {
   await ctx?.secrets.store(PAT_KEY, token);
+  tokenCache = undefined;
   probeCache = undefined;
   resetGithubCache();
   return connection();
@@ -135,6 +154,7 @@ export async function setToken(token: string): Promise<GithubConnection> {
 /** Forget the token; all PR calls become no-ops afterwards. */
 export async function clearToken(): Promise<void> {
   await ctx?.secrets.delete(PAT_KEY);
+  tokenCache = undefined;
   probeCache = undefined;
   resetGithubCache();
 }
@@ -270,7 +290,7 @@ export async function getJson<T>(
 
 // --- PR fetch ---------------------------------------------------------------
 
-interface RawPr {
+export interface RawPr {
   number: number;
   title: string;
   html_url: string;
@@ -314,46 +334,83 @@ interface RawPrDetail {
 }
 
 /**
- * Resolve the most relevant PR for `branch` in `repo`, with its CI, review and
- * comment rollups. Returns null when there is no PR or anything goes wrong.
- * Only ever called when a token is present (see PrService).
+ * True when a PR provably has not changed since `prior` was assembled: same PR
+ * number, same `updated_at` (bumped by comments, reviews, review requests,
+ * title/state edits) and same head SHA (bumped by a push). Check-run completion
+ * and base-branch movement do NOT bump `updated_at`, which is why callers pair
+ * this with a pending-checks test and a periodic aux refresh.
  */
-export async function fetchPr(
+export function prUnchanged(
+  prior: PrInfo | null | undefined,
+  raw: { number: number; updated_at?: string; head?: { sha?: string } }
+): boolean {
+  return (
+    !!prior &&
+    prior.number === raw.number &&
+    !!prior.updatedAt &&
+    prior.updatedAt === raw.updated_at &&
+    prior.headSha === raw.head?.sha
+  );
+}
+
+/**
+ * Assemble a full PrInfo for a raw PR (as returned by the list endpoints),
+ * fetching only the follow-ups that can have changed since `prior`:
+ *
+ * - unchanged (see prUnchanged) with settled checks and `refreshAux` false:
+ *   zero requests — `prior` is reused with the list's fresh title/state/url.
+ * - unchanged but checks pending: only check-runs + commit status (2 calls) —
+ *   check completion does not bump the PR's `updated_at`.
+ * - `refreshAux` true: also refetch the PR detail (mergeable_state goes
+ *   "behind" when the base moves, again without an `updated_at` bump) and the
+ *   checks (a re-run of a completed check is invisible to `updated_at` too).
+ * - changed: everything (detail, reviews, checks, status), as before.
+ *
+ * Each fetched extra independently degrades to undefined.
+ */
+export async function completePrInfo(
   token: string,
   repo: RemoteInfo,
-  branch: string
-): Promise<PrInfo | null> {
+  raw: RawPr,
+  prior?: PrInfo | null,
+  refreshAux = true
+): Promise<PrInfo> {
   const { owner, repo: name } = repo;
-  const head = encodeURIComponent(`${owner}:${branch}`);
-  const list = await getJson<RawPr[]>(
-    `/repos/${owner}/${name}/pulls?head=${head}&state=all&sort=updated&direction=desc&per_page=10`,
-    token
-  );
-  if (!list || !list.length) return null;
-
-  // Prefer an open PR; otherwise the most recently updated (list is already
-  // sorted updated-desc).
-  const raw = list.find((p) => p.state === "open") ?? list[0];
   const sha = raw.head?.sha;
+  const unchanged = prUnchanged(prior, raw);
+  const needChecks =
+    !unchanged || refreshAux || (prior as PrInfo).checks === "pending";
+  const needDetail = !unchanged || refreshAux;
+  const needReviews = !unchanged;
 
-  // Fetch the extras concurrently; each independently degrades to undefined.
+  if (unchanged && !needChecks && !needDetail) {
+    // Nothing to refetch; the list already carries the freshest cheap fields.
+    return {
+      ...(prior as PrInfo),
+      title: raw.title,
+      url: raw.html_url,
+      state: prState(raw),
+    };
+  }
+
   const [detail, reviews, checkRuns, combined] = await Promise.all([
-    getJson<RawPrDetail>(
-      `/repos/${owner}/${name}/pulls/${raw.number}`,
-      token
-    ),
-    getJson<RawReview[]>(
-      `/repos/${owner}/${name}/pulls/${raw.number}/reviews?per_page=100`,
-      token
-    ),
-    sha
+    needDetail
+      ? getJson<RawPrDetail>(`/repos/${owner}/${name}/pulls/${raw.number}`, token)
+      : Promise.resolve(undefined),
+    needReviews
+      ? getJson<RawReview[]>(
+          `/repos/${owner}/${name}/pulls/${raw.number}/reviews?per_page=100`,
+          token
+        )
+      : Promise.resolve(undefined),
+    needChecks && sha
       ? getJson<RawCheckRuns>(
           `/repos/${owner}/${name}/commits/${sha}/check-runs?per_page=100`,
           token,
           "checks"
         )
       : Promise.resolve(undefined),
-    sha
+    needChecks && sha
       ? getJson<RawCombined>(
           `/repos/${owner}/${name}/commits/${sha}/status`,
           token,
@@ -362,15 +419,26 @@ export async function fetchPr(
       : Promise.resolve(undefined),
   ]);
 
-  const checks = rollupChecks(
-    checkRuns?.check_runs,
-    combined?.state,
-    combined?.total_count
-  );
+  const checks = needChecks
+    ? rollupChecks(checkRuns?.check_runs, combined?.state, combined?.total_count)
+    : {
+        state: (prior as PrInfo).checks,
+        pass: (prior as PrInfo).checksPass,
+        fail: (prior as PrInfo).checksFail,
+        pending: (prior as PrInfo).checksPending,
+      };
   const requested =
     (detail?.requested_reviewers ?? raw.requested_reviewers ?? []).length;
-  const rev = reviewSummary(reviews ?? [], requested);
-  const comments = (detail?.comments ?? 0) + (detail?.review_comments ?? 0);
+  const rev = needReviews
+    ? reviewSummary(reviews ?? [], requested)
+    : {
+        review: (prior as PrInfo).review,
+        approvals: (prior as PrInfo).approvals,
+        changesRequested: (prior as PrInfo).changesRequested,
+      };
+  const comments = needDetail
+    ? (detail?.comments ?? 0) + (detail?.review_comments ?? 0)
+    : (prior as PrInfo).comments;
 
   return {
     number: raw.number,
@@ -386,11 +454,42 @@ export async function fetchPr(
     changesRequested: rev.changesRequested,
     reviewsPending: requested,
     comments,
-    mergeState: mapMergeState(detail?.mergeable_state),
-    autoMerge: !!detail?.auto_merge,
+    mergeState: needDetail
+      ? mapMergeState(detail?.mergeable_state)
+      : (prior as PrInfo).mergeState,
+    autoMerge: needDetail
+      ? !!detail?.auto_merge
+      : (prior as PrInfo).autoMerge,
     updatedAt: raw.updated_at,
     headSha: sha,
   };
+}
+
+/**
+ * Resolve the most relevant PR for `branch` in `repo`, with its CI, review and
+ * comment rollups. Returns null when there is no PR or anything goes wrong.
+ * Only ever called when a token is present (see PrService). `prior` +
+ * `refreshAux` enable the completePrInfo reuse path.
+ */
+export async function fetchPr(
+  token: string,
+  repo: RemoteInfo,
+  branch: string,
+  prior?: PrInfo | null,
+  refreshAux = true
+): Promise<PrInfo | null> {
+  const { owner, repo: name } = repo;
+  const head = encodeURIComponent(`${owner}:${branch}`);
+  const list = await getJson<RawPr[]>(
+    `/repos/${owner}/${name}/pulls?head=${head}&state=all&sort=updated&direction=desc&per_page=10`,
+    token
+  );
+  if (!list || !list.length) return null;
+
+  // Prefer an open PR; otherwise the most recently updated (list is already
+  // sorted updated-desc).
+  const raw = list.find((p) => p.state === "open") ?? list[0];
+  return completePrInfo(token, repo, raw, prior, refreshAux);
 }
 
 // --- branches overlay: all PRs in one REST list call ------------------------
@@ -434,6 +533,61 @@ export interface BranchPrInfo {
 const MAX_PR_PAGES = 10;
 
 /**
+ * The repo's open PRs via `GET /pulls?state=open` (paged, updated-desc,
+ * ETag-cached per page so an unchanged repo costs 304s). A first-page failure
+ * returns an empty list with `error` set; a later-page failure keeps the pages
+ * already collected. Never throws.
+ */
+async function listOpenPrs(
+  token: string,
+  repo: RemoteInfo
+): Promise<{ raws: RawPr[]; error?: string }> {
+  const { owner, repo: name } = repo;
+  const raws: RawPr[] = [];
+  let error: string | undefined;
+  for (let page = 1; page <= MAX_PR_PAGES; page++) {
+    const list = await getJson<RawPr[]>(
+      `/repos/${owner}/${name}/pulls?state=open&sort=updated&direction=desc&per_page=100&page=${page}`,
+      token
+    );
+    if (!list) {
+      // Only a first-page failure means "no data at all"; a later-page failure
+      // keeps what we already collected.
+      if (page === 1) {
+        error =
+          "GitHub returned no PR list (token may lack Pull requests: Read).";
+      }
+      break;
+    }
+    raws.push(...list);
+    if (list.length < 100) break; // a short page is the last page
+  }
+  return { raws, error };
+}
+
+/**
+ * The repo's open PRs keyed by head ref, for the worktree-card poll: one bulk
+ * list per repo instead of one `?head=` list call per worktree. Returns
+ * undefined when the list could not be fetched at all (offline, bad token), so
+ * the caller can keep prior data instead of treating every branch as PR-less.
+ * The list arrives updated-desc, so the first PR seen per head ref is the most
+ * recently updated one.
+ */
+export async function fetchOpenPrsByHead(
+  token: string,
+  repo: RemoteInfo
+): Promise<Map<string, RawPr> | undefined> {
+  const { raws, error } = await listOpenPrs(token, repo);
+  if (error) return undefined;
+  const byHead = new Map<string, RawPr>();
+  for (const raw of raws) {
+    const ref = raw.head?.ref;
+    if (ref && !byHead.has(ref)) byHead.set(ref, raw);
+  }
+  return byHead;
+}
+
+/**
  * Fetch the repo's open PRs via the REST `GET /pulls?state=open` list, mapped by
  * head ref name. One list call per page and no per-PR follow-ups, so it works
  * with a fine-grained PAT that has "Pull requests: Read" but is denied GraphQL
@@ -470,28 +624,8 @@ export async function fetchPrsByBranch(
    *  "Pull requests: Read". */
   error?: string;
 }> {
-  const { owner, repo: name } = repo;
   const prs = new Map<string, BranchPrInfo>();
-  const raws: RawPr[] = [];
-  let error: string | undefined;
-
-  for (let page = 1; page <= MAX_PR_PAGES; page++) {
-    const list = await getJson<RawPr[]>(
-      `/repos/${owner}/${name}/pulls?state=open&sort=updated&direction=desc&per_page=100&page=${page}`,
-      token
-    );
-    if (!list) {
-      // Only a first-page failure means "no data at all"; a later-page failure
-      // keeps what we already collected.
-      if (page === 1) {
-        error =
-          "GitHub returned no PR list (token may lack Pull requests: Read).";
-      }
-      break;
-    }
-    raws.push(...list);
-    if (list.length < 100) break; // a short page is the last page
-  }
+  const { raws, error } = await listOpenPrs(token, repo);
 
   for (const raw of raws) {
     const headRef = raw.head?.ref;

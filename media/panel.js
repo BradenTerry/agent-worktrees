@@ -142,11 +142,9 @@
   // tracks instantly without a full re-render.
   let activeSessionId = "";
 
+  const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
   function esc(s) {
-    return String(s).replace(
-      /[&<>"]/g,
-      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])
-    );
+    return String(s).replace(/[&<>"]/g, (c) => ESC_MAP[c]);
   }
 
   function send(action, extra) {

@@ -2,6 +2,33 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.4.2
+
+- **Hook events no longer sweep git across every worktree** - agent activity
+  now refreshes only the agent rows plus git for the worktrees whose sessions
+  actually fired, instead of spawning git status for all of them on every hook
+  burst. Payloads that differ only by the never-rendered activity heartbeat are
+  no longer re-posted, so the panel stops rebuilding its DOM on every tool
+  call.
+- **Faster tool calls while the panel watches** - the status emitter no longer
+  reads the session transcript on the tool-blocking PreToolUse/PostToolUse
+  events (titles land at turn boundaries, which the other events cover), and
+  its per-event directory create is now lazy.
+- **Far fewer GitHub requests** - PR polling starts with one bulk open-PR list
+  per repo instead of one list call per worktree, and a PR that is provably
+  unchanged (same updated time and head commit) is reused with no follow-up
+  requests. Checks still refresh while pending, and a periodic detail pass
+  catches the out-of-date flag and check re-runs. Merged and closed PRs stop
+  being refetched and no longer hold the poll at its fast cadence. The token
+  is read once, not per call.
+- **Stale badge fix** - overlapping refreshes could finish out of order and
+  briefly show the Activity Bar badge for a waiting agent that had already
+  resumed; the newest state now always wins.
+- **Less background work** - repo root, primary worktree path, origin remote
+  and hook-install state are cached instead of re-derived every refresh; a
+  hidden panel skips its GitHub work until shown; the pulsing status dots no
+  longer force continuous repaints.
+
 ## 3.4.1
 
 - **A badge when an agent needs you** - the Activity Bar icon now shows a count

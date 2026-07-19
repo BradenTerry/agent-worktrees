@@ -144,7 +144,11 @@ Code blocks the tool until the hook exits, so follow-up events reuse the cached
 value instead of spawning `git rev-parse` twice per event — on Windows, where
 process spawns are expensive, that cache is the difference between hooks being
 free and every tool call paying a visible startup tax. `SessionStart`
-re-resolves from git. When the extension launched the agent it passes `claude
+re-resolves from git. For the same reason the transcript tail read that picks
+up Claude's generated session title is skipped on `PreToolUse`/`PostToolUse`
+(the prior title is carried forward) and runs only on the turn-boundary events
+(`UserPromptSubmit`, `Stop`, `Notification`, `SubagentStop`, `SessionStart`),
+which is where a new title lands. When the extension launched the agent it passes `claude
 --session-id <uuid>` and stamps that same uuid into the terminal env as
 `AGENT_WORKTREES_SID`; the emitter (a child of the Claude process) inherits it
 and keys the state file by it rather than by Claude's live `session_id`. That id
@@ -216,11 +220,34 @@ flowchart LR
 The panel refreshes on a few discrete signals: extension load, the manual Refresh
 button, the session-state `FileSystemWatcher` (one event per Claude hook firing,
 which also surfaces an agent creating a new worktree), window focus, and
-source-control scope changes. Each refresh spawns `git status` for every worktree
-(plus a `git diff --numstat HEAD` only for worktrees with tracked changes — a
-clean worktree skips it, halving its per-worktree spawns), so reacting to every
-raw event would peg the CPU - and noticeably worse on Windows, where every process
-spawn is far more expensive than on macOS. The per-worktree statuses run at most
+source-control scope changes. A full refresh spawns `git status` for every
+worktree (plus a `git diff --numstat HEAD` only for worktrees with tracked
+changes — a clean worktree skips it, halving its per-worktree spawns), so
+reacting to every raw event would peg the CPU - and noticeably worse on Windows,
+where every process spawn is far more expensive than on macOS.
+
+The session-state watcher — by far the most frequent trigger while an agent
+works — does **not** run the full gather. A hook firing means agent state
+changed and files may have changed in that agent's worktree, but not in the
+others, so `refreshAgents` re-reads the session files, swaps the agent VMs into
+the last gathered payload, and re-runs `git status` only for the worktrees
+whose sessions actually fired (the watcher records each changed file's session
+id). It falls back to a full refresh when a session appears in a worktree the
+cached payload does not know — an agent just created one with `claude -w`. The
+posted-payload dedupe also strips the `lastActivity` heartbeat (bumped by every
+hook event, never rendered) from its signature, so an agent streaming tool
+calls no longer re-posts — and full-DOM-rebuilds — a byte-identical panel.
+
+Because the full and agent-only refreshes run on separate coalescers they can
+overlap, and a slow full refresh reads its session snapshot before the git work
+that delays it — so it could land *after* a faster agent-only update and
+overwrite newer agent state (this is what once left the Activity Bar badge
+showing a waiting agent that had already gone active). Every refresh therefore
+claims a monotonic token before reading session state, and only the newest
+claim is allowed to post (the sidebar counterpart of the branches view's
+`branchPostSeq` guard). A hidden sidebar still runs the git gather — the
+Activity Bar badge needs it — but skips the PR/token/remote work until
+re-shown. The per-worktree statuses run at most
 4 at a time (`mapLimit`) so a many-worktree repo never fires an unbounded spawn
 burst, and a refresh only re-reads the Branches tab while that tab is actually
 visible — hidden behind another editor it skips the (git-heavy) branch listing
@@ -330,11 +357,25 @@ panel as a `{ type: "branches" }` payload:
   accessible by personal access token" on tokens denied GraphQL, which this
   avoids.
 
-The bulk-list path is used **only** by the branches view. The per-worktree PR
-badges on the cards keep the existing per-branch REST `fetchPr` path (which does
-fetch each PR's checks and reviews) unchanged, so the two are separate code
-paths — and the cards still show CI checks and review status that the branches
-view does not.
+The worktree-card poll (`PrService`) shares the bulk-list technique but stays a
+separate path, because the cards do show checks and reviews. Each poll starts
+with one bulk `GET /pulls?state=open` per repo — the repo's worktrees share it —
+mapped by head ref, instead of one `?head=` list call per worktree. Follow-ups
+are then fetched only where something can have changed: a PR whose `updated_at`
+and head SHA match the cache is reused outright (zero requests), with two
+blind spots `updated_at` cannot see covered separately — checks are refetched
+while the cached rollup is pending (check completion does not bump
+`updated_at`), and an aux refresh of detail + checks runs at most every five
+minutes to catch base-branch movement (the "Out of date" pill) and re-runs of
+completed checks. Reviews and comments refetch only on an `updated_at` change.
+A branch with no open PR in the bulk list: a cached merged/closed PR is
+terminal and never refetched (anything new would be an open PR and appear in
+the bulk list), and such PRs no longer count toward the fast poll cadence; an
+uncached branch, or one whose PR just left the open list, pays one `state=all`
+lookup to learn its state. Every request stays ETag-conditional (304 replies
+do not count against the rate limit), and the token is memoized instead of
+re-read from SecretStorage on every call (invalidated via
+`secrets.onDidChange`, so a token change in another window is picked up).
 
 The view is git-first, so its **Updated by** and **Location** filters and
 **Sort** are git-based and run entirely client-side over the cached payload —
