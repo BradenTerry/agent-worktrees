@@ -85,17 +85,24 @@ const EVENT_STATE = {
  * `notification_type` on the payload:
  *  - "agent_completed": a background subagent finished and the parent is about
  *    to be re-invoked with its result — the agent is working, not blocked.
- *  - "idle_prompt": fired after ~60s of no user input. When background
- *    subagents are still running (`pendingAgents` > 0, read from the
- *    transcript) the parent is merely waiting on THEM, so flagging it
- *    "waiting on you" is a false positive — it stays active.
+ *  - "idle_prompt": fired after ~60s of no user input. This is NOT a signal
+ *    that the agent needs the user — it also fires when a session simply
+ *    finished its turn and is sitting idle, which flagged every done agent as
+ *    "waiting" forever (a permanent badge on the Activity Bar icon). When
+ *    background subagents are still running (`pendingAgents` > 0, read from
+ *    the transcript) the parent is working on THEM: active. Otherwise keep the
+ *    prior state: an unanswered permission prompt stays waiting, a finished
+ *    turn stays idle.
  *  Everything else (permission_prompt, agent_needs_input, an older Claude Code
  *  that sends no type, ...) genuinely needs the user: waiting.
  */
-function notificationState(payload, pendingAgents) {
+function notificationState(payload, pendingAgents, prior) {
   const type = payload.notification_type;
   if (type === "agent_completed") return "active";
-  if (type === "idle_prompt" && pendingAgents > 0) return "active";
+  if (type === "idle_prompt") {
+    if (pendingAgents > 0) return "active";
+    return prior === "waiting" ? "waiting" : "idle";
+  }
   return "waiting";
 }
 
@@ -322,7 +329,7 @@ function main() {
 
   const state =
     event === "Notification"
-      ? notificationState(payload, tail.pendingAgents)
+      ? notificationState(payload, tail.pendingAgents, prior.state)
       : EVENT_STATE[event] || "active";
 
   // The summary: Claude's own generated title from the transcript, which tracks

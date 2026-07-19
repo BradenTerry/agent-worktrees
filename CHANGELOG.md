@@ -2,6 +2,21 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.4.5
+
+- **A finished agent no longer counts as waiting forever** - Claude Code fires
+  an idle nudge about a minute after any turn ends with no user input; the
+  emitter treated it as "the agent needs you" and flagged every done session as
+  waiting until its next prompt, keeping a permanent count on the Activity Bar
+  badge. The idle nudge now preserves the prior state: an unanswered permission
+  prompt stays waiting, a finished turn stays idle.
+- **The Activity Bar badge now clears when no agent is waiting** - VS Code
+  ignores clearing a view badge by setting it to `undefined` once a number has
+  been shown (microsoft/vscode#162900 still reproduces for webview views), so
+  the badge stuck at its last nonzero count even after every agent resumed or
+  finished. The panel now clears it with a zero-value badge, which VS Code
+  honors.
+
 ## 3.4.4
 
 - **An agent delegating to background subagents no longer shows as waiting on
