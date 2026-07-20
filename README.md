@@ -162,10 +162,13 @@ value instead of spawning `git rev-parse` twice per event — on Windows, where
 process spawns are expensive, that cache is the difference between hooks being
 free and every tool call paying a visible startup tax. `SessionStart`
 re-resolves from git. For the same reason the transcript tail read that picks
-up Claude's generated session title is skipped on `PreToolUse`/`PostToolUse`
-(the prior title is carried forward) and runs only on the turn-boundary events
-(`UserPromptSubmit`, `Stop`, `Notification`, `SubagentStop`, `SessionStart`),
-which is where a new title lands. When the extension launched the agent it passes `claude
+up Claude's generated session title always runs on the turn-boundary events
+(`UserPromptSubmit`, `Stop`, `Notification`, `SubagentStop`, `SessionStart`)
+but is kept off the `PreToolUse`/`PostToolUse` hot path once a title is known
+(the prior title is carried forward). While the session has no title yet —
+the first title lands mid-turn, a few seconds after the first prompt — tool
+events do read the tail, throttled to once per 5 seconds, so a busy new
+session picks its summary up without paying the read on every tool call. When the extension launched the agent it passes `claude
 --session-id <uuid>` and stamps that same uuid into the terminal env as
 `AGENT_WORKTREES_SID`; the emitter (a child of the Claude process) inherits it
 and keys the state file by it rather than by Claude's live `session_id`. That id

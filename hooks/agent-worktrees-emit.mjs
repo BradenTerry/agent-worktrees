@@ -17,7 +17,7 @@
  *   ($AGENT_WORKTREES_SID, stable across /resume) when present, else the live
  *   session_id.
  *   = { sessionId, worktree, branch, cwd, state, task, skills, subagents,
- *       model, startedAt, ts }
+ *       model, startedAt, titleCheckTs, ts }
  * SessionEnd removes the file so the agent disappears when its session exits.
  */
 import { execFileSync } from "node:child_process";
@@ -317,15 +317,30 @@ function main() {
   )
     subagents++;
 
-  // The transcript tail is read only at turn boundaries: PreToolUse/PostToolUse
-  // fire on every tool call and Claude Code blocks the tool until this hook
-  // exits, so a tail read + parse per tool call is real latency on every agent.
-  // The remaining events (UserPromptSubmit, Stop, Notification, SubagentStop,
-  // SessionStart) bracket the boundaries where its records land.
-  const tail =
-    event !== "PreToolUse" && event !== "PostToolUse"
-      ? readTranscriptTail(payload.transcript_path)
-      : { title: "", pendingAgents: 0 };
+  // The transcript tail read is kept off the tool-call hot path:
+  // PreToolUse/PostToolUse fire on every tool call and Claude Code blocks the
+  // tool until this hook exits, so a tail read + parse per tool call is real
+  // latency on every agent. Boundary events (UserPromptSubmit, Stop,
+  // Notification, SubagentStop, SessionStart) always read it. But the FIRST
+  // title of a session lands a few seconds AFTER UserPromptSubmit, in the
+  // middle of the first turn — with no read at all on tool events, a busy new
+  // session showed its default "Claude N" label for the whole first turn. So
+  // while the session has no title yet, tool events also read the tail, but
+  // throttled (at most once per TITLE_RECHECK_MS via titleCheckTs) so a
+  // session Claude never titles doesn't pay the read on every tool call.
+  // Once a title exists it is carried forward and refreshed only at
+  // boundaries, so the steady-state hot path stays read-free.
+  let task = typeof prior.task === "string" ? prior.task : "";
+  let titleCheckTs =
+    typeof prior.titleCheckTs === "number" ? prior.titleCheckTs : 0;
+  const isToolEvent = event === "PreToolUse" || event === "PostToolUse";
+  const TITLE_RECHECK_MS = 5000;
+  const readTail =
+    !isToolEvent || (!task && now - titleCheckTs >= TITLE_RECHECK_MS);
+  const tail = readTail
+    ? readTranscriptTail(payload.transcript_path)
+    : { title: "", pendingAgents: 0 };
+  if (readTail) titleCheckTs = now;
 
   const state =
     event === "Notification"
@@ -337,8 +352,7 @@ function main() {
   // the user's raw prompt: the title lands shortly after the first prompt, so
   // until then the panel row and terminal keep their default "Claude N" /
   // "Claude · <worktree>" label rather than echoing the prompt text. Until the
-  // next boundary event fires, the prior title is carried forward.
-  let task = typeof prior.task === "string" ? prior.task : "";
+  // next read that finds one, the prior title is carried forward.
   if (tail.title) {
     task = tail.title;
   }
@@ -348,6 +362,7 @@ function main() {
   // restarts the clock. (A fresh startup has no transcript title yet.)
   if (event === "SessionStart" && payload.source === "startup") {
     task = "";
+    titleCheckTs = 0;
     startedAt = now;
   }
 
@@ -362,6 +377,7 @@ function main() {
     model: payload.model || "claude",
     startedAt,
     ts: now,
+    ...(titleCheckTs ? { titleCheckTs } : {}),
     ...(task ? { task } : {}),
     ...(skills.length ? { skills } : {}),
     ...(subagents ? { subagents } : {}),
