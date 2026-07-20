@@ -2,6 +2,20 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.4.7
+
+- **Status hooks can no longer surface errors in your Claude session** - when
+  the emitter's state directory couldn't be created (deleted extension
+  storage, a synced `~/.claude/settings.json` pointing at another machine's
+  path), the emitter crashed and Claude Code printed a
+  `PreToolUse:<tool> hook error ... failed with non-blocking status code`
+  warning on every tool call. The emitter now swallows every failure and
+  always exits 0 silently - a status update that can't land is dropped instead
+  of erroring the session - and the hook command runs `node --no-warnings` so
+  node's own startup warnings can't be reported as hook errors either. The
+  repaired command is written to `settings.json` automatically on the next
+  activation.
+
 ## 3.4.6
 
 - **A new session's summary now appears during its first turn** - the first
