@@ -190,7 +190,10 @@ idle, so it uses Claude Code's hooks. With your **explicit consent**, it adds a
 small emitter to `~/.claude/settings.json` that, on each hook event, writes a
 local state file the extension watches. **Nothing is sent over the network** —
 status flows entirely through local files, and you can remove the hooks anytime
-by editing that settings file.
+by editing that settings file. Status reporting is best-effort and stays out of
+your way: if a status update can't be written it is dropped silently, so the
+hooks never show errors in your Claude session or interfere with its tool
+calls.
 
 | Status      | When                                                        |
 | ----------- | ----------------------------------------------------------- |

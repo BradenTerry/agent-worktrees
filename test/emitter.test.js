@@ -372,6 +372,35 @@ test("re-resolves the worktree when cwd changes or on SessionStart", () => {
   assert.match(stateOf(sid).worktree, /repo$/);
 });
 
+test("a state write that cannot land never fails the hook", () => {
+  // Claude Code prints a "PreToolUse:<tool> hook error ... failed with
+  // non-blocking status code" warning for any nonzero exit or stderr output —
+  // on PreToolUse, once per tool call. When the sessions dir cannot exist
+  // (deleted global storage, a synced settings.json pointing at another
+  // machine's path), the emitter must drop the update silently.
+  const blocker = path.join(dir, "blocker");
+  fs.writeFileSync(blocker, ""); // a FILE where the dir path needs a directory
+  const env = {
+    ...process.env,
+    AGENT_WORKTREES_DIR: path.join(blocker, "sessions"),
+  };
+  delete env.AGENT_WORKTREES_SID;
+  const r = spawnSync("node", [EMITTER], {
+    input: JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Read",
+      session_id: "session-unwritable",
+      cwd: repo,
+    }),
+    cwd: repo,
+    encoding: "utf8",
+    env,
+  });
+  assert.strictEqual(r.status, 0);
+  assert.strictEqual(r.stderr, "");
+  assert.strictEqual(r.stdout, "");
+});
+
 test("SessionEnd removes the state file", () => {
   const r = run({ hook_event_name: "SessionEnd", session_id: SID, cwd: repo });
   assert.strictEqual(r.status, 0);

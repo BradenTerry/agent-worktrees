@@ -184,6 +184,17 @@ local files, and nothing of the extension's lives in your `~/.claude` tree apart
 from the hook entries in `settings.json`. Status reporting needs `node` on
 `PATH`.
 
+Status reporting is best-effort by design. Claude Code surfaces any nonzero
+hook exit — or any stderr output at all — as a
+`hook error ... failed with non-blocking status code` warning in the session,
+and wired to `PreToolUse` that would mean a warning per tool call. So the
+emitter swallows every failure and always exits 0 silently: a state write that
+can't land (deleted global storage, a synced `settings.json` whose `--dir`
+path doesn't exist on this machine, a read-only disk) degrades to a missed
+status update, never a visible error. The hook command also runs
+`node --no-warnings` so node's own startup warnings (deprecation/experimental,
+varying by node version) can't hit stderr before the emitter gets control.
+
 ## Requirements
 
 - The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`)
