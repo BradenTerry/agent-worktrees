@@ -2,6 +2,16 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.4.6
+
+- **A new session's summary now appears during its first turn** - the first
+  session title lands a few seconds after the first prompt, mid-turn, but the
+  emitter only read the transcript at turn boundaries, so a busy new session
+  showed its default "Claude N" label until the whole first turn ended. While
+  a session has no title yet, tool events now also read the transcript tail,
+  throttled to once per 5 seconds; once a title is known the per-tool-call hot
+  path stays read-free as before.
+
 ## 3.4.5
 
 - **A finished agent no longer counts as waiting forever** - Claude Code fires
