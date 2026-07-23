@@ -54,6 +54,22 @@ The **Branches view** opens as a full editor tab listing every branch with when 
   highlighted in the panel (and its worktree's Agents bar is marked when the
   card is collapsed), so switching between several worktrees never leaves you
   typing to the wrong agent.
+- **Linked files** — a new worktree only gets the files git tracks, so the
+  gitignored local config your build or integration tests rely on (an
+  `appsettings.Development.json`, a `.env`, a certs folder) simply is not there
+  and the tests fail. In **Settings → Linked Files** you list those files once
+  per repository and the panel symlinks them into every worktree it creates, so
+  a fresh worktree builds and tests exactly like your main checkout. Finding them
+  is one click: **Add from .gitignore** shows everything git ignores and you tick
+  what you need (whole ignored folders like `node_modules` stay collapsed to a
+  single row, so the list is short). You can also browse with the normal file
+  picker or type a path. The links
+  point back at your main worktree's copy, so editing the file once updates it
+  everywhere. Already have worktrees? **Link existing worktrees** applies the
+  list to all of them in one click. A file a worktree genuinely has of its own is
+  never overwritten. Works on Windows without Developer Mode or running as
+  administrator: folders are linked with a junction and files fall back to a hard
+  link, so you are never asked to elevate anything.
 - **Skills used** — see which Claude skills each agent has invoked.
 - **Subagents used** — a robot count shows how many subagents each agent has
   spawned, plus the total across the worktree.
