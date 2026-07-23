@@ -1254,6 +1254,90 @@ button.busy {
   color: var(--vscode-errorForeground, #f14c4c);
 }
 
+/* --- Linked Files settings tab ------------------------------------------ */
+.linked-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.linked-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
+}
+.linked-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vscode-foreground);
+}
+.linked-path svg {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  opacity: 0.75;
+}
+.linked-path code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+.linked-remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  color: var(--vscode-descriptionForeground);
+}
+.linked-remove svg {
+  width: 13px;
+  height: 13px;
+}
+.linked-remove:hover {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+.linked-empty {
+  margin: 0;
+}
+.linked-field {
+  margin-top: 2px;
+}
+/* Secondary actions under the add field. Wraps so the two buttons stack rather
+   than overflow at narrow sidebar widths. */
+.linked-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.linked-actions svg {
+  width: 13px;
+  height: 13px;
+}
+/* Icon-only "choose a file" button, sized to sit flush with the path input. */
+.linked-browse {
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: 3px 7px;
+}
+.linked-browse svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* --- Branches view (dedicated editor tab, fills the editor area) --------- */
 .branches-view .settings-title svg {
   width: 14px;

@@ -270,6 +270,71 @@ export async function addWorktree(
   }
 }
 
+/** One path git currently ignores, offered as a candidate for linking. */
+export interface IgnoredEntry {
+  /** Repo-relative path, forward slashes, no trailing slash. */
+  path: string;
+  /** True when git collapsed a wholly-ignored directory into this one entry
+   *  (so `node_modules` is one row, not fifty thousand). */
+  isDir: boolean;
+}
+
+/**
+ * Parse `git ls-files -z --others --ignored ... --directory` output. Pure and
+ * exported so the NUL splitting, the trailing-slash directory marker and the
+ * exclusions below are unit-tested without spawning git.
+ *
+ * Two things are never offered:
+ *  - anything under `.git`, which is git's own storage, and
+ *  - the panel's own worktree storage (`.claude/worktrees`), plus a collapsed
+ *    `.claude` directory entry that would contain it. Linking a worktree into a
+ *    worktree makes a recursive link. Individual files under `.claude` (a
+ *    `settings.local.json`, say) are still offered, since those are ordinary
+ *    local config.
+ */
+export function parseIgnoredPaths(stdout: string): IgnoredEntry[] {
+  const out: IgnoredEntry[] = [];
+  for (const raw of stdout.split("\0")) {
+    if (!raw) continue;
+    const isDir = raw.endsWith("/");
+    const p = (isDir ? raw.slice(0, -1) : raw).replace(/\\/g, "/");
+    if (!p) continue;
+    if (p === ".git" || p.startsWith(".git/")) continue;
+    if (p === ".claude/worktrees" || p.startsWith(".claude/worktrees/")) continue;
+    if (p === ".claude" && isDir) continue;
+    out.push({ path: p, isDir });
+  }
+  return out;
+}
+
+/**
+ * Every path git ignores in `repoRoot`, as candidates for the linked-files list.
+ *
+ * `--directory --no-empty-directory` collapses a wholly-ignored directory into a
+ * single entry, which is what keeps `node_modules` or `bin`/`obj` from expanding
+ * into tens of thousands of rows. `--full-name` keeps paths repo-relative
+ * regardless of cwd, and `-z` means a filename with odd characters can't break
+ * the parse.
+ */
+export async function listIgnoredPaths(
+  repoRoot: string
+): Promise<IgnoredEntry[]> {
+  const { stdout } = await git(
+    [
+      "ls-files",
+      "-z",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+      "--directory",
+      "--no-empty-directory",
+      "--full-name",
+    ],
+    { cwd: repoRoot }
+  );
+  return parseIgnoredPaths(stdout);
+}
+
 /** A branch of the repository, annotated with its worktree association. */
 export interface BranchInfo {
   /** Short branch name, e.g. "feature/x". */

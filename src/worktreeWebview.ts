@@ -13,6 +13,12 @@ import {
 } from "./worktreeData";
 import { countWaitingAgents, worktreeDirFor } from "./worktreeUtils";
 import {
+  linkPathsIntoWorktree,
+  unlinkPathFromWorktree,
+  linkFailures,
+  LinkOutcome,
+} from "./links";
+import {
   addWorktree,
   addBranchWorktree,
   switchWorktreeBranch,
@@ -31,6 +37,7 @@ import {
   mapLimit,
   getRemoteInfo,
   RemoteInfo,
+  listIgnoredPaths,
 } from "./git";
 import { hooksInstalled, installHooks, sessionsDir, HOOKS } from "./hooks";
 import { readSessionsByWorktree } from "./sessionStore";
@@ -64,6 +71,12 @@ const SCM_SCOPED_PATH_KEY = "agentWorktrees.scmScopedPath";
 /** Config key for the debug-tracing toggle, surfaced in Settings → Debug. */
 const TRACE_SETTING = "agentWorktrees.trace";
 
+/** globalState key for the per-repo lists of files symlinked into new worktrees
+ *  (Settings → Linked Files). Value is a map of repo root → relative paths; a
+ *  map (not a single array) keeps each repo's list separate while living in the
+ *  extension's own storage rather than the repo's .vscode/settings.json. */
+const LINKED_PATHS_KEY = "agentWorktrees.linkedPaths";
+
 /** Messages sent from the webview to the extension. */
 interface ActionMessage {
   type: "action";
@@ -85,6 +98,11 @@ interface ActionMessage {
     | "togglePr"
     | "toggleScm"
     | "toggleTrace"
+    | "addLinkedPath"
+    | "browseLinkedPath"
+    | "pickIgnoredPaths"
+    | "removeLinkedPath"
+    | "relinkWorktrees"
     | "showLog"
     | "scopeScm"
     | "openBranches"
@@ -102,6 +120,8 @@ interface ActionMessage {
   value?: boolean;
   /** Branch name, for worktreeFromBranch / deleteBranch. */
   branch?: string;
+  /** Repo-relative file path, for addLinkedPath / removeLinkedPath. */
+  linkPath?: string;
   /** Whether the branch is remote-only, for worktreeFromBranch. */
   remoteOnly?: boolean;
   /** Whether the branch's PR is merged, for deleteBranch (skips the unmerged
@@ -333,6 +353,7 @@ export class WorktreeWebviewProvider
     data.traceEnabled = vscode.workspace
       .getConfiguration()
       .get<boolean>(TRACE_SETTING, false);
+    if (data.repoRoot) data.linkedPaths = this.getLinkedPaths(data.repoRoot);
     data.activeSessionId = this.activeSessionId();
     if (!installed) {
       data.hooks = HOOKS.map((h) => ({
@@ -552,6 +573,16 @@ export class WorktreeWebviewProvider
         return this.toggleScm(msg.value);
       case "toggleTrace":
         return this.toggleTrace(msg.value);
+      case "addLinkedPath":
+        return this.addLinkedPath(msg.linkPath);
+      case "browseLinkedPath":
+        return this.browseLinkedPath();
+      case "pickIgnoredPaths":
+        return this.pickIgnoredPaths();
+      case "removeLinkedPath":
+        return this.removeLinkedPath(msg.linkPath);
+      case "relinkWorktrees":
+        return this.relinkWorktrees();
       case "showLog":
         return void vscode.commands.executeCommand("worktreeView.showLog");
       case "scopeScm":
@@ -587,6 +618,340 @@ export class WorktreeWebviewProvider
       .update(TRACE_SETTING, !!value, vscode.ConfigurationTarget.Global);
     this.lastPosted = "";
     await this.refresh();
+  }
+
+  // --- Linked files ----------------------------------------------------------
+
+  /** The whole per-repo linked-paths map from globalState (repo root → paths). */
+  private linkedPathsMap(): Record<string, string[]> {
+    return this.context.globalState.get<Record<string, string[]>>(
+      LINKED_PATHS_KEY,
+      {}
+    );
+  }
+
+  /** The configured relative paths symlinked into `repoRoot`'s worktrees. */
+  private getLinkedPaths(repoRoot: string): string[] {
+    return this.linkedPathsMap()[normalize(repoRoot)] ?? [];
+  }
+
+  /** Persist `paths` for `repoRoot`, dropping the entry entirely when empty so
+   *  the stored map doesn't accumulate blanks for repos that opt back out. */
+  private async setLinkedPaths(
+    repoRoot: string,
+    paths: string[]
+  ): Promise<void> {
+    const key = normalize(repoRoot);
+    const map = { ...this.linkedPathsMap() };
+    if (paths.length) map[key] = paths;
+    else delete map[key];
+    await this.context.globalState.update(LINKED_PATHS_KEY, map);
+    this.lastPosted = "";
+    await this.refresh();
+  }
+
+  /** Canonical form of a typed/picked entry: forward slashes, no leading "./"
+   *  or "/" and no trailing slash, so the same file entered two ways is one
+   *  entry. */
+  private static normalizeLinkRel(raw: string): string {
+    return raw
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\.?\//, "")
+      .replace(/\/+$/, "");
+  }
+
+  /**
+   * Convert a typed or picked path into the stored repo-relative form, or
+   * undefined when it lands outside the repository (which has no such form).
+   *
+   * Absolute input is accepted and made relative: pasting a full path is a
+   * natural thing to do, and on Windows `C:\repo\...` would otherwise be stored
+   * verbatim and then resolve to a target outside the worktree. Drive-letter and
+   * UNC prefixes are detected explicitly because `path.isAbsolute` only
+   * recognizes them when the host itself is Windows.
+   */
+  private toRepoRelative(primary: string, input: string): string | undefined {
+    const cleaned = input.trim().replace(/\\/g, "/");
+    if (!cleaned) return undefined;
+    const isAbs =
+      path.isAbsolute(cleaned) ||
+      /^[a-zA-Z]:\//.test(cleaned) ||
+      cleaned.startsWith("//");
+    if (!isAbs) return WorktreeWebviewProvider.normalizeLinkRel(cleaned);
+    // Canonicalize both sides so a drive-letter case or trailing-slash
+    // difference can't make an in-repo path look external.
+    const rel = path.relative(normalize(primary), normalize(cleaned));
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return undefined;
+    return WorktreeWebviewProvider.normalizeLinkRel(rel);
+  }
+
+  /** Add one repo-relative path to the linked-files list (deduped, blanks
+   *  ignored) and link it into every existing worktree right away. */
+  private async addLinkedPath(raw?: string): Promise<void> {
+    const primary = await this.primaryWorktree();
+    if (!primary) return;
+    const typed = (raw ?? "").trim();
+    if (!typed) return;
+    const rel = this.toRepoRelative(primary, typed);
+    if (!rel) {
+      vscode.window.showWarningMessage(
+        `"${typed}" is outside the repository. Linked files must live inside it.`
+      );
+      return;
+    }
+    await this.addLinkedPathsFor(primary, [rel]);
+  }
+
+  /**
+   * Persist any of `rels` not already listed, then link the whole set into the
+   * worktrees that already exist (the "existing" half of the setting) so a path
+   * is usable the moment it is added.
+   */
+  private async addLinkedPathsFor(
+    primary: string,
+    rels: string[]
+  ): Promise<void> {
+    if (!rels.length) return;
+    const current = this.getLinkedPaths(primary);
+    const added = rels.filter((r) => !current.includes(r));
+    if (added.length) {
+      await this.setLinkedPaths(primary, [...current, ...added]);
+    }
+    await this.linkInExistingWorktrees(primary, rels);
+  }
+
+  /**
+   * Pick files (or folders, where the platform's dialog allows both) with VS
+   * Code's native open dialog instead of typing a path, rooted at the repo. A
+   * selection outside the repository is rejected: a link must be expressible as
+   * a repo-relative path for it to mean the same thing in every worktree.
+   */
+  private async browseLinkedPath(): Promise<void> {
+    const primary = await this.primaryWorktree();
+    if (!primary) {
+      vscode.window.showErrorMessage("No git repository in this window.");
+      return;
+    }
+    const picked = await vscode.window.showOpenDialog({
+      defaultUri: vscode.Uri.file(primary),
+      canSelectFiles: true,
+      canSelectFolders: true,
+      canSelectMany: true,
+      openLabel: "Link",
+      title: "Choose files to link into every worktree",
+    });
+    if (!picked?.length) return;
+
+    const rels: string[] = [];
+    const outside: string[] = [];
+    for (const uri of picked) {
+      const rel = this.toRepoRelative(primary, uri.fsPath);
+      if (!rel) {
+        outside.push(uri.fsPath);
+        continue;
+      }
+      rels.push(rel);
+    }
+
+    if (outside.length) {
+      vscode.window.showWarningMessage(
+        `Linked files must live inside the repository. Skipped: ${outside.join(", ")}`
+      );
+    }
+    await this.addLinkedPathsFor(primary, rels);
+  }
+
+  /** Upper bound on the ignored paths offered at once. `--directory` already
+   *  collapses whole ignored trees, so hitting this means a repo with a genuinely
+   *  huge spread of ignored files; the quick pick stays responsive and the user
+   *  is told the list was cut rather than silently shown a partial view. */
+  private static readonly MAX_IGNORED_CHOICES = 2000;
+
+  /**
+   * Offer everything git ignores as a multi-select quick pick, so the files that
+   * need linking (which are gitignored almost by definition — that is exactly
+   * why `git worktree add` doesn't bring them along) can be ticked instead of
+   * typed. Paths already on the list are filtered out.
+   */
+  private async pickIgnoredPaths(): Promise<void> {
+    const primary = await this.primaryWorktree();
+    if (!primary) {
+      vscode.window.showErrorMessage("No git repository in this window.");
+      return;
+    }
+
+    let ignored;
+    try {
+      ignored = await listIgnoredPaths(primary);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `Could not read ignored files: ${(err as Error).message}`
+      );
+      return;
+    }
+
+    const already = new Set(this.getLinkedPaths(primary));
+    let candidates = ignored.filter((e) => !already.has(e.path));
+    if (!candidates.length) {
+      vscode.window.showInformationMessage(
+        ignored.length
+          ? "Every ignored file is already linked."
+          : "This repository has no ignored files to link."
+      );
+      return;
+    }
+
+    // Files first, then whole ignored directories (which are usually build
+    // output the user does not want), each alphabetical — so the config files
+    // this feature exists for are at the top.
+    candidates.sort((a, b) =>
+      a.isDir !== b.isDir
+        ? a.isDir
+          ? 1
+          : -1
+        : a.path.localeCompare(b.path)
+    );
+    const total = candidates.length;
+    const capped = total > WorktreeWebviewProvider.MAX_IGNORED_CHOICES;
+    if (capped) {
+      candidates = candidates.slice(
+        0,
+        WorktreeWebviewProvider.MAX_IGNORED_CHOICES
+      );
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      candidates.map((e) => ({
+        label: e.path,
+        description: e.isDir ? "folder" : undefined,
+        entry: e,
+      })),
+      {
+        canPickMany: true,
+        matchOnDescription: true,
+        title: capped
+          ? `Ignored files (showing first ${candidates.length} of ${total})`
+          : "Ignored files",
+        placeHolder:
+          "Pick the ignored files to symlink into every worktree (type to filter)",
+      }
+    );
+    if (!picked?.length) return;
+
+    await this.addLinkedPathsFor(
+      primary,
+      picked.map((p) => p.entry.path)
+    );
+  }
+
+  /**
+   * Remove a path from the list and clean up the symlinks it created. Only a
+   * symlink pointing at this repo's copy of that path is unlinked (see
+   * unlinkPathFromWorktree) — a real file a worktree owns is never touched, and
+   * removing a symlink never affects the file it pointed at.
+   */
+  private async removeLinkedPath(raw?: string): Promise<void> {
+    const primary = await this.primaryWorktree();
+    if (!primary) return;
+    const rel = (raw ?? "").trim();
+    if (!rel) return;
+    const next = this.getLinkedPaths(primary).filter((p) => p !== rel);
+    await this.setLinkedPaths(primary, next);
+    try {
+      for (const w of await listWorktrees(primary)) {
+        if (normalize(w.path) === normalize(primary)) continue;
+        await unlinkPathFromWorktree(primary, w.path, rel);
+      }
+    } catch {
+      // Best effort: the entry is already gone from the list either way.
+    }
+  }
+
+  /** Re-apply the whole linked-files list to every existing worktree (the
+   *  "Link existing worktrees" button), then report what happened. */
+  private async relinkWorktrees(): Promise<void> {
+    const primary = await this.primaryWorktree();
+    if (!primary) return;
+    const paths = this.getLinkedPaths(primary);
+    if (!paths.length) {
+      vscode.window.showInformationMessage(
+        "No linked files configured yet. Add a path first."
+      );
+      return;
+    }
+    await this.linkInExistingWorktrees(primary, paths, true);
+  }
+
+  /**
+   * Symlink `paths` into every worktree except the primary one (which already
+   * holds the real files). `announceEmpty` makes the "nothing to do, all good"
+   * case say so out loud — used by the explicit button but not by the quiet
+   * add-a-path path. Link failures are always surfaced.
+   */
+  private async linkInExistingWorktrees(
+    primary: string,
+    paths: string[],
+    announceEmpty = false
+  ): Promise<void> {
+    let worktrees;
+    try {
+      worktrees = await listWorktrees(primary);
+    } catch {
+      return;
+    }
+    const others = worktrees.filter((w) => normalize(w.path) !== normalize(primary));
+    if (!others.length) {
+      if (announceEmpty) {
+        vscode.window.showInformationMessage(
+          "No other worktrees to link into yet. New worktrees get these files automatically."
+        );
+      }
+      return;
+    }
+    const failures: LinkOutcome[] = [];
+    for (const w of others) {
+      const outcomes = await linkPathsIntoWorktree(primary, w.path, paths);
+      failures.push(...linkFailures(outcomes));
+    }
+    this.reportLinkFailures(failures);
+    if (!failures.length && announceEmpty) {
+      vscode.window.showInformationMessage(
+        `Linked ${paths.length} file${paths.length === 1 ? "" : "s"} into ${others.length} worktree${others.length === 1 ? "" : "s"}.`
+      );
+    }
+    await this.refresh();
+  }
+
+  /**
+   * Apply the repo's linked-files list to a single freshly created worktree.
+   * Called from the worktree-creation paths so a new worktree can build/test
+   * against the same local config as the primary. Never throws — a link problem
+   * warns but must not fail the worktree creation.
+   */
+  private async applyLinksToNewWorktree(
+    primary: string,
+    worktreeDir: string
+  ): Promise<void> {
+    const paths = this.getLinkedPaths(primary);
+    if (!paths.length) return;
+    try {
+      const outcomes = await linkPathsIntoWorktree(primary, worktreeDir, paths);
+      this.reportLinkFailures(linkFailures(outcomes));
+    } catch {
+      // linkPathsIntoWorktree is already non-throwing per path; this is a belt.
+    }
+  }
+
+  /** Surface link problems as one warning, listing the paths that didn't link
+   *  and why. A "real file already exists" or "source missing" is worth telling
+   *  the user; a clean run stays silent. */
+  private reportLinkFailures(failures: readonly LinkOutcome[]): void {
+    if (!failures.length) return;
+    const lines = failures.map((f) => `${f.path}: ${f.message ?? f.status}`);
+    vscode.window.showWarningMessage(
+      `Some linked files could not be symlinked. ${lines.join(" ")}`
+    );
   }
 
   /** The built-in Git extension's API, activating it first if needed. */
@@ -1135,6 +1500,7 @@ export class WorktreeWebviewProvider
       );
       return;
     }
+    await this.applyLinksToNewWorktree(primary, dir);
     await this.refresh();
   }
 
@@ -1661,6 +2027,7 @@ export class WorktreeWebviewProvider
       );
       return;
     }
+    await this.applyLinksToNewWorktree(primary, dir);
     await this.agent(dir);
     await this.refresh();
     await this.postBranches();

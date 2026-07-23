@@ -61,6 +61,13 @@
     external:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h4v4"/><path d="M13 3L7.5 8.5"/><path d="M11 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h3"/></svg>',
     bug: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5.5" width="6" height="7" rx="3"/><path d="M6 4a2 2 0 0 1 4 0"/><path d="M5 8H2.5M11 8h2.5M5.2 5.7L3.5 4M10.8 5.7L12.5 4M5.2 11.5L3.5 13M10.8 11.5L12.5 13M8 6.5v5"/></svg>',
+    link:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5l3-3"/><path d="M8.2 4.8l1-1a2.4 2.4 0 0 1 3.4 3.4l-1 1"/><path d="M7.8 11.2l-1 1a2.4 2.4 0 0 1-3.4-3.4l1-1"/></svg>',
+    folderOpen:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12V4a1 1 0 0 1 1-1h3l1.4 1.6H12a1 1 0 0 1 1 1V7"/><path d="M2 12l2-4.6h10.5L12.4 12z"/></svg>',
+    // A file with a strike through it: the "git ignores this" candidates list.
+    ignored:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1.8H4.2a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1V5.6z"/><path d="M9 1.8v3.8h3.8"/><path d="M3.6 13.6L12.4 2.4"/></svg>',
     behind:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v7M5 6.5l3 3 3-3"/><path d="M3.5 13.5h9"/></svg>',
     autoMerge:
@@ -870,6 +877,7 @@
       (data && data.prEnabled) !== false,
       (data && data.scmEnabled) === true,
       (data && data.traceEnabled) === true,
+      (data && data.linkedPaths) || [],
     ]);
   }
 
@@ -883,6 +891,7 @@
       label: "Source Control",
       section: integrationsSection,
     },
+    { id: "linked", icon: "link", label: "Linked Files", section: linkedSection },
     { id: "debug", icon: "bug", label: "Debug", section: debugSection },
   ];
 
@@ -1013,6 +1022,86 @@
     );
   }
 
+  function linkedSection(data) {
+    const paths = (data && data.linkedPaths) || [];
+    const list = paths.length
+      ? '<ul class="linked-list">' +
+        paths
+          .map(
+            (p) =>
+              '<li class="linked-item">' +
+              '<span class="linked-path" title="' +
+              esc(p) +
+              '">' +
+              icons.link +
+              "<code>" +
+              esc(p) +
+              "</code></span>" +
+              '<button class="linked-remove" data-link-remove="' +
+              esc(p) +
+              '" title="Remove ' +
+              esc(p) +
+              '" aria-label="Remove ' +
+              esc(p) +
+              '">' +
+              icons.cross +
+              "</button>" +
+              "</li>"
+          )
+          .join("") +
+        "</ul>"
+      : '<p class="gh-help dim linked-empty">No linked files yet. Add a repo-relative ' +
+        "path below (for example <code>tests/appsettings.local.json</code>).</p>";
+
+    // Browse opens the host's native file picker rooted at the repo; the text
+    // field stays for typing a path directly (and is the way to add a folder on
+    // platforms whose dialog can't offer files and folders at once).
+    const field =
+      '<div class="gh-field linked-field">' +
+      '<input type="text" id="linked-input" placeholder="tests/appsettings.local.json" autocomplete="off" spellcheck="false" />' +
+      '<button class="linked-browse" data-action="browseLinkedPath" title="Choose files to link" aria-label="Choose files to link">' +
+      icons.folderOpen +
+      "</button>" +
+      '<button class="primary" data-link-add>Add</button>' +
+      "</div>";
+
+    // The files this feature exists for are gitignored almost by definition, so
+    // offering the ignore list is usually the fastest way to find them.
+    const fromIgnore =
+      '<button data-action="pickIgnoredPaths">' +
+      icons.ignored +
+      "Add from .gitignore</button>";
+
+    const relink = paths.length
+      ? '<button data-action="relinkWorktrees">Link existing worktrees</button>'
+      : "";
+
+    const actions =
+      '<div class="linked-actions">' + fromIgnore + relink + "</div>";
+
+    return (
+      '<section class="gh-section">' +
+      '<h3 class="gh-h">' +
+      icons.link +
+      " Linked files</h3>" +
+      '<p class="gh-lead">Symlink gitignored local files into every worktree this ' +
+      "panel creates, so builds and integration tests that need them (an " +
+      "<code>appsettings</code>, a <code>.env</code>, a certs folder) work in a " +
+      "fresh worktree the same as in your main checkout.</p>" +
+      list +
+      field +
+      actions +
+      '<p class="gh-help dim">Add from .gitignore lists every file git ignores so ' +
+      "you can tick the ones you need. You can also type a path or use the folder " +
+      "button to pick files. Paths are relative to the repository root and point " +
+      "back at your main worktree's copy, so edits stay in sync. A real file " +
+      "already present in a worktree is never overwritten. New worktrees are " +
+      'linked automatically; "Link existing worktrees" applies the list to the ' +
+      "ones you already have.</p>" +
+      "</section>"
+    );
+  }
+
   function debugSection(data) {
     const traceEnabled = !!(data && data.traceEnabled);
     const toggle =
@@ -1092,6 +1181,21 @@
         if (e.key === "Enter") saveToken();
       };
     }
+    const linkInput = root.querySelector("#linked-input");
+    if (linkInput) {
+      linkInput.onkeydown = (e) => {
+        if (e.key === "Enter") addLinkedPath();
+      };
+    }
+  }
+
+  function addLinkedPath() {
+    const input = root.querySelector("#linked-input");
+    const value = input && input.value.trim();
+    if (!value) return;
+    send("addLinkedPath", { linkPath: value });
+    input.value = "";
+    input.focus();
   }
 
   function saveToken() {
@@ -1793,6 +1897,19 @@
         ghTokenFormOpen = !ghTokenFormOpen;
         renderSettings();
       }
+      return;
+    }
+    // Linked Files controls (add a path / remove a path).
+    const linkAdd = e.target.closest("[data-link-add]");
+    if (linkAdd) {
+      addLinkedPath();
+      return;
+    }
+    const linkRemove = e.target.closest("[data-link-remove]");
+    if (linkRemove) {
+      send("removeLinkedPath", {
+        linkPath: linkRemove.getAttribute("data-link-remove") || undefined,
+      });
       return;
     }
     // Settings tab switch (webview-only; no round trip).
