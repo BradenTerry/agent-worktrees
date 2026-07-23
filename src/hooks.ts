@@ -118,7 +118,11 @@ export const HOOKS: HookSpec[] = [
  *  the global-storage path; it cannot read the extension's context. */
 function hookCommand(context: vscode.ExtensionContext): string {
   const emitter = path.join(hooksDir(context), EMITTER);
-  return `node "${emitter}" --dir "${sessionsDir(context)}"`;
+  // --no-warnings: Claude Code surfaces ANY stderr output as a per-event
+  // "hook error", and node's startup warnings (deprecation/experimental,
+  // varying by node version) hit stderr before the emitter runs a single
+  // line, so they can only be silenced from the command line.
+  return `node --no-warnings "${emitter}" --dir "${sessionsDir(context)}"`;
 }
 
 // --- settings.json plumbing -------------------------------------------------

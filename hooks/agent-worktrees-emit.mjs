@@ -418,4 +418,17 @@ function main() {
   }
 }
 
-main();
+// The emitter is best-effort telemetry, but Claude Code treats any nonzero
+// exit — and even bare stderr output — as a hook failure and prints a
+// "PreToolUse:<tool> hook error ... failed with non-blocking status code"
+// warning in the user's session; wired to PreToolUse that's a warning on
+// every tool call. A state write that can't land (global storage deleted, a
+// synced settings.json whose --dir path doesn't exist on this machine, a
+// read-only or full disk) must degrade to "no status update", never to a
+// visible hook error, so nothing escapes: swallow everything and exit 0.
+try {
+  main();
+} catch {
+  /* dropping one status update beats erroring the user's tool call */
+}
+process.exitCode = 0;
