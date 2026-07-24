@@ -15,7 +15,15 @@
   },
   "categories": [
     "SCM Providers",
+    "AI",
     "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "worktree",
+    "ai",
+    "git"
   ],
   "main": "./out/extension.js",
   "activationEvents": [
