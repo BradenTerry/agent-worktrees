@@ -2,6 +2,26 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.5.0
+
+- **Linked files: gitignored local config now reaches your worktrees** - a new
+  worktree only gets the files git tracks, so the gitignored config a build or
+  integration test depends on (an `appsettings.Development.json`, a `.env`, a
+  certs folder) was simply absent and those tests failed there. A new
+  **Settings -> Linked Files** tab holds a per-repository list of paths that are
+  symlinked into every worktree the panel creates, pointing back at your main
+  worktree's copy so editing the file once updates it everywhere. Finding them
+  is one click: **Add from .gitignore** lists everything git ignores and you
+  tick what you want, with wholly-ignored folders like `node_modules` collapsed
+  to a single row so the list stays short. You can also browse with the normal
+  file picker or type a path. New worktrees are linked automatically, and
+  **Link existing worktrees** applies the list to the ones you already have.
+  Removing a path unlinks it again. A file a worktree genuinely owns is never
+  overwritten, and unlinking never touches the data the link pointed at.
+  Works on Windows without Developer Mode or running as administrator: folders
+  are linked with a junction and files fall back to a hard link, so you are
+  never asked to elevate anything.
+
 ## 3.4.7
 
 - **Status hooks can no longer surface errors in your Claude session** - when

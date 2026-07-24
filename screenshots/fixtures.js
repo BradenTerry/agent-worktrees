@@ -68,6 +68,10 @@ function overviewData() {
     repoName: "acme-web",
     hooksInstalled: true,
     prEnabled: true,
+    // The Source Control scope button defaults to on in the extension, so the
+    // listing images must show it too; without this the screenshots advertise a
+    // panel missing a button every user actually gets.
+    scmEnabled: true,
     // The agent whose terminal is open, shown highlighted in the panel.
     activeSessionId: "s-co-2",
     github: { hasToken: true, connected: true, login: "acme-dev", tokenType: "fine-grained" },
@@ -102,6 +106,9 @@ function overviewData() {
         detached: false,
         locked: false,
         inWorkspace: false,
+        // Source Control is currently scoped here, so this card's scope pill
+        // renders filled while the others show the inactive state.
+        scmActive: true,
         git: { dirty: 4, insertions: 212, deletions: 38, ahead: 3, behind: 0 },
         agents: [
           {
