@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.5.1
+
+- **Easier to find on the Marketplace** - the listing carried no search
+  keywords at all, so it was effectively undiscoverable for the terms people
+  actually search. Adds `claude`, `claude code`, `worktree`, `ai` and `git`,
+  and lists the extension under the **AI** category alongside **SCM
+  Providers**. Listing metadata only; no change to how the extension behaves.
+
 ## 3.5.0
 
 - **Linked files: gitignored local config now reaches your worktrees** - a new
