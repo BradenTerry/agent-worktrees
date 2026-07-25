@@ -1,6 +1,10 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import * as vscode from "vscode";
 import { supportsAgentCliTitle } from "../../worktreeUtils";
+import { managesUserSettings } from "../../hooks";
 
 /**
  * Extension-host smoke tests. These run inside a real VS Code (via
@@ -19,6 +23,42 @@ suite("Agent Worktrees extension host", () => {
     assert.ok(ext, "the extension is installed in the test host");
     await ext.activate();
     assert.strictEqual(ext.isActive, true, "the extension activated");
+  });
+
+  test("activating in a test host leaves global settings.json alone", async () => {
+    // The test host runs with a throwaway --user-data-dir, so its globalStorage
+    // (and the emitter's --dir) live under it. ~/.claude/settings.json is NOT
+    // sandboxed with it: it is the real user's file, shared by every Claude
+    // session on the machine. If activation repaired the hook command from
+    // here, every session would write its state into this run's scratch dir and
+    // the installed extension's panel would stop seeing agents entirely.
+    assert.strictEqual(
+      managesUserSettings(vscode.ExtensionMode.Test),
+      false,
+      "a test host must not write the user's global settings"
+    );
+    assert.strictEqual(
+      managesUserSettings(vscode.ExtensionMode.Production),
+      true,
+      "a real install still installs and repairs its hooks"
+    );
+
+    // And prove it end to end: this suite activated the extension above, so if
+    // the guard were missing settings.json would already name this host's
+    // scratch storage.
+    const ext = vscode.extensions.getExtension("bradenterry.agent-worktrees");
+    await ext?.activate();
+    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    let raw: string;
+    try {
+      raw = await fs.promises.readFile(settingsPath, "utf8");
+    } catch {
+      return; // no global settings on this machine (CI): nothing to clobber
+    }
+    assert.ok(
+      !raw.includes(".vscode-test"),
+      `${settingsPath} points a hook into the test host's user-data dir`
+    );
   });
 
   test("registers its commands", async () => {

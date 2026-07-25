@@ -125,6 +125,25 @@ function hookCommand(context: vscode.ExtensionContext): string {
   return `node --no-warnings "${emitter}" --dir "${sessionsDir(context)}"`;
 }
 
+/**
+ * Whether this host may write the user's global ~/.claude/settings.json.
+ *
+ * False in the extension-host test runner. `@vscode/test-cli` boots VS Code
+ * with a throwaway `--user-data-dir` (`.vscode-test/user-data/...`), so
+ * `globalStorageUri` — and therefore the `--dir` in hookCommand — points at a
+ * temporary directory. settings.json is NOT sandboxed with it: it is the real
+ * user's file, shared by every Claude session on the machine. Letting a test
+ * run repair the command path there rewires every session's emitter to write
+ * state into the test's scratch dir, where no installed extension is watching.
+ * The user's panel then shows no new agents at all (their existing rows just
+ * age out) until a real activation happens to repair the path back — and the
+ * next `npm test` breaks it again. Tests get the same isolation from our
+ * settings writes that they already get from VS Code's own storage.
+ */
+export function managesUserSettings(mode: vscode.ExtensionMode): boolean {
+  return mode !== vscode.ExtensionMode.Test;
+}
+
 // --- settings.json plumbing -------------------------------------------------
 
 type HookEntry = {
@@ -226,6 +245,7 @@ async function ensureEmitter(context: vscode.ExtensionContext): Promise<void> {
 export async function installHooks(
   context: vscode.ExtensionContext
 ): Promise<void> {
+  if (!managesUserSettings(context.extensionMode)) return;
   await ensureEmitter(context);
   const settings = await readSettings();
   const command = hookCommand(context);
@@ -252,11 +272,13 @@ export async function installHooks(
  * emitter; without this, an update that adds an event would flip
  * hooksInstalled to false and re-show the consent page to a user who already
  * accepted). Never installs from scratch — a user who has not consented has no
- * emitter hooks at all, and none are added.
+ * emitter hooks at all, and none are added. In a test host it does nothing at
+ * all (see managesUserSettings).
  */
 export function syncHooks(context: vscode.ExtensionContext): Promise<void> {
   syncPending = (async () => {
     try {
+      if (!managesUserSettings(context.extensionMode)) return;
       const settings = await readSettings();
       const anyInstalled = HOOKS.some((spec) => !!findHook(settings, spec));
       if (!anyInstalled) return;
