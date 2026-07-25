@@ -75,6 +75,14 @@ function overviewData() {
     // The agent whose terminal is open, shown highlighted in the panel.
     activeSessionId: "s-co-2",
     github: { hasToken: true, connected: true, login: "acme-dev", tokenType: "fine-grained" },
+    // Gitignored local config symlinked into every worktree the panel creates.
+    // Populated so the Linked Files settings tab screenshots with a real list
+    // rather than its empty state.
+    linkedPaths: [
+      ".env.local",
+      "src/appsettings.Development.json",
+      "certs",
+    ],
     worktrees: [
       {
         path: REPO,
