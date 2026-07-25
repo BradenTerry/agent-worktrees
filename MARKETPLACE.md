@@ -1,261 +1,152 @@
 # Agent Worktrees
 
-**Run and monitor multiple Claude Code agents across your git worktrees, from one side panel.**
+**Run and monitor several Claude Code agents across your git worktrees, from one side panel.**
 
-Worktrees are the natural unit for running agents in parallel: each gets an
-isolated checkout, so sessions never step on each other's files. Agent Worktrees
-puts every worktree, its git state, and its running Claude agents in a single
-view.
+Worktrees are the natural unit for running agents in parallel: each one is an
+isolated checkout, so sessions never step on each other's files. This extension
+puts every worktree, its git state, its pull request, and its running agents in a
+single view.
 
-## Screenshots
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="The Agent Worktrees panel: three worktrees with branch names, git status, PR rollups and their running Claude agents" width="380">
 
-<sub>Click any thumbnail to view it full size.</sub>
+## The short version
 
-| Worktrees, git status & agents | PR checks, review & comments | Settings & integrations | Skills used per agent |
-| :---: | :---: | :---: | :---: |
-| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills an agent has used" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png) |
+- **See every worktree at once**, with changed files, `+`/`-` lines and
+  ahead/behind counts.
+- **Start a Claude agent in any worktree in one click**, or create a worktree and
+  an agent together.
+- **Watch each agent's status live**: active, waiting, or idle.
+- **Get a badge on the Activity Bar** the moment an agent is blocked on you.
+- **Read PR state, CI checks and reviews** on the worktree card, no browser tab.
+- **Work every branch in the repo** from a dedicated Branches tab.
 
-The **Branches view** opens as a full editor tab listing every branch with when and by whom it was last updated, its open PR status, git-based filters, and one-click worktree creation:
+## Agents
 
-[<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png" alt="The Branches editor tab listing every branch with its last-updated time and author, open PR status, an Updated by / Sort filter bar, and create-worktree actions" width="720">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png)
+- Launch a Claude CLI session in any worktree, each in its own terminal.
+- **Agent & Worktree** creates a fresh worktree with `claude -w` and starts an
+  agent in it, in one step.
+- Reveal or stop any session from the panel. Reveal works in the window that
+  started the agent; another window can still see and stop it, and tells you when
+  the terminal lives elsewhere.
+- The agent whose terminal is open is highlighted, so switching between worktrees
+  never leaves you typing to the wrong agent.
+- Terminal tabs are titled by Claude Code itself, so each tab tracks that
+  session's current topic, background tabs included, and the terminal you are
+  reading is never pulled away when another agent answers.
+- A robot count shows how many subagents each agent has spawned.
+- Click an agent's skill chip to see which Claude skills it has used.
 
-## Highlights
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills one agent has invoked" width="380">
 
-- **Every worktree at a glance** — primary and linked worktrees with branch
-  names and `Primary` / `detached` / `locked` badges.
-- **Git status per worktree** — changed-file count, `+`/`−` line totals, and
-  ahead/behind from upstream, refreshed on agent activity and window focus, plus a
-  per-card refresh button to update one worktree's git (and PR/CI, when enabled)
-  on demand.
-- **PR status at a glance** — when a worktree's branch has a pull request, the
-  card shows its title, state, CI checks, reviews and comments, plus an **Out of
-  date** pill when the branch is behind its base branch and an **Auto-merge**
-  pill when auto-merge is enabled.
-- **Start agents in a click** — launch a Claude CLI session in any worktree, each
-  in its own terminal. Reveal or stop it from the panel. Reveal works in the
-  window that started the agent; another window can still see and stop it, and
-  now tells you when its terminal lives elsewhere instead of doing nothing.
-- **Agent & Worktree in one step** — create a fresh worktree with `claude -w` and
-  start an agent in it together.
-- **Terminal tabs that say what the agent is doing** — agent terminals are left
-  for Claude Code to title, so each tab tracks that session's current topic on
-  its own, background tabs included, and the terminal you are reading is never
-  pulled away when another agent answers. On VS Code older than 1.117 (or with
-  `terminal.integrated.tabs.allowAgentCliTitle` turned off) tabs keep the
-  `Claude · <worktree>` name they launch with.
-- **Open in a new window** — open any worktree in its own VS Code window in a
-  click; if one is already open for that worktree, it is focused instead of
-  duplicated.
-- **Switch a worktree's branch** — an edit button beside the branch name lets you
-  check out a different branch in that worktree, or create a new one, without
-  leaving the panel.
-- **Live agent status** — each agent shows as **active**, **waiting**, or
-  **idle**, driven by Claude Code hook events.
-- **A badge when an agent needs you** — the Activity Bar icon shows a count of
-  the agents waiting on a permission prompt or question, so a blocked agent is
-  visible even while the panel is hidden behind another view. An agent that is
-  only waiting for its background subagents to finish stays **active**, not
-  waiting, so the badge means you specifically.
-- **Know who you're talking to** — the agent whose terminal is currently open is
-  highlighted in the panel (and its worktree's Agents bar is marked when the
-  card is collapsed), so switching between several worktrees never leaves you
-  typing to the wrong agent.
-- **Linked files** — a new worktree only gets the files git tracks, so the
-  gitignored local config your build or integration tests rely on (an
-  `appsettings.Development.json`, a `.env`, a certs folder) simply is not there
-  and the tests fail. In **Settings → Linked Files** you list those files once
-  per repository and the panel symlinks them into every worktree it creates, so
-  a fresh worktree builds and tests exactly like your main checkout. Finding them
-  is one click: **Add from .gitignore** shows everything git ignores and you tick
-  what you need (whole ignored folders like `node_modules` stay collapsed to a
-  single row, so the list is short). You can also browse with the normal file
-  picker or type a path. The links
-  point back at your main worktree's copy, so editing the file once updates it
-  everywhere. Already have worktrees? **Link existing worktrees** applies the
-  list to all of them in one click. A file a worktree genuinely has of its own is
-  never overwritten. Works on Windows without Developer Mode or running as
-  administrator: folders are linked with a junction and files fall back to a hard
-  link, so you are never asked to elevate anything.
-- **Skills used** — see which Claude skills each agent has invoked.
-- **Subagents used** — a robot count shows how many subagents each agent has
-  spawned, plus the total across the worktree.
-- **Delete worktrees** — remove a worktree without leaving the panel, in one
-  confirmation. The dialog tells you upfront what the removal touches (running
-  agents, uncommitted changes, unpushed commits on the branch) and lets you
-  remove the worktree alone or remove it and delete its leftover branch in the
-  same step. No chain of follow-up prompts.
-- **Stale lock cleanup** — Claude locks the worktrees it creates while a session
-  runs; if a session crashes or is killed, the leftover lock used to leave a
-  `locked` badge on a worktree with no agents and block deleting it. The panel
-  now clears these dead-session locks automatically (locks you placed yourself
-  are never touched).
-- **Branches view** — a full-screen editor tab listing every branch in the repo,
-  with each branch's open PR status and a one-click way to spin up a worktree and
-  agent for any branch that does not have one yet.
-- **Buttons that show their work** — actions that take a moment (starting an
-  agent, creating a worktree, opening a window, fetching, refreshing GitHub) show
-  a spinner in place of their icon while they run, so you can see the click
-  landed instead of wondering if anything happened.
+### Status
+
+Status comes from Claude Code's hooks, which the extension installs only with
+your explicit consent. **Nothing is sent over the network.** State flows through
+local files, and you can remove the hooks anytime by editing
+`~/.claude/settings.json`.
+
+| Status      | When                                                                       |
+| ----------- | -------------------------------------------------------------------------- |
+| **idle**    | started, or finished responding and awaiting you                           |
+| **active**  | processing a prompt, running tools, or waiting on its own subagents         |
+| **waiting** | needs you: a permission prompt or a question                               |
+
+The Activity Bar badge counts only **waiting** agents, so it always means you
+specifically, never an agent waiting on its own subagents.
+
+## Pull requests
+
+Connect a GitHub token and each worktree card grows a PR rollup.
+
+- Title, state, CI checks, reviews and comment count.
+- An **Out of date** pill when the branch is behind its base.
+- An **Auto-merge** pill when auto-merge is enabled.
+- Refreshed as your agents work, plus a per-card refresh button.
+
+| On the worktree card | Connecting a token |
+| :--- | :--- |
+| <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="A worktree card showing its PR state, auto-merge pill, review counts and CI check rollup" width="380"> | <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="Settings, GitHub tab: the PR status toggle and the connected token" width="380"> |
 
 ## Branches view
 
-A **Branches** button in the panel toolbar opens a dedicated editor tab listing
-every branch in the repository — your local branches plus branches that exist
-only on `origin`. Each row is tagged by where it lives — **local only**, **local
-+ remote**, or **remote only** — and shows how far ahead or behind its compare
-base it is (↑ to push, ↓ to pull). The base is the branch's
-upstream, or the repo's default branch when it has no upstream. Each row also
-tells you whether a worktree already exists for that branch:
-the ones that do show a **Worktree exists** marker alongside a **Start agent**
-button that launches a Claude agent in that existing worktree, and the ones that
-don't get a **Create worktree & start agent** button that builds the worktree
-right there in your current window and starts a Claude agent in it. Picking a
-remote-only branch checks it out as a new local tracking branch.
+A full editor tab listing every branch in the repo, local and remote-only.
 
-Worktrees created here (and by the New Worktree command) live inside your repo
-under `.claude/worktrees/` — the same place Claude Code's own `claude -w` puts
-them — so they stay in one predictable spot instead of appearing next to your
-project folder. Tip: if you don't want that folder showing up as untracked in
-`git status`, add a `/.claude/worktrees/` line to `.git/info/exclude` (or your
-`.gitignore`); the extension never edits those files for you.
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png" alt="The Branches editor tab: every branch with last-updated time and author, location tags, PR status and create-worktree actions" width="860">
 
-This view is git-first. Each branch row shows when it was **last updated** (the
-relative time of its latest commit) and **who** made that commit, and a filter and
-sort bar across the top lets you slice the list — all from local git, with no
-loading and no token required. Nothing is filtered by default — every branch is
-listed until you make a selection:
+- **Start work anywhere**: branches with a worktree get **Start agent**, the rest
+  get **Create worktree & start agent**. Picking a remote-only branch checks it
+  out as a new local tracking branch.
+- **Git-first**: last-updated time, author, location tag (local only, local +
+  remote, remote only) and ahead/behind, all from local git with no token needed.
+- **Filter and sort**: by updater, location, PR status, or review-requested-from-
+  you. Your choices are remembered.
+- **Fetch and prune** to refresh ahead/behind and drop refs for branches deleted
+  on the remote.
+- **Delete Local** removes a local branch only, never the remote. It warns about
+  unpushed commits and handles squash-merged branches cleanly.
+- **Delete gone** clears out every local branch whose remote is gone, in one
+  confirmation.
 
-- **Updated by** — pick one or more people (the committers of the listed branches)
-  to show only the branches they last touched. You are pinned to the top of the
-  list.
-- **Location** — pick where a branch lives: **Local only**, **Local + remote**,
-  or **Remote only** (multi-select, matching the tag on each row).
-- **Sort** — Recently updated, Least recently updated, or Name (A–Z).
-- **PR Status** — a single-select (shown only once a GitHub token is connected)
-  that narrows the list by pull request state: **All** (no filter), **Open**, or
-  **Draft**.
-- **Reviewer** — a single-select (shown only once a GitHub token is connected)
-  that narrows the list to branches whose PR has a review requested from you,
-  i.e. the PRs you still have to review: **All** (no filter) or
-  **Review requested**.
-- **Clear Filters** — resets the author, Location, PR Status and Reviewer filters
-  in one click; enabled only while a filter is active. (Sort is left as you set
-  it.)
+Worktrees created here live under `.claude/worktrees/` inside your repo, the same
+place `claude -w` puts them.
 
-Your filter and sort choices are remembered the next time you open the view. Close
-it like any editor tab; the Branches button reopens it.
+## Linked files
 
-When the GitHub integration is connected, a branch that has an **open** (or draft)
-pull request also shows it inline — its title, state badge, author, assignees and
-whether you are a requested reviewer — as a hint on the branch row. (The branches
-view fetches your open PRs in one bulk call, which doesn't include CI-check or
-review-approval detail; for the full checks-and-reviews rollup, see the PR on its
-worktree card.) The branch list paints instantly from local git; PR status loads in
-the background: opening the view starts a **Fetch Open PRs** of PR status on its own
-(the button spins until it lands, and the **Last refreshed** label fills in with the
-time), and you can re-run it anytime from that button (see below). Without a token
-the view simply lists every branch, with no PR info. (A dedicated PR view may come
-later.)
+A new worktree only gets the files git tracks, so the gitignored local config
+your build or tests depend on is simply missing, and they fail.
 
-**Fetch and prune.** A **Fetch** button in the header pulls from the remote to
-refresh local branch state — ahead/behind counts — so the view
-reflects what actually landed. A **Prune** checkbox next to it (on by default)
-also removes tracking refs for branches deleted on the remote, so merged-and-
-deleted branches stop lingering as **remote only** rows.
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png" alt="Settings, Linked Files tab: a list of gitignored paths symlinked into every worktree, with Add from .gitignore and Link existing worktrees buttons" width="380">
 
-**Fetch Open PRs.** When you have connected a GitHub token, a **Fetch Open PRs**
-button appears in the header beside a **Last refreshed** label. The view refreshes
-open PR and CI status automatically when it opens, and this button re-queries on
-demand afterwards. The label reads **Never** only until that first on-open refresh
-lands, then shows the time of the most recent one. The GitHub refresh runs without
-a git fetch — so you can refresh just the PR view, or just your local branch state,
-independently.
+- List those paths once per repository; every worktree the panel creates gets
+  them symlinked in.
+- **Add from .gitignore** shows everything git ignores so you can tick what you
+  need. Whole ignored folders like `node_modules` collapse to one row.
+- Links point at your main worktree's copy, so editing once updates everywhere.
+- **Link existing worktrees** applies the list to the worktrees you already have.
+- A file a worktree genuinely owns is never overwritten.
+- Works on Windows without Developer Mode or administrator rights: folders use a
+  junction, files fall back to a hard link.
 
-**Delete branches.** Every branch that exists on your machine shows a **Delete
-Local** button that removes the local branch only. The branch on the remote is
-left untouched, so there is nothing to undo on GitHub. (Remote-only branches have
-no local copy, so they show no button.) The repository's default branch (such as
-`main`) is never deletable, so it shows no Delete button. If the branch has
-commits that were never pushed, the confirm tells you how many would be lost. A
-branch whose PR was merged deletes cleanly without a false "not fully merged"
-warning, even after a squash-merge where git would otherwise refuse.
+## Also included
 
-If the branch is currently checked out in your main window, deleting it is blocked
-(switch to another branch first). If it is checked out in one of your other
-worktrees, you can still delete it: the panel warns you, frees that worktree (it
-is left on a detached snapshot, with its files intact), and then removes the
-branch.
-
-**Clean up merged branches in one click.** A header **Delete gone** button removes
-every local branch whose upstream branch is gone: the ones whose remote branch
-was merged and deleted (so they are just clutter now). It lists them and asks once
-before deleting, leaves anything checked out in a worktree alone, and asks a second
-time before force-deleting any branch that still has unmerged commits. Pair it with
-**Prune** so a branch deleted on the remote moments ago is recognized.
-
-**Jump to GitHub.** Each branch name links straight to that branch on GitHub, and
-a **Branches on GitHub** link in the header opens the repository's full branches
-page.
-
-**Stay current.** Opening the view reads your local branches right away without
-calling GitHub; the Fetch button pulls from the remote on demand, updating
-ahead/behind counts and pruning branches deleted there so phantom remote
-branches don't linger, while Refresh GitHub updates PR and CI status. Long
-branch lists are paged so they stay easy to scan, and
-the view only fetches branches for the repository you have open, never your other
-repositories.
-
-## How agent status works
-
-The panel can't tell on its own whether a Claude session is working, waiting, or
-idle, so it uses Claude Code's hooks. With your **explicit consent**, it adds a
-small emitter to `~/.claude/settings.json` that, on each hook event, writes a
-local state file the extension watches. **Nothing is sent over the network** —
-status flows entirely through local files, and you can remove the hooks anytime
-by editing that settings file. Status reporting is best-effort and stays out of
-your way: if a status update can't be written it is dropped silently, so the
-hooks never show errors in your Claude session or interfere with its tool
-calls.
-
-| Status      | When                                                        |
-| ----------- | ----------------------------------------------------------- |
-| **idle**    | session started, or finished responding and awaiting you    |
-| **active**  | processing a prompt, running tools, or waiting on its own background subagents |
-| **waiting** | needs you — a permission prompt or a question               |
+- **Open in a new window**, focusing an existing window instead of duplicating it.
+- **Switch a worktree's branch**, or create a new one, from the panel.
+- **Delete a worktree** in a single confirmation that tells you upfront what it
+  touches (running agents, uncommitted changes, unpushed commits) and can delete
+  the leftover branch in the same step.
+- **Stale lock cleanup**: dead-session locks are cleared automatically, so a
+  crashed agent no longer leaves a worktree stuck as `locked`. Locks you placed
+  yourself are never touched.
+- **Source Control scoping**, so VS Code's SCM view follows the worktree you pick.
+- **Buttons that show their work**: slow actions show a spinner in place of their
+  icon.
 
 ## Requirements
 
-- The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`)
-  on your `PATH`.
+- The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on
+  your `PATH`.
 - `git` and `node` on your `PATH`.
 - A workspace whose first folder is inside a git repository.
 
 ## Getting started
 
 1. Install the extension and open a folder that is a git repository.
-2. Open the **Agent Worktrees** view from the Activity Bar.
-3. Accept the hook prompt to enable live agent status (optional but recommended).
-4. Click **Agent** on any worktree to start a Claude session, or **Agent &
-   Worktree** to spin up a new worktree and an agent together.
+2. Open **Agent Worktrees** from the Activity Bar.
+3. Accept the hook prompt for live agent status (optional, recommended).
+4. Click **Agent** on any worktree, or **Agent & Worktree** to create both at once.
 
 ## Troubleshooting
 
-If the panel or Branches view seems slow or empty, open the panel **Settings**
-and switch to the **Debug** tab, then turn on **Debug tracing** (the "Agent
-Worktrees: Toggle Debug Tracing" command does the same). With it on, every
-external call - each git command and GitHub API request, with its duration and
-result - is logged to the "Agent Worktrees" output channel. Use **Open log** on
-the same tab to reveal it (or View: Output, then pick "Agent Worktrees"). That
-shows you exactly what is being run and what is slow or failing. It is off by
-default, and request headers (which carry your GitHub token) are never logged.
+Panel slow or empty? Open **Settings**, then the **Debug** tab, and turn on
+**Debug tracing**. Every git command and GitHub request is then logged with its
+duration and result to the "Agent Worktrees" output channel (**Open log** reveals
+it). It is off by default, and request headers, which carry your GitHub token,
+are never logged.
 
 ## Privacy
 
 Agent Worktrees runs on your machine and collects no telemetry. It reads local
-git state and Claude Code hook output from files in the extension's own private
-storage (nothing of the extension's lives in your `~/.claude` tree apart from the
-hook entries it adds to `settings.json` once you consent). The only network
-requests it makes are to the GitHub API, and only when you connect a GitHub token
-to show pull request and CI status; with no token connected, it makes no network
-requests.
-</content>
+git state and Claude Code hook output from files in its own private storage.
+Nothing of the extension's lives in your `~/.claude` tree apart from the hook
+entries you consent to. The only network requests it makes are to the GitHub API,
+and only once you connect a token. With no token, it makes none.

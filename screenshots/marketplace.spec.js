@@ -31,6 +31,13 @@ test("settings - GitHub PR integration", async ({ page }) => {
   await page.locator("#root").screenshot({ path: shot("settings.png"), animations: "disabled" });
 });
 
+test("linked-files - gitignored config linked into every worktree", async ({ page }) => {
+  const data = overviewData();
+  await mountPanel(page, { data, message: { type: "openSettings" }, height: 620 });
+  await page.locator('.settings-tab[data-tab="linked"]').click();
+  await page.locator("#root").screenshot({ path: shot("linked-files.png"), animations: "disabled" });
+});
+
 test("branches - all branches with PR status and filters", async ({ page }) => {
   const data = branchesData();
   // The branches view opens as a full editor tab, so render it wide like one.
