@@ -2,8 +2,16 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## Unreleased
+## 3.6.0
 
+- **A clearer Marketplace listing** - the listing had grown to a 261-line body
+  that buried what the extension actually does: four thumbnails too small to
+  read, a twenty-bullet highlights wall with wildly uneven entries, and a
+  Branches deep-dive longer than every other feature combined. It now opens with
+  a six-bullet summary under the main screenshot, then covers agents, pull
+  requests, branches and linked files in turn, each with its screenshot inline at
+  a readable size. Adds a Linked Files screenshot, the one major feature that had
+  none. Listing and documentation only; no change to how the extension behaves.
 - **A background agent no longer yanks the terminal view away from the one
   you're reading** - when Claude generated or updated a session's title, the
   panel renamed that agent's terminal to match, and the only rename VS Code
