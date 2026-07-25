@@ -37,6 +37,12 @@ The **Branches view** opens as a full editor tab listing every branch with when 
   now tells you when its terminal lives elsewhere instead of doing nothing.
 - **Agent & Worktree in one step** — create a fresh worktree with `claude -w` and
   start an agent in it together.
+- **Terminal tabs that say what the agent is doing** — agent terminals are left
+  for Claude Code to title, so each tab tracks that session's current topic on
+  its own, background tabs included, and the terminal you are reading is never
+  pulled away when another agent answers. On VS Code older than 1.117 (or with
+  `terminal.integrated.tabs.allowAgentCliTitle` turned off) tabs keep the
+  `Claude · <worktree>` name they launch with.
 - **Open in a new window** — open any worktree in its own VS Code window in a
   click; if one is already open for that worktree, it is focused instead of
   duplicated.

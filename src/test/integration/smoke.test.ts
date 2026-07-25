@@ -1,5 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import { supportsAgentCliTitle } from "../../worktreeUtils";
 
 /**
  * Extension-host smoke tests. These run inside a real VS Code (via
@@ -46,5 +47,53 @@ suite("Agent Worktrees extension host", () => {
     const api = exports.getAPI(1);
     assert.ok(api, "obtained Git API v1");
     assert.ok(Array.isArray(api.repositories), "repositories is an array");
+  });
+
+  test("the agent-CLI terminal title setting matches our version cutoff", () => {
+    // Agent terminals are left unnamed so Claude Code's own OSC title names the
+    // tab; that only works from VS Code 1.117, where the terminal label computer
+    // began honouring an agent CLI's title sequence, gated on
+    // terminal.integrated.tabs.allowAgentCliTitle. supportsAgentCliTitle encodes
+    // that cutoff, and a wrong cutoff is invisible in the unit suite because it
+    // only compares strings. Assert against the *real* host on every OS in the
+    // matrix: the setting exists exactly when we claim the behavior does.
+    const declared = supportsAgentCliTitle(vscode.version, true);
+    const setting = vscode.workspace
+      .getConfiguration()
+      .inspect<boolean>("terminal.integrated.tabs.allowAgentCliTitle");
+    assert.strictEqual(
+      setting?.defaultValue !== undefined,
+      declared,
+      `VS Code ${vscode.version}: supportsAgentCliTitle says ${declared}, but ` +
+        `terminal.integrated.tabs.allowAgentCliTitle is ` +
+        `${setting?.defaultValue === undefined ? "absent" : "present"}`
+    );
+    if (declared) {
+      assert.strictEqual(
+        setting?.defaultValue,
+        true,
+        "the setting still defaults to on, so agent terminals get their title " +
+          "from the sequence without the user configuring anything"
+      );
+    }
+  });
+
+  test("an unnamed agent terminal keeps the launch env we key sessions by", () => {
+    // The rename path is gone, so the session id stamped in the creation env is
+    // the only link left between a panel row and its terminal (reclaimTerminal
+    // re-links restored terminals through it). Windows env vars are
+    // case-insensitive, so assert the round-trip on the real host rather than
+    // assuming the key survives verbatim.
+    const terminal = vscode.window.createTerminal({
+      cwd: __dirname,
+      env: { AGENT_WORKTREES_SID: "smoke-test-session" },
+    });
+    try {
+      const opts = terminal.creationOptions as vscode.TerminalOptions;
+      assert.strictEqual(opts.name, undefined, "no static API title is set");
+      assert.strictEqual(opts.env?.AGENT_WORKTREES_SID, "smoke-test-session");
+    } finally {
+      terminal.dispose();
+    }
   });
 });

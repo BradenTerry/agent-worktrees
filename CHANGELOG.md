@@ -2,6 +2,22 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## Unreleased
+
+- **A background agent no longer yanks the terminal view away from the one
+  you're reading** - when Claude generated or updated a session's title, the
+  panel renamed that agent's terminal to match, and the only rename VS Code
+  offers acts on the *active* terminal, so the rename had to reveal it first.
+  While you were jumping between agents, whichever one answered next stole the
+  selected terminal tab. Agent terminals are now left unnamed at launch, which
+  keeps VS Code's escape-sequence title handling alive so Claude Code titles
+  its own tab - live, background tabs included, with nothing to reveal. As a
+  bonus the tab now tracks the session's current topic instead of the title
+  that happened to exist when the last rename ran. On VS Code older than 1.117
+  (or with `terminal.integrated.tabs.allowAgentCliTitle` turned off) the
+  extension still names the tab itself, but only ever renames the terminal you
+  are already in; the rest stay queued until you switch back to them.
+
 ## 3.5.1
 
 - **Easier to find on the Marketplace** - the listing carried no search

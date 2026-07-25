@@ -5,6 +5,7 @@ const path = require("node:path");
 const {
   countWaitingAgents,
   normalizePath,
+  supportsAgentCliTitle,
   worktreeDirFor,
 } = require("../out/worktreeUtils.js");
 
@@ -58,4 +59,35 @@ test("countWaitingAgents sums waiting agents across worktrees", () => {
 test("normalizePath lowercases the drive letter (Windows)", { skip: process.platform !== "win32" }, () => {
   assert.strictEqual(normalizePath("C:\\repo\\feature"), "c:\\repo\\feature");
   assert.strictEqual(normalizePath("C:\\repo"), normalizePath("c:\\repo"));
+});
+
+// Whether an agent terminal is left unnamed (so Claude Code's own OSC title
+// names the tab) or named by us and renamed. The cutoff is VS Code 1.117, where
+// the terminal label computer began switching the title template to
+// ${sequence} for a detected agent CLI. Same rule on every OS: the escape
+// sequence is the only cross-platform signal VS Code has, since every agent CLI
+// runs as `node`.
+test("supportsAgentCliTitle gates on VS Code 1.117 and the opt-out", () => {
+  assert.strictEqual(supportsAgentCliTitle("1.117.0", true), true);
+  assert.strictEqual(supportsAgentCliTitle("1.130.2", true), true);
+  assert.strictEqual(supportsAgentCliTitle("2.0.0", true), true);
+  // Below the cutoff the template stays ${process} and an unnamed tab would
+  // read "node", so the extension has to name the terminal itself.
+  assert.strictEqual(supportsAgentCliTitle("1.116.4", true), false);
+  assert.strictEqual(supportsAgentCliTitle("1.90.0", true), false);
+  assert.strictEqual(supportsAgentCliTitle("0.999.0", true), false);
+  // terminal.integrated.tabs.allowAgentCliTitle turned off: VS Code ignores the
+  // sequence, so we name the tab even on a new host.
+  assert.strictEqual(supportsAgentCliTitle("1.130.2", false), false);
+});
+
+test("supportsAgentCliTitle handles insider and malformed versions", () => {
+  // vscode.version carries a suffix on Insiders builds.
+  assert.strictEqual(supportsAgentCliTitle("1.117.0-insider", true), true);
+  assert.strictEqual(supportsAgentCliTitle("1.116.0-insider", true), false);
+  // Anything unparseable falls back to naming the terminal ourselves, which
+  // works on every version.
+  assert.strictEqual(supportsAgentCliTitle("", true), false);
+  assert.strictEqual(supportsAgentCliTitle("nonsense", true), false);
+  assert.strictEqual(supportsAgentCliTitle("1", true), false);
 });

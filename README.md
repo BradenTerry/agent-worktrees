@@ -42,7 +42,8 @@ state, and its running agents in one view.
   active is highlighted (blue outline + terminal glyph on its row, and a marker
   on its worktree's Agents bar for collapsed cards), driven by
   `onDidChangeActiveTerminal` as a lightweight class toggle — no re-render, no
-  git spawns.
+  git spawns. The terminal's tab title is left to Claude Code (see
+  [Terminal tab titles](#terminal-tab-titles)).
 - **Agent & Worktree** — create a new worktree with Claude (`claude -w`) and
   start an agent in it in a single step.
 - **Open in new window** — open any worktree in its own VS Code window from the
@@ -295,6 +296,48 @@ flowchart LR
     T --> H
     TW --> H
 ```
+
+### Terminal tab titles
+
+Agent terminals are titled by Claude Code, not by the extension, and the way to
+arrange that is to **not** pass `name` to `createTerminal`.
+
+VS Code treats an extension-supplied `name` as a static API title, and the
+`TitleEventSource.Api` branch disposes the xterm listener that would otherwise
+apply OSC title escape sequences — permanently, since nothing re-registers it.
+Claude Code emits exactly such a sequence, continuously, carrying the same
+generated topic the panel row shows; and since VS Code 1.117 the label computer
+recognises an agent CLI from that sequence (`/claude\s*code/i`) and swaps the
+tab title template to `${sequence}` on its own, gated on
+`terminal.integrated.tabs.allowAgentCliTitle` (default `true`). So naming the
+terminal is precisely what used to suppress the free, always-current title.
+
+There is no API that renames a terminal in the background: `Terminal.name` is
+read-only, `workbench.action.terminal.renameWithArg` is registered as an
+active-instance action, and `workbench.action.terminal.rename` opens a quick
+pick. Renaming therefore meant revealing the terminal first, which is what made
+a background agent steal the terminal tab you were reading whenever it produced
+a new title. Leaving the title to Claude removes the reveal entirely and works
+for terminals that are not visible at all.
+
+```mermaid
+flowchart TD
+    A["agent launch"] --> B{"VS Code >= 1.117<br/>and allowAgentCliTitle?"}
+    B -->|yes| C["createTerminal({ cwd })<br/>no name"]
+    C --> D["OSC title listener stays live"]
+    D --> E["Claude Code's own title<br/>drives the tab, background included"]
+    B -->|no| F["createTerminal({ name: 'Claude · &lt;worktree&gt;' })"]
+    F --> G["syncTerminalNames queues the summary"]
+    G --> H{"is that terminal<br/>the active one?"}
+    H -->|yes| I["renameWithArg — no reveal needed"]
+    H -->|no| J["stay queued until the user<br/>switches back to it"]
+```
+
+The fallback path never reveals a terminal either: a queued rename is applied
+only when its terminal is already `vscode.window.activeTerminal`, in which case
+the command needs no `show()` and cannot disturb the tab selection or pop open a
+hidden panel. A terminal the user never returns to keeps its launch name; its
+panel row still shows the summary.
 
 ### Refresh coalescing
 
