@@ -11,7 +11,11 @@ import {
   WorktreeData,
   BranchData,
 } from "./worktreeData";
-import { countWaitingAgents, worktreeDirFor } from "./worktreeUtils";
+import {
+  countWaitingAgents,
+  supportsAgentCliTitle,
+  worktreeDirFor,
+} from "./worktreeUtils";
 import {
   linkPathsIntoWorktree,
   unlinkPathFromWorktree,
@@ -188,8 +192,11 @@ export class WorktreeWebviewProvider
    *  to its session after our in-memory handle is gone. */
   private static readonly SID_ENV = "AGENT_WORKTREES_SID";
   /** Last name we applied to each session's terminal, so we only rename on a
-   *  real change (renaming reveals the terminal, so doing it every event churns). */
+   *  real change and an idle session never churns. */
   private appliedTerminalNames = new Map<string, string>();
+  /** Names waiting to be applied, for sessions whose terminal is not the one
+   *  the user is currently looking at; see flushTerminalNames. */
+  private desiredTerminalNames = new Map<string, string>();
   /** Where the emitter writes per-session state, under the extension's global
    *  storage (so nothing of ours lives in ~/.claude). Derived from the context. */
   private readonly sessionsDir: string;
@@ -267,10 +274,13 @@ export class WorktreeWebviewProvider
       vscode.window.onDidCloseTerminal((t) => this.forgetTerminal(t)),
       // Highlight the agent whose terminal the user is looking at. A
       // lightweight message (not a full refresh) so switching terminals
-      // repaints instantly without re-running git.
-      vscode.window.onDidChangeActiveTerminal(() =>
-        this.postActiveTerminal()
-      ),
+      // repaints instantly without re-running git. Switching is also when a
+      // rename we deferred (to avoid stealing the terminal the user was in)
+      // becomes safe to apply.
+      vscode.window.onDidChangeActiveTerminal(() => {
+        this.postActiveTerminal();
+        void this.flushTerminalNames();
+      }),
       // Catch external/agent edits and commits when the window regains focus.
       vscode.window.onDidChangeWindowState((s) => {
         if (s.focused) this.scheduleRefresh();
@@ -345,7 +355,7 @@ export class WorktreeWebviewProvider
       ? await readSessionsByWorktree(this.sessionsDir)
       : undefined;
     if (agents) {
-      await this.syncTerminalNames(agents);
+      this.syncTerminalNames(agents);
     }
     const data = await gatherWorktrees(agents, installed, force);
     data.scmEnabled = this.isScmEnabled();
@@ -440,7 +450,7 @@ export class WorktreeWebviewProvider
     const changed = new Set(this.pendingSessionIds);
     this.pendingSessionIds.clear();
     const agents = await readSessionsByWorktree(this.sessionsDir);
-    await this.syncTerminalNames(agents);
+    this.syncTerminalNames(agents);
     const known = new Set(data.worktrees.map((wt) => normalize(wt.path)));
     for (const key of agents.keys()) {
       if (!known.has(key)) return this.refresh();
@@ -1131,15 +1141,15 @@ export class WorktreeWebviewProvider
   /**
    * Spin up a Claude CLI session in the given worktree. We launch Claude with a
    * session id we generate so the panel row, its state file, and its terminal
-   * all share one id — that link is what lets the work summary reach the
-   * terminal name. Each click gets its own terminal so agents can run side by
-   * side across worktrees.
+   * all share one id — that link is what lets focus and stop reach the right
+   * terminal. Each click gets its own terminal so agents can run side by side
+   * across worktrees.
    */
   private async agent(fsPath?: string): Promise<void> {
     if (!fsPath) return;
     const sessionId = randomUUID();
     const terminal = vscode.window.createTerminal({
-      name: `Claude · ${nameOf(fsPath)}`,
+      ...this.launchName(`Claude · ${nameOf(fsPath)}`),
       cwd: fsPath,
       iconPath: this.terminalIcon,
       env: { [WorktreeWebviewProvider.SID_ENV]: sessionId },
@@ -1165,7 +1175,7 @@ export class WorktreeWebviewProvider
     }
     const sessionId = randomUUID();
     const terminal = vscode.window.createTerminal({
-      name: "Claude · new worktree",
+      ...this.launchName("Claude · new worktree"),
       cwd,
       iconPath: this.terminalIcon,
       env: { [WorktreeWebviewProvider.SID_ENV]: sessionId },
@@ -1393,6 +1403,7 @@ export class WorktreeWebviewProvider
       if (term === terminal) {
         this.terminals.delete(id);
         this.appliedTerminalNames.delete(id);
+        this.desiredTerminalNames.delete(id);
       }
     }
   }
@@ -1417,30 +1428,99 @@ export class WorktreeWebviewProvider
   }
 
   /**
-   * Keep each agent's terminal named like its panel row: the work summary
-   * (Claude's generated title). Until that exists the terminal keeps its launch
-   * name ("Claude · <worktree>"); we never name it after the raw prompt. Only
-   * renames on a real change (renaming reveals the terminal, so doing it every
-   * event would churn), and reveals with focus preserved so a background refresh
-   * never steals the cursor.
+   * The `name` half of an agent terminal's creation options — present only when
+   * we have to name the tab ourselves.
+   *
+   * Passing `name` to `createTerminal` is not free: VS Code treats it as a
+   * static API title, which permanently disposes the listener that would
+   * otherwise apply the OSC title escape sequences the process emits
+   * (`TitleEventSource.Api` beats `Sequence`, and it cannot be re-enabled
+   * afterwards). Claude Code emits exactly such a sequence, continuously,
+   * carrying the same generated topic the panel shows — and since 1.117 VS Code
+   * recognises an agent CLI from that sequence and switches the tab title
+   * template to `${sequence}` on its own (`terminal.integrated.tabs.
+   * allowAgentCliTitle`, on by default). So on a new enough host the best thing
+   * we can do for the tab title is stay out of the way: Claude renames its own
+   * tab, live, including while the terminal sits in the background, which no
+   * extension API can do (`Terminal.name` is read-only and the rename command
+   * only ever targets the active terminal).
+   *
+   * On older hosts, or when the user has turned that setting off, the template
+   * stays `${process}` and an unnamed tab would just read "node", so we keep
+   * naming it ourselves and fall back to renaming via syncTerminalNames.
    */
-  private async syncTerminalNames(
-    byPath: Map<string, AgentVM[]>
-  ): Promise<void> {
+  private launchName(name: string): { name?: string } {
+    return this.agentCliTitleSupported() ? {} : { name };
+  }
+
+  /** Whether this host resolves agent terminal titles from the CLI's own title
+   *  escape sequence (VS Code >= 1.117, and the user has not opted out). */
+  private agentCliTitleSupported(): boolean {
+    return supportsAgentCliTitle(
+      vscode.version,
+      vscode.workspace
+        .getConfiguration()
+        .get<boolean>("terminal.integrated.tabs.allowAgentCliTitle", true) !==
+        false
+    );
+  }
+
+  /**
+   * Queue each agent's terminal to be named like its panel row: the work
+   * summary (Claude's generated title). Until that exists the terminal keeps
+   * its launch name ("Claude · <worktree>"); we never name it after the raw
+   * prompt. Queued, not applied: see flushTerminalNames for why.
+   *
+   * Only for terminals we named at launch — where the host resolves the title
+   * from Claude's own escape sequence there is nothing to do; see launchName.
+   */
+  private syncTerminalNames(byPath: Map<string, AgentVM[]>): void {
+    if (this.agentCliTitleSupported()) return;
     for (const list of byPath.values()) {
       for (const a of list) {
-        const terminal = this.terminals.get(a.sessionId);
-        if (!terminal) continue;
+        if (!this.terminals.has(a.sessionId)) continue;
         const desired = a.summary;
         if (!desired) continue; // nothing meaningful yet; keep the launch name
         if (this.appliedTerminalNames.get(a.sessionId) === desired) continue;
-        this.appliedTerminalNames.set(a.sessionId, desired);
-        terminal.show(true);
-        await vscode.commands.executeCommand(
-          "workbench.action.terminal.renameWithArg",
-          { name: desired }
-        );
+        this.desiredTerminalNames.set(a.sessionId, desired);
       }
+    }
+    void this.flushTerminalNames();
+  }
+
+  /**
+   * Apply a queued rename, but only to the terminal the user is already looking
+   * at.
+   *
+   * The only rename VS Code exposes is the
+   * `workbench.action.terminal.renameWithArg` command, which acts on the
+   * *active* terminal — there is no per-terminal rename API and `Terminal.name`
+   * is read-only. Revealing a background terminal to rename it is what used to
+   * yank the terminal view onto whichever agent had just answered while the
+   * user was reading another one (`show(true)` preserves keyboard focus, but
+   * not the selected tab).
+   *
+   * So we never reveal anything: a rename is applied only when its terminal is
+   * already active, in which case the command needs no `show()` at all and
+   * cannot disturb the selection or pop open a hidden panel. Everything else
+   * stays queued and lands the moment the user switches back to that terminal
+   * (onDidChangeActiveTerminal flushes). Only one terminal is ever active, so
+   * at most one rename runs per flush. A terminal the user never returns to
+   * simply keeps its launch name; its panel row still shows the summary.
+   */
+  private async flushTerminalNames(): Promise<void> {
+    if (!this.desiredTerminalNames.size) return;
+    const active = vscode.window.activeTerminal;
+    if (!active) return;
+    for (const [sessionId, name] of this.desiredTerminalNames) {
+      if (this.terminals.get(sessionId) !== active) continue;
+      this.desiredTerminalNames.delete(sessionId);
+      this.appliedTerminalNames.set(sessionId, name);
+      await vscode.commands.executeCommand(
+        "workbench.action.terminal.renameWithArg",
+        { name }
+      );
+      return;
     }
   }
 

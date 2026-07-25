@@ -34,6 +34,34 @@ export function countWaitingAgents(
   return n;
 }
 
+/**
+ * Whether this host titles agent terminals from the CLI's own OSC title escape
+ * sequence, which is what lets Claude Code name its tab (background tabs
+ * included) instead of the extension renaming it.
+ *
+ * VS Code 1.117 is where the terminal label computer started recognising an
+ * agent CLI from that sequence and swapping the tab title template to
+ * `${sequence}`; `terminal.integrated.tabs.allowAgentCliTitle` (default true)
+ * turns it off. Below that, or opted out, the template stays `${process}` and an
+ * unnamed agent tab would just read "node", so the extension names it instead.
+ *
+ * Platform-independent: the sequence is the same on Windows, macOS and Linux
+ * (VS Code notes it as the only cross-platform signal, since agent CLIs all run
+ * as `node`). Split by hand rather than semver-parsed because `vscode.version`
+ * can carry a suffix (e.g. "1.117.0-insider").
+ */
+export function supportsAgentCliTitle(
+  version: string,
+  allowAgentCliTitle: boolean
+): boolean {
+  if (!allowAgentCliTitle) return false;
+  const [major, minor] = version
+    .split(".")
+    .map((part) => parseInt(part, 10));
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
+  return major > 1 || (major === 1 && minor >= 117);
+}
+
 /** Canonical absolute path: resolved, with any trailing slash removed. */
 export function normalizePath(p: string): string {
   const resolved = path.resolve(p).replace(/[\\/]+$/, "");
