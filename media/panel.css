@@ -719,26 +719,81 @@ button.busy {
   height: 11px;
 }
 
-/* Per-agent subagent counter: a robot glyph + the number of subagents the
- * agent has spawned. Static (no click); sits next to the skill chip. */
-.subagent-chip {
+/* A subagent that is running right now, indented under the agent that spawned
+ * it. Only live ones are rendered, so these rows come and go on their own. */
+.subagent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 18px;
+  padding: 3px 8px 3px 4px;
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+.subagent-mark {
   flex: 0 0 auto;
   display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 6px 1px 5px;
-  font-size: 11px;
-  border-radius: 999px;
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
-  color: var(--vscode-foreground);
-  background: transparent;
+  color: var(--vscode-charts-blue, #3794ff);
+  animation: sub-pulse 1.8s ease-in-out infinite;
 }
-.subagent-chip svg {
-  width: 12px;
-  height: 12px;
+.subagent-mark svg {
+  width: 13px;
+  height: 13px;
+}
+/* Stopped its turn but still in flight — parked on a background command that
+   will wake it. Still listed, but the working pulse is off. */
+.subagent-row.paused .subagent-mark {
+  animation: none;
+  color: var(--vscode-descriptionForeground);
+}
+/* This subagent is the one holding the session's permission prompt. Same yellow
+   the panel uses everywhere for "needs you", and it keeps pulsing so it reads as
+   the live thing to deal with. */
+.subagent-row.asking .subagent-mark {
+  color: var(--vscode-charts-yellow, #cca700);
+}
+.subagent-row.asking .subagent-label {
+  color: var(--vscode-charts-yellow, #cca700);
+}
+/* The agent type ("Explore", "general-purpose") reads as a qualifier on the
+   task, so it is dimmed and never squeezes the task text out. */
+.subagent-type {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+.subagent-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subagent-age {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-descriptionForeground);
+}
+@keyframes sub-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .subagent-mark {
+    animation: none;
+  }
 }
 
-/* Worktree-wide subagent total shown in the Agents bar. */
+/* Count of subagents running across the worktree, shown in the Agents bar so
+ * they stay visible while the agent list is collapsed. */
 .agents-bar-subagents {
   display: inline-flex;
   align-items: center;

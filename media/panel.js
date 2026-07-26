@@ -41,8 +41,10 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
-    robot:
-      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.4V2"/><circle cx="8" cy="1.6" r="0.6" fill="currentColor"/><rect x="3" y="4" width="10" height="8" rx="2"/><path d="M3 8H1.6M14.4 8H13"/><circle cx="6" cy="8" r="0.9" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="0.9" fill="currentColor" stroke="none"/></svg>',
+    // A running subagent: an elbow connector down from the parent row into a
+    // node, so a subagent reads as belonging to the agent above it.
+    subagent:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4 2.5v5.5a2.5 2.5 0 0 0 2.5 2.5H8.7"/><circle cx="11.4" cy="10.5" r="1.9"/></svg>',
     gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>',
     pr: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8M12 11V7a2.5 2.5 0 0 0-2.5-2.5H7M9 2.5L7 4.5l2 2"/></svg>',
     branch:
@@ -207,6 +209,85 @@
     return STATUS[a && a.status] ? a.status : "idle";
   }
 
+  /** Compact "how long has this been running" ("18s", "4m", "2h"). */
+  function shortAge(t) {
+    const sec = Math.max(0, (Date.now() - (t || 0)) / 1000);
+    if (sec < 60) return Math.round(sec) + "s";
+    const min = sec / 60;
+    if (min < 60) return Math.round(min) + "m";
+    const hr = min / 60;
+    if (hr < 24) return Math.round(hr) + "h";
+    return Math.round(hr / 24) + "d";
+  }
+
+  /**
+   * The subagents an agent has in flight, as indented rows under it. Only live
+   * ones are tracked, so this list empties itself — it answers "what is this
+   * agent running", not "what has it run". A paused one has stopped its turn
+   * but is still in flight, parked on a background command that will wake it:
+   * shown, but without the working pulse.
+   */
+  function subagentRows(a) {
+    const subs = (a && a.subagents) || [];
+    // A pending permission decision only means the USER is being asked when the
+    // session is waiting: PermissionRequest also fires for calls auto mode or an
+    // allowlist settles silently, and Claude Code's "needs you" notification
+    // never says which subagent it came from. Pairing the two is what makes the
+    // waiting marker trustworthy.
+    const sessionWaiting = statusOf(a) === "waiting";
+    return subs
+      .map((s) => {
+        const type = s.type || "";
+        const task = s.task || "";
+        const name = task || type || "Subagent";
+        const age = shortAge(s.startedAt);
+        const asking = sessionWaiting && !!s.awaitingPermission;
+        const state = asking
+          ? "waiting for you"
+          : s.paused
+          ? "waiting on background work"
+          : "running";
+        return (
+          '<div class="subagent-row' +
+          (asking ? " asking" : s.paused ? " paused" : "") +
+          '" data-tip="' +
+          esc((type ? type + ": " : "") + (task || "subagent") + " — " + state) +
+          '">' +
+          '<span class="subagent-mark">' +
+          icons.subagent +
+          "</span>" +
+          (task && type
+            ? '<span class="subagent-type">' + esc(type) + "</span>"
+            : "") +
+          '<span class="subagent-label">' +
+          esc(name) +
+          "</span>" +
+          '<span class="subagent-age" data-since="' +
+          Number(s.startedAt || 0) +
+          '">' +
+          age +
+          "</span>" +
+          "</div>"
+        );
+      })
+      .join("");
+  }
+
+  // Elapsed labels have to tick on their own. The extension only re-posts when
+  // the payload actually changes, and a subagent quietly working changes
+  // nothing the panel renders — so an age rendered once would sit frozen at
+  // whatever it read when the row first appeared. Rewrite just the text of the
+  // labels that moved; no re-render, no DOM rebuild.
+  function tickAges() {
+    root.querySelectorAll(".subagent-age[data-since]").forEach((el) => {
+      const since = Number(el.getAttribute("data-since"));
+      if (!since) return;
+      const next = shortAge(since);
+      if (el.textContent !== next) el.textContent = next;
+    });
+  }
+  setInterval(tickAges, 1000);
+
   function agentRows(agents) {
     if (!agents || !agents.length) {
       return '<div class="agents-empty">No agents yet. Use “New Agent” to start one.</div>';
@@ -233,17 +314,8 @@
               skills.length +
               "</button>"
             : "";
-          const subs = a.subagents || 0;
-          const subChip = subs
-            ? '<span class="subagent-chip" title="' +
-              subs +
-              " subagent" +
-              (subs === 1 ? "" : "s") +
-              ' used">' +
-              icons.robot +
-              subs +
-              "</span>"
-            : "";
+          // No subagent chip on the row itself: the live ones are rendered as
+          // rows directly underneath, which says it better than a count.
           return (
             '<div class="agent-row' +
             (s === "waiting" ? " attention" : "") +
@@ -264,7 +336,6 @@
             '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
             icons.terminal +
             "</span>" +
-            subChip +
             skillChip +
             '<span class="row-actions">' +
             '<button class="iconbtn" data-action="stopAgent" data-session="' +
@@ -273,7 +344,8 @@
             icons.stop +
             "</button>" +
             "</span>" +
-            "</div>"
+            "</div>" +
+            subagentRows(a)
           );
         })
         .join("") +
@@ -292,16 +364,18 @@
     let subTotal = 0;
     for (const a of agents) {
       counts[statusOf(a)]++;
-      subTotal += a.subagents || 0;
+      subTotal += (a.subagents || []).length;
     }
 
+    // Live subagents across the worktree. The individual ones are rows in the
+    // (collapsible) agent list, so this keeps them visible when it is closed.
     const subStat = subTotal
       ? '<span class="agents-bar-subagents" title="' +
         subTotal +
         " subagent" +
         (subTotal === 1 ? "" : "s") +
-        ' used in this worktree">' +
-        icons.robot +
+        ' running in this worktree">' +
+        icons.subagent +
         subTotal +
         "</span>"
       : "";

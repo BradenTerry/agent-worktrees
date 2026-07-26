@@ -126,10 +126,41 @@ state, and its running agents in one view.
   by device + inode identity instead.
 - **Skills used** — each agent row shows a chip with the count of Claude skills
   it has invoked; click it for the full list.
-- **Subagents used** — a robot glyph with a count tracks how many subagents each
-  agent has spawned (every `Agent` tool call is one subagent; the tool was named
-  `Task` before Claude Code 2.1.63 and both names count). The Agents bar sums
-  it across the worktree; each agent row shows its own.
+- **Live subagents** — the subagents an agent has in flight *right now* appear
+  as indented rows under it, labelled with the agent type and the `Agent` tool's
+  `description`, plus how long each has been going. `SubagentStart` registers
+  one; `SubagentStop` does *not* retire it, because a stop is not an end — an
+  async subagent that hands work to a background command stops its turn, stays
+  resumable, and is woken when the command lands (Claude Code's own notification
+  says as much: it "fires each time this agent stops with no live background
+  children of its own … the same task-id may notify more than once"). Retiring
+  on the stop made a subagent vanish the moment it backgrounded anything. The
+  authority is instead Claude Code's in-flight registry, stamped on every `Stop`
+  / `SubagentStop` payload as `background_tasks` ("running/pending +
+  backgrounded"): a stop only marks the subagent **paused** (listed, with the
+  working pulse off), and the next registry snapshot — from that same payload,
+  or the parent's next turn end — decides whether it is gone. Once a subagent
+  has appeared in the registry, the registry alone retires it: stopping an agent
+  from Claude Code's own agent manager fires no hook (its turn never ends), so a
+  killed one would otherwise sit in the panel forever. That registry also adopts
+  subagents this extension never saw start, e.g. hooks installed while one was
+  already running. Only `Stop` and `SubagentStop` carry it, so a kill shows up
+  at the next turn end rather than instantly. `SubagentStart` only knows the agent *type*, so the
+  description is parked by the `Agent` tool's `PreToolUse` (the tool was named
+  `Task` before Claude Code 2.1.63; both names count) and claimed by the next
+  start of that type; an unclaimed one expires rather than mislabelling a later
+  subagent. Registry entries carry both fields and need no pairing. A subagent
+  row also marks **which one is waiting on you**: Claude Code's `Notification`
+  is the only trustworthy "needs you" signal but is built without the agent
+  context, so it never says which subagent raised it, while `PermissionRequest`
+  names the asker but fires for silently-allowed calls too. Neither is enough
+  alone, so the panel pairs them — the subagent with an outstanding permission
+  decision is drawn in the waiting yellow only while the session itself is in
+  the waiting state. Elapsed
+  times tick in the webview itself: the extension only re-posts when the payload
+  changes, and a subagent quietly working changes nothing else, so a rendered
+  age would otherwise freeze. The Agents bar carries the worktree-wide count so
+  they stay visible when the list is collapsed.
 - **Collapsible agent lists** with per-status counts, so a card reads at a glance
   and expands to the individual sessions on demand.
 - **Waiting-agent badge** — every refresh sets a number badge on the view's
@@ -173,12 +204,22 @@ fire exactly on those transitions, so the extension installs one small emitter
 script wired to a handful of events. The events map to a status shown in the
 panel:
 
-| Hook                                                            | Status            |
-| --------------------------------------------------------------- | ----------------- |
-| `SessionStart`, `Stop`                                          | idle              |
-| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStop` | active            |
-| `Notification` (permission / question)                          | waiting           |
-| `SessionEnd`                                                    | removed from panel |
+| Hook                                                                              | Status             |
+| --------------------------------------------------------------------------------- | ------------------ |
+| `SessionStart`, `Stop`                                                            | idle               |
+| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`  | active             |
+| `Notification` (permission / question)                                            | waiting            |
+| `PermissionRequest`                                                               | unchanged          |
+| `SessionEnd`                                                                      | removed from panel |
+
+`SubagentStart` and `SubagentStop` do double duty: besides the status, they open
+and pause the subagent rows under the agent, which the `background_tasks`
+registry on `Stop`/`SubagentStop` then reconciles (see **Live subagents**
+above). `PermissionRequest` is installed purely to name the subagent behind a
+prompt and deliberately leaves the status alone — it runs in the permission
+decision path, ahead of any prompt, and fires for calls an allowlist or auto
+mode settles silently, so reporting a status from it would clear a genuine
+waiting state (and the Activity Bar badge) while the user was still answering.
 
 `Notification` is not always "waiting": the emitter reads the payload's
 `notification_type`. `agent_completed` (a background subagent finished; the
@@ -212,7 +253,10 @@ Code blocks the tool until the hook exits, so follow-up events reuse the cached
 value instead of spawning `git rev-parse` twice per event — on Windows, where
 process spawns are expensive, that cache is the difference between hooks being
 free and every tool call paying a visible startup tax. `SessionStart`
-re-resolves from git. For the same reason the transcript tail read that picks
+re-resolves from git. Events fired *by* a subagent carry its `agent_id` — and,
+when it runs in an isolated worktree, its own `cwd` — so they always reuse the
+parent's cached worktree; re-resolving would move the parent's row onto the
+subagent's card. For the same reason the transcript tail read that picks
 up Claude's generated session title always runs on the turn-boundary events
 (`UserPromptSubmit`, `Stop`, `Notification`, `SubagentStop`, `SessionStart`)
 but is kept off the `PreToolUse`/`PostToolUse` hot path once a title is known
