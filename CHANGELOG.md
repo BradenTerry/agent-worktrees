@@ -2,6 +2,27 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.7.2
+
+- **A subagent working in its own worktree is now shown on that worktree's
+  card** - agents increasingly fan work out one subagent per ticket, each in a
+  git worktree of its own so their concurrent edits cannot collide. Every one of
+  those subagents was listed under the session that spawned them, stacked on the
+  card for a worktree none of them were touching, while the cards for the
+  worktrees where the work was actually happening sat empty. Each subagent's row
+  now sits on the card for the worktree it was given, naming the agent that sent
+  it there, and a worktree with no agent of its own shows those rows instead of
+  "No agents yet". The agent driving the fan-out keeps a count chip of everything
+  it has in flight, so a session whose subagents have all moved elsewhere does
+  not read as idle. Clicking any subagent row reveals its agent's terminal, which
+  is the only terminal there is - a subagent does not have one.
+  A subagent's worktree comes from the `cwd` on the events it fires itself, and
+  is recorded on the subagent rather than on the session: the parent's own row
+  must not move to another card. It is resolved once and cached against that cwd,
+  so this costs one `git` call per subagent, not one per tool call. Subagents
+  Claude Code's in-flight registry adopts (which fire no events of their own) and
+  ones working outside this repository stay listed under their parent.
+
 ## 3.7.1
 
 - **Agents that are no longer running are retired instead of lingering** - a

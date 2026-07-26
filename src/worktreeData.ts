@@ -40,6 +40,25 @@ export interface SubagentVM {
   awaitingPermission?: boolean;
   /** Epoch ms when the subagent started. */
   startedAt: number;
+  /** Worktree the subagent is working in, when that is NOT its parent session's
+   *  (an isolated worktree gives it a cwd of its own). Absent means it shares
+   *  the parent's worktree, which is the common case. */
+  worktree?: string;
+}
+
+/**
+ * A subagent shown on a worktree card that is not its parent session's, because
+ * it was given that worktree to work in. It is not an agent of its own — there
+ * is no session or terminal behind it — so it carries who to talk to instead.
+ */
+export interface WorktreeSubagentVM extends SubagentVM {
+  /** Session that spawned it; clicking the row reveals that session's terminal. */
+  parentSessionId: string;
+  /** That session's row label, so the row can say where it came from. */
+  parentLabel: string;
+  /** The parent session's status, which decides whether an outstanding
+   *  permission decision means the user is actually being asked. */
+  parentStatus: AgentStatus;
 }
 
 /** A single agent session created within a worktree. */
@@ -62,6 +81,21 @@ export interface AgentVM {
   lastActivity: number;
 }
 
+/**
+ * Everything the session state files say, indexed by worktree path: the agents
+ * whose session runs there, plus the subagents that were handed that worktree by
+ * a session running somewhere else. Both maps are keyed by `normalize(path)`.
+ */
+export interface SessionIndex {
+  agents: Map<string, AgentVM[]>;
+  subagents: Map<string, WorktreeSubagentVM[]>;
+  /** Filled by gatherWorktrees with the subagent worktrees it found no card
+   *  for (a path outside this repo). Those rows fall back to their parent, and
+   *  the caller keeps the set so an incremental refresh does not mistake them
+   *  for a worktree that has just been created. */
+  unplaced?: Set<string>;
+}
+
 /** A hook shown on the consent page (name + why it is needed). */
 export interface HookInfoVM {
   label: string;
@@ -79,6 +113,9 @@ export interface WorktreeVM {
   inWorkspace: boolean;
   git?: GitStatus;
   agents: AgentVM[];
+  /** Subagents working in this worktree whose parent session lives in another
+   *  one. Rendered as rows on this card, alongside (or instead of) its agents. */
+  subagents?: WorktreeSubagentVM[];
   /** GitHub PR status for this worktree's branch (when the integration is on
    *  and a PR exists). null = looked up, no PR; undefined = not looked up. */
   pr?: PrInfo | null;
@@ -154,7 +191,7 @@ export function folderIndex(fsPath: string): number {
 
 /** Gather worktrees of the repo containing the first workspace folder. */
 export async function gatherWorktrees(
-  agentsByPath?: Map<string, AgentVM[]>,
+  sessions?: SessionIndex,
   hooksInstalled = false,
   fetch = false
 ): Promise<WorktreeData> {
@@ -207,17 +244,39 @@ export async function gatherWorktrees(
     }ms`
   );
 
-  const vms: WorktreeVM[] = worktrees.map((wt, i) => ({
-    path: wt.path,
-    name: wt.branch ?? path.basename(wt.path),
-    branch: wt.branch,
-    isPrimary: wt.isPrimary,
-    detached: wt.detached,
-    locked: wt.locked,
-    inWorkspace: openPaths.has(normalize(wt.path)),
-    git: statuses[i],
-    agents: agentsByPath?.get(normalize(wt.path)) ?? [],
-  }));
+  // A subagent's worktree is whatever `git rev-parse` said about its cwd, which
+  // is not guaranteed to be a worktree of THIS repo (a subagent can be pointed
+  // anywhere). With no card to land on, its row would simply vanish, so drop the
+  // relocation and let it render under its parent instead. The objects are
+  // shared with the parent's own list, so clearing the field is all it takes.
+  if (sessions) {
+    const cards = new Set(worktrees.map((wt) => normalize(wt.path)));
+    const unplaced = new Set<string>();
+    for (const [key, list] of sessions.subagents) {
+      if (cards.has(key)) continue;
+      for (const sub of list) delete sub.worktree;
+      sessions.subagents.delete(key);
+      unplaced.add(key);
+    }
+    sessions.unplaced = unplaced;
+  }
+
+  const vms: WorktreeVM[] = worktrees.map((wt, i) => {
+    const key = normalize(wt.path);
+    const subagents = sessions?.subagents.get(key) ?? [];
+    return {
+      path: wt.path,
+      name: wt.branch ?? path.basename(wt.path),
+      branch: wt.branch,
+      isPrimary: wt.isPrimary,
+      detached: wt.detached,
+      locked: wt.locked,
+      inWorkspace: openPaths.has(key),
+      git: statuses[i],
+      agents: sessions?.agents.get(key) ?? [],
+      ...(subagents.length ? { subagents } : {}),
+    };
+  });
 
   // Primary worktree pinned to the top; the rest sorted by name.
   vms.sort((a, b) => {

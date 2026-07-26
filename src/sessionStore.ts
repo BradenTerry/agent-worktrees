@@ -1,6 +1,15 @@
 import * as fs from "fs";
 import * as path from "path";
-import { AgentVM, AgentStatus, SubagentVM, normalize } from "./worktreeData";
+import {
+  AgentVM,
+  AgentStatus,
+  SessionIndex,
+  SubagentVM,
+  WorktreeSubagentVM,
+} from "./worktreeData";
+// The same path key gatherWorktrees uses, taken from the VS Code-free module so
+// this file stays requirable (and unit-testable) outside the extension host.
+import { normalizePath as normalize } from "./worktreeUtils";
 
 /** Raw per-session state written by the emitter hook. The liveness markers it
  *  also writes (`pid`, `launched`) are read by pruneDeadSessions in liveness.ts,
@@ -42,7 +51,7 @@ function readSubagents(raw: unknown, fallbackTs: number): SubagentVM[] {
   const out: SubagentVM[] = [];
   for (const s of raw) {
     if (!s || typeof s !== "object") continue;
-    const { id, type, task, paused, awaitingPermission, startedAt } =
+    const { id, type, task, paused, awaitingPermission, startedAt, worktree } =
       s as Record<string, unknown>;
     if (typeof id !== "string" || !id) continue;
     out.push({
@@ -52,6 +61,7 @@ function readSubagents(raw: unknown, fallbackTs: number): SubagentVM[] {
       ...(paused === true ? { paused: true } : {}),
       ...(awaitingPermission === true ? { awaitingPermission: true } : {}),
       startedAt: typeof startedAt === "number" ? startedAt : fallbackTs,
+      ...(typeof worktree === "string" && worktree ? { worktree } : {}),
     });
   }
   return out;
@@ -61,10 +71,16 @@ function readSubagents(raw: unknown, fallbackTs: number): SubagentVM[] {
  * Read every session state file and group the agents by worktree path.
  * Within a worktree, agents are ordered by first-seen (ts ascending) and given
  * stable sequential labels. Stale files are pruned as they are encountered.
+ *
+ * A subagent that was handed a worktree of its own is indexed separately, under
+ * THAT worktree rather than its parent session's, so the panel can show it on
+ * the card for the code it is actually touching. It stays in the parent agent's
+ * own `subagents` list too — that is what the count on the parent row is drawn
+ * from, so a fanned-out session still says how many it has in flight.
  */
 export async function readSessionsByWorktree(
   dir: string
-): Promise<Map<string, AgentVM[]>> {
+): Promise<SessionIndex> {
   const files = await fs.promises.readdir(dir).catch(() => [] as string[]);
   const now = Date.now();
   const byPath = new Map<string, SessionState[]>();
@@ -93,10 +109,11 @@ export async function readSessionsByWorktree(
     }
   }
 
-  const out = new Map<string, AgentVM[]>();
+  const agents = new Map<string, AgentVM[]>();
+  const elsewhere = new Map<string, WorktreeSubagentVM[]>();
   for (const [key, sessions] of byPath) {
     sessions.sort((a, b) => (a.startedAt ?? a.ts) - (b.startedAt ?? b.ts));
-    out.set(
+    agents.set(
       key,
       sessions.map((s, i) => {
         const summary = s.task && s.task.trim() ? s.task.trim() : undefined;
@@ -104,10 +121,33 @@ export async function readSessionsByWorktree(
           ? s.skills.filter((x) => typeof x === "string")
           : [];
         const subagents = readSubagents(s.subagents, s.ts);
+        const label = summary || `Claude ${i + 1}`;
+        for (const sub of subagents) {
+          if (!sub.worktree) continue;
+          const home = normalize(sub.worktree);
+          // Not, via a stale file or a symlinked path, the worktree it is
+          // already listed under. Clearing the field keeps one invariant for
+          // everything downstream: `worktree` set means "rendered on another
+          // card", so the parent's own rows are exactly the ones without it.
+          if (home === key) {
+            delete sub.worktree;
+            continue;
+          }
+          // The SAME object, not a copy: gatherWorktrees clears `worktree` on
+          // subagents whose path has no card, and that has to put the row back
+          // under its parent, where this object is also listed.
+          const placed = sub as WorktreeSubagentVM;
+          placed.parentSessionId = s.sessionId;
+          placed.parentLabel = label;
+          placed.parentStatus = s.state;
+          const list = elsewhere.get(home) ?? [];
+          list.push(placed);
+          elsewhere.set(home, list);
+        }
         return {
           sessionId: s.sessionId,
           // The work summary, then an ordinal until Claude generates a title.
-          label: summary || `Claude ${i + 1}`,
+          label,
           summary,
           skills,
           subagents,
@@ -118,5 +158,9 @@ export async function readSessionsByWorktree(
       })
     );
   }
-  return out;
+  // Oldest first, matching how subagents are ordered under their parent.
+  for (const list of elsewhere.values()) {
+    list.sort((a, b) => a.startedAt - b.startedAt);
+  }
+  return { agents, subagents: elsewhere };
 }

@@ -160,7 +160,25 @@ state, and its running agents in one view.
   times tick in the webview itself: the extension only re-posts when the payload
   changes, and a subagent quietly working changes nothing else, so a rendered
   age would otherwise freeze. The Agents bar carries the worktree-wide count so
-  they stay visible when the list is collapsed.
+  they stay visible when the list is collapsed. Clicking a subagent row reveals
+  its **parent's** terminal — a subagent has no terminal of its own, so its
+  session is the thing to talk to.
+- **Subagents follow the worktree they were given** — a fan-out (one subagent
+  per ticket, each in its own worktree so concurrent edits cannot collide) puts
+  each subagent's row on the card for the worktree it is actually touching, not
+  under the session that spawned them. Only the events a subagent fires itself
+  carry its `cwd`, so the emitter resolves it there (once, cached against that
+  cwd, so `PreToolUse` does not pay for a `git` spawn on every tool call) and
+  records it on the subagent when it differs from the session's own worktree.
+  The parent's row keeps a count chip of everything it has in flight — without
+  it, the session driving a fan-out would look idle. Note the emitter records the
+  worktree on the *subagent*, never on the session: the parent's row must not
+  move to another card, which is what re-keying on a subagent's cwd used to do.
+  Subagents adopted from the `background_tasks` registry fire no events of their
+  own and so carry no cwd; they stay on the parent's card, as does one whose
+  worktree belongs to no card in this repo (`gatherWorktrees` drops the
+  relocation rather than let the row vanish, and remembers the path so the
+  agent-only refresh does not mistake it for a worktree that just appeared).
 - **Collapsible agent lists** with per-status counts, so a card reads at a glance
   and expands to the individual sessions on demand.
 - **Waiting-agent badge** — every refresh sets a number badge on the view's
@@ -255,8 +273,12 @@ process spawns are expensive, that cache is the difference between hooks being
 free and every tool call paying a visible startup tax. `SessionStart`
 re-resolves from git. Events fired *by* a subagent carry its `agent_id` — and,
 when it runs in an isolated worktree, its own `cwd` — so they always reuse the
-parent's cached worktree; re-resolving would move the parent's row onto the
-subagent's card. For the same reason the transcript tail read that picks
+parent's cached worktree for the *session*; re-resolving would move the parent's
+row onto the subagent's card. That cwd is resolved separately and recorded on
+the subagent instead, which is what puts its row on the card for the worktree it
+was given (see **Subagents follow the worktree they were given** above); it too
+is cached, against the cwd it was resolved for, so a subagent costs one `git`
+spawn rather than one per tool call. For the same reason the transcript tail read that picks
 up Claude's generated session title always runs on the turn-boundary events
 (`UserPromptSubmit`, `Stop`, `Notification`, `SubagentStop`, `SessionStart`)
 but is kept off the `PreToolUse`/`PostToolUse` hot path once a title is known

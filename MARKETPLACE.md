@@ -38,6 +38,13 @@ single view.
   finish, so the panel shows live work, not a running total. A subagent parked
   on a background command is dimmed rather than dropped, and when an agent needs
   you the row tells you which of its subagents is asking.
+- When an agent fans work out across worktrees — one subagent per ticket, each
+  in a worktree of its own so their edits cannot collide — each subagent is
+  listed on the card for the worktree it is actually working in, naming the
+  agent that sent it there. The card for a worktree with no agent of its own
+  still shows what is happening inside it, and the agent driving the fan-out
+  carries a count of everything it has in flight instead of looking idle.
+  Clicking a subagent opens the terminal of the agent running it.
 - Click an agent's skill chip to see which Claude skills it has used.
 - Agents that are no longer running are retired on their own. An agent that dies
   with its terminal (you closed the window, killed the terminal, restarted the

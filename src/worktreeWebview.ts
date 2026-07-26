@@ -168,6 +168,11 @@ export class WorktreeWebviewProvider
   /** Session ids whose state files changed since the last agent refresh, so
    *  that refresh re-reads git only for the worktrees those sessions live in. */
   private readonly pendingSessionIds = new Set<string>();
+  /** Subagent worktrees the last full gather found no card for (a path outside
+   *  this repo). Without this, the agent-only refresh would read one as a
+   *  worktree that had just appeared and force a full gather on every hook
+   *  event the subagent fires. */
+  private unplacedSubagents = new Set<string>();
   /** Monotonic token claimed by every refresh before it reads the session
    *  files; postData only accepts the newest claim. Full and agent-only
    *  refreshes overlap (separate coalescers), and a slow full refresh that
@@ -370,13 +375,14 @@ export class WorktreeWebviewProvider
     const seq = ++this.updateSeq;
     const installed = await hooksInstalled();
     if (installed) await this.sweepDeadAgents();
-    const agents = installed
+    const sessions = installed
       ? await readSessionsByWorktree(this.sessionsDir)
       : undefined;
-    if (agents) {
-      this.syncTerminalNames(agents);
+    if (sessions) {
+      this.syncTerminalNames(sessions.agents);
     }
-    const data = await gatherWorktrees(agents, installed, force);
+    const data = await gatherWorktrees(sessions, installed, force);
+    this.unplacedSubagents = sessions?.unplaced ?? new Set();
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
     data.traceEnabled = vscode.workspace
@@ -473,17 +479,40 @@ export class WorktreeWebviewProvider
     // signal this window gets, so without it a stale row could sit there until
     // the next full refresh.
     await this.sweepDeadAgents();
-    const agents = await readSessionsByWorktree(this.sessionsDir);
-    this.syncTerminalNames(agents);
+    const sessions = await readSessionsByWorktree(this.sessionsDir);
+    this.syncTerminalNames(sessions.agents);
     const known = new Set(data.worktrees.map((wt) => normalize(wt.path)));
-    for (const key of agents.keys()) {
+    // A worktree the cache has never heard of needs a full gather to get a card
+    // at all — whether an agent's session lives there or a subagent was handed
+    // it (an isolated worktree is created the moment the subagent starts).
+    for (const key of sessions.agents.keys()) {
       if (!known.has(key)) return this.refresh();
     }
-    const touched = data.worktrees.filter((wt) =>
-      (agents.get(normalize(wt.path)) ?? []).some((a) =>
-        changed.has(a.sessionId)
-      )
-    );
+    for (const [key, list] of sessions.subagents) {
+      if (known.has(key)) continue;
+      // Already judged card-less by a full gather: leave the rows with their
+      // parent, exactly as that gather did, instead of gathering again.
+      if (this.unplacedSubagents.has(key)) {
+        for (const sub of list) delete sub.worktree;
+        sessions.subagents.delete(key);
+        continue;
+      }
+      return this.refresh();
+    }
+    // A worktree is touched when a session that fired runs there, or when one
+    // of its subagents is working there: the second is how an isolated
+    // worktree's card sees the changes its subagent is making.
+    const touched = data.worktrees.filter((wt) => {
+      const key = normalize(wt.path);
+      return (
+        (sessions.agents.get(key) ?? []).some((a) =>
+          changed.has(a.sessionId)
+        ) ||
+        (sessions.subagents.get(key) ?? []).some((s) =>
+          changed.has(s.parentSessionId)
+        )
+      );
+    });
     const statuses = await mapLimit(touched, 4, (wt) => getStatus(wt.path));
     // An agent that ran `git checkout` (typically back to main once its PR
     // merged) changed more than this cached payload can patch: the card's
@@ -500,7 +529,11 @@ export class WorktreeWebviewProvider
     if (switched) return this.refresh();
     touched.forEach((wt, i) => (wt.git = statuses[i]));
     for (const wt of data.worktrees) {
-      wt.agents = agents.get(normalize(wt.path)) ?? [];
+      const key = normalize(wt.path);
+      wt.agents = sessions.agents.get(key) ?? [];
+      const subs = sessions.subagents.get(key);
+      if (subs && subs.length) wt.subagents = subs;
+      else delete wt.subagents;
     }
     data.activeSessionId = this.activeSessionId();
     this.postData(data, seq);
@@ -1818,19 +1851,33 @@ export class WorktreeWebviewProvider
       ? await unpushedCommitCount(primary, deletableBranch)
       : 0;
 
-    // Every agent whose worktree is this path (or nested under it).
-    const byPath = await readSessionsByWorktree(this.sessionsDir);
+    // Every agent whose worktree is this path (or nested under it), and every
+    // subagent that was handed it to work in. The subagents belong to a session
+    // running elsewhere, so removing this worktree does not stop them — it pulls
+    // the directory out from under them, which is worth saying separately.
+    const inScope = (key: string) =>
+      key === target || key.startsWith(target + path.sep);
+    const sessions = await readSessionsByWorktree(this.sessionsDir);
     const agents: AgentVM[] = [];
-    for (const [key, list] of byPath) {
-      if (key === target || key.startsWith(target + path.sep)) {
-        agents.push(...list);
-      }
+    for (const [key, list] of sessions.agents) {
+      if (inScope(key)) agents.push(...list);
+    }
+    let subagents = 0;
+    for (const [key, list] of sessions.subagents) {
+      if (inScope(key)) subagents += list.length;
     }
 
     const consequences = [`Deletes ${fsPath}`];
     if (agents.length) {
       consequences.push(
         `Stops ${agents.length} running agent${agents.length === 1 ? "" : "s"}`
+      );
+    }
+    if (subagents) {
+      consequences.push(
+        `Breaks ${subagents} subagent${
+          subagents === 1 ? "" : "s"
+        } working in it (owned by a session in another worktree)`
       );
     }
     if (dirty) consequences.push("Discards uncommitted changes");

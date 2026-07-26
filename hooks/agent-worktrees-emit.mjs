@@ -488,6 +488,31 @@ function main() {
     if (asked) asked.awaitingPermission = true;
   }
 
+  // Where this subagent is actually working. An isolated worktree gives it a cwd
+  // of its own, and the panel shows it on THAT worktree's card rather than on the
+  // parent's — a fan-out of seven tickets into seven worktrees reads as seven
+  // busy cards, not as seven rows stacked under one. Only the events a subagent
+  // fires itself carry its cwd, so it is resolved there and carried forward.
+  // Recorded only when it differs from the session's own worktree: absent means
+  // "same as the parent", which is the overwhelmingly common case.
+  //
+  // Off the hot path via the cwd check — a subagent resolves once, on the first
+  // event whose cwd differs from where we last saw it, not on every tool call.
+  // Subagents adopted from the in-flight registry never fire an event of their
+  // own and so carry no cwd; they stay on the parent's card.
+  if (subagentId && cwd) {
+    const self = subagents.find((s) => s.id === subagentId);
+    if (self && self.cwd !== cwd) {
+      self.cwd = cwd;
+      const root =
+        cwd === baseCwd
+          ? top
+          : git(cwd, ["rev-parse", "--show-toplevel"]) || cwd;
+      if (root && root !== top) self.worktree = root;
+      else delete self.worktree;
+    }
+  }
+
   if (inFlight) {
     // Reconcile against Claude Code's own registry. It knows every backgrounded
     // subagent, including ones started before these hooks were installed, and
