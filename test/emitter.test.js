@@ -483,10 +483,72 @@ test("a subagent's own events re-register it and never move its parent's row", (
     s.subagents.map((x) => [x.id, x.type]),
     [["sub-iso", "general-purpose"]]
   );
+  // The parent's card does not move, but the subagent records where it is
+  // actually working so the panel can show it on THAT worktree's card.
+  assert.match(s.subagents[0].worktree, /other-worktree$/);
+  assert.notStrictEqual(s.subagents[0].worktree, home);
 
   // Restarting the session clears them: subagents do not survive the process.
   run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo, source: "resume" });
   assert.strictEqual(stateOf(sid).subagents, undefined);
+});
+
+// The common case: a subagent shares its parent's worktree. Recording a
+// worktree for it would push its row onto a card it is already on, so the field
+// stays absent and the panel keeps listing it under its parent.
+test("a subagent in the parent's own worktree records no worktree of its own", () => {
+  const sid = "session-sub-home";
+  run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo, source: "startup" });
+  run({
+    hook_event_name: "SubagentStart",
+    session_id: sid,
+    cwd: repo,
+    agent_id: "sub-home",
+    agent_type: "Explore",
+  });
+  const s = stateOf(sid);
+  assert.strictEqual(s.subagents.length, 1);
+  assert.strictEqual(s.subagents[0].worktree, undefined);
+});
+
+// A subagent that moves worktrees mid-run (or whose first event arrived before
+// its isolated worktree existed) re-resolves rather than keeping the stale one.
+test("a subagent that changes cwd re-resolves its worktree", () => {
+  const sid = "session-sub-moved";
+  const away = path.join(dir, "away-worktree");
+  fs.mkdirSync(away, { recursive: true });
+  execFileSync("git", ["init", "-b", "main"], { cwd: away, stdio: "ignore" });
+
+  run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo, source: "startup" });
+  // Starts in the parent's worktree ...
+  run({
+    hook_event_name: "SubagentStart",
+    session_id: sid,
+    cwd: repo,
+    agent_id: "sub-moved",
+    agent_type: "nocturne",
+  });
+  assert.strictEqual(stateOf(sid).subagents[0].worktree, undefined);
+
+  // ... then works out of its own.
+  run({
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    cwd: away,
+    agent_id: "sub-moved",
+    tool_name: "Bash",
+  });
+  assert.match(stateOf(sid).subagents[0].worktree, /away-worktree$/);
+
+  // And back: the field is cleared, not left pointing at where it used to be.
+  run({
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    cwd: repo,
+    agent_id: "sub-moved",
+    tool_name: "Bash",
+  });
+  assert.strictEqual(stateOf(sid).subagents[0].worktree, undefined);
 });
 
 test("SubagentStop marks active", () => {

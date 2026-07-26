@@ -96,12 +96,24 @@ function overviewData() {
         agents: [
           {
             sessionId: "s-main-1",
-            label: "Triage flaky CI",
-            summary: "Triage flaky CI",
+            label: "Work the release backlog",
+            summary: "Work the release backlog, one worktree per ticket",
             skills: ["code-review"],
-            status: "idle",
+            // Fanned out: this session gave each subagent a worktree of its own,
+            // so their rows are on those cards and the count is what says the
+            // session is busy.
+            subagents: [
+              {
+                id: "sub-main-1a",
+                type: "nocturne",
+                task: "Cache the settings read",
+                startedAt: ago(9 * MIN),
+                worktree: REPO + "-perf-cache",
+              },
+            ],
+            status: "active",
             startedAt: ago(2 * HOUR),
-            lastActivity: ago(40 * MIN),
+            lastActivity: ago(20 * 1000),
           },
         ],
         pr: null,
@@ -217,6 +229,33 @@ function overviewData() {
           comments: 1,
           mergeState: "behind",
         },
+      },
+      // A worktree with no agent of its own: the session on main handed it to a
+      // subagent, so the card shows that subagent's row (attributed back to the
+      // agent running it) rather than an empty agent list.
+      {
+        path: REPO + "-perf-cache",
+        name: "perf/settings-cache",
+        branch: "perf/settings-cache",
+        isPrimary: false,
+        detached: false,
+        locked: false,
+        inWorkspace: false,
+        git: { dirty: 2, insertions: 34, deletions: 6, ahead: 0, behind: 0 },
+        agents: [],
+        subagents: [
+          {
+            id: "sub-main-1a",
+            type: "nocturne",
+            task: "Cache the settings read",
+            startedAt: ago(9 * MIN),
+            worktree: REPO + "-perf-cache",
+            parentSessionId: "s-main-1",
+            parentLabel: "Work the release backlog",
+            parentStatus: "active",
+          },
+        ],
+        pr: null,
       },
     ],
   };

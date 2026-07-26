@@ -221,55 +221,93 @@
   }
 
   /**
-   * The subagents an agent has in flight, as indented rows under it. Only live
-   * ones are tracked, so this list empties itself — it answers "what is this
-   * agent running", not "what has it run". A paused one has stopped its turn
-   * but is still in flight, parked on a background command that will wake it:
-   * shown, but without the working pulse.
+   * One running subagent as an indented row. Only live ones are tracked, so
+   * these lists empty themselves — a row answers "what is running", not "what
+   * has run". A paused one has stopped its turn but is still in flight, parked
+   * on a background command that will wake it: shown, but without the working
+   * pulse.
+   *
+   * `sessionWaiting` is the status of the session that owns it, and `via` names
+   * that session when the row is on a card the session does not live on. The row
+   * clicks through to the owning session's terminal either way: a subagent has
+   * no terminal of its own, so the thing to talk to is always its parent.
    */
-  function subagentRows(a) {
-    const subs = (a && a.subagents) || [];
+  function subagentRow(s, sessionWaiting, sessionId, via) {
+    const type = s.type || "";
+    const task = s.task || "";
+    const name = task || type || "Subagent";
     // A pending permission decision only means the USER is being asked when the
     // session is waiting: PermissionRequest also fires for calls auto mode or an
     // allowlist settles silently, and Claude Code's "needs you" notification
     // never says which subagent it came from. Pairing the two is what makes the
     // waiting marker trustworthy.
-    const sessionWaiting = statusOf(a) === "waiting";
+    const asking = sessionWaiting && !!s.awaitingPermission;
+    const state = asking
+      ? "waiting for you"
+      : s.paused
+      ? "waiting on background work"
+      : "running";
+    return (
+      '<div class="subagent-row' +
+      (asking ? " asking" : s.paused ? " paused" : "") +
+      '" data-action="focusAgent" data-session="' +
+      esc(sessionId || "") +
+      '" role="button" tabindex="0" data-tip="' +
+      esc(
+        (type ? type + ": " : "") +
+          (task || "subagent") +
+          " — " +
+          state +
+          (via ? ", spawned by " + via : "") +
+          ". Click to reveal " +
+          (via ? "its agent's" : "the agent's") +
+          " terminal."
+      ) +
+      '">' +
+      '<span class="subagent-mark">' +
+      icons.subagent +
+      "</span>" +
+      (task && type
+        ? '<span class="subagent-type">' + esc(type) + "</span>"
+        : "") +
+      '<span class="subagent-label">' +
+      esc(name) +
+      "</span>" +
+      (via ? '<span class="subagent-via">' + esc(via) + "</span>" : "") +
+      '<span class="subagent-age" data-since="' +
+      Number(s.startedAt || 0) +
+      '">' +
+      shortAge(s.startedAt) +
+      "</span>" +
+      "</div>"
+    );
+  }
+
+  /** The subagents working in this agent's own worktree, as rows under it. The
+   *  ones given a worktree of their own are rows on that worktree's card
+   *  instead — the agent row just carries the count of them all. */
+  function subagentRows(a) {
+    const subs = (a && a.subagents) || [];
+    const waiting = statusOf(a) === "waiting";
     return subs
-      .map((s) => {
-        const type = s.type || "";
-        const task = s.task || "";
-        const name = task || type || "Subagent";
-        const age = shortAge(s.startedAt);
-        const asking = sessionWaiting && !!s.awaitingPermission;
-        const state = asking
-          ? "waiting for you"
-          : s.paused
-          ? "waiting on background work"
-          : "running";
-        return (
-          '<div class="subagent-row' +
-          (asking ? " asking" : s.paused ? " paused" : "") +
-          '" data-tip="' +
-          esc((type ? type + ": " : "") + (task || "subagent") + " — " + state) +
-          '">' +
-          '<span class="subagent-mark">' +
-          icons.subagent +
-          "</span>" +
-          (task && type
-            ? '<span class="subagent-type">' + esc(type) + "</span>"
-            : "") +
-          '<span class="subagent-label">' +
-          esc(name) +
-          "</span>" +
-          '<span class="subagent-age" data-since="' +
-          Number(s.startedAt || 0) +
-          '">' +
-          age +
-          "</span>" +
-          "</div>"
-        );
-      })
+      .filter((s) => !s.worktree)
+      .map((s) => subagentRow(s, waiting, a.sessionId))
+      .join("");
+  }
+
+  /** Subagents working in THIS worktree whose agent lives in another one — the
+   *  usual shape of a fan-out, where one session hands each subagent a worktree
+   *  so their edits cannot collide. */
+  function foreignSubagentRows(subs) {
+    return (subs || [])
+      .map((s) =>
+        subagentRow(
+          s,
+          s.parentStatus === "waiting",
+          s.parentSessionId,
+          s.parentLabel || "another agent"
+        )
+      )
       .join("");
   }
 
@@ -288,9 +326,16 @@
   }
   setInterval(tickAges, 1000);
 
-  function agentRows(agents) {
+  function agentRows(agents, foreign) {
+    const away = (foreign || []).length;
     if (!agents || !agents.length) {
-      return '<div class="agents-empty">No agents yet. Use “New Agent” to start one.</div>';
+      // A worktree can be busy without holding an agent of its own: a session
+      // elsewhere handed it to a subagent. The rows say so; the empty line is
+      // only for a worktree where nothing at all is happening.
+      if (!away) {
+        return '<div class="agents-empty">No agents yet. Use “New Agent” to start one.</div>';
+      }
+      return '<div class="agents">' + foreignSubagentRows(foreign) + "</div>";
     }
     return (
       '<div class="agents">' +
@@ -314,8 +359,33 @@
               skills.length +
               "</button>"
             : "";
-          // No subagent chip on the row itself: the live ones are rendered as
-          // rows directly underneath, which says it better than a count.
+          // How many subagents this agent has in flight, wherever they are
+          // working. The ones in this worktree are rows directly underneath, but
+          // a fan-out sends them to worktrees of their own — their rows are on
+          // those cards, and without the count the session driving the whole
+          // thing would look idle.
+          const subs = a.subagents || [];
+          const away = subs.filter((x) => x.worktree).length;
+          const subChip = subs.length
+            ? '<span class="subagent-count" data-tip="' +
+              esc(
+                subs.length +
+                  " subagent" +
+                  (subs.length === 1 ? "" : "s") +
+                  " running" +
+                  (away
+                    ? ", " +
+                      away +
+                      " of them in " +
+                      (away === 1 ? "a worktree" : "worktrees") +
+                      " of their own"
+                    : "")
+              ) +
+              '">' +
+              icons.subagent +
+              subs.length +
+              "</span>"
+            : "";
           return (
             '<div class="agent-row' +
             (s === "waiting" ? " attention" : "") +
@@ -336,6 +406,7 @@
             '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
             icons.terminal +
             "</span>" +
+            subChip +
             skillChip +
             '<span class="row-actions">' +
             '<button class="iconbtn" data-action="stopAgent" data-session="' +
@@ -359,12 +430,15 @@
    * than dimmed, and a single agent shows just its status dot — the "Agents 1"
    * count already says how many there are, so a "1" breakdown adds nothing.
    */
-  function agentsBar(agents, path) {
+  function agentsBar(agents, path, foreign) {
     const counts = { active: 0, waiting: 0, idle: 0 };
-    let subTotal = 0;
+    // Subagents working in THIS worktree: the local agents' own, minus any they
+    // sent to a worktree elsewhere, plus the ones another worktree's agent sent
+    // here. It counts the rows on this card, not who spawned them.
+    let subTotal = (foreign || []).length;
     for (const a of agents) {
       counts[statusOf(a)]++;
-      subTotal += (a.subagents || []).length;
+      subTotal += (a.subagents || []).filter((s) => !s.worktree).length;
     }
 
     // Live subagents across the worktree. The individual ones are rows in the
@@ -683,6 +757,8 @@
     if (wt.locked) badges.push('<span class="badge warn">locked</span>');
 
     const agents = wt.agents || [];
+    // Subagents another worktree's agent is running in this one.
+    const foreign = wt.subagents || [];
 
     const agentBtn =
       '<button class="act agent" data-action="agent" data-path="' +
@@ -758,9 +834,9 @@
       agentBtn +
       "</div>" +
       prLine(wt.pr) +
-      agentsBar(agents, wt.path) +
+      agentsBar(agents, wt.path, foreign) +
       '<div class="card-body">' +
-      agentRows(agents) +
+      agentRows(agents, foreign) +
       "</div>" +
       "</div>"
     );
@@ -2208,9 +2284,10 @@
       toggle(bar.getAttribute("data-toggle"));
       return;
     }
-    // Activate a focused agent row (but not when a child button has focus —
-    // buttons fire their own click on Enter/Space).
-    if (e.target.matches && e.target.matches(".agent-row")) {
+    // Activate a focused agent (or subagent) row — both reveal a terminal, and
+    // a subagent's is its parent's. Not when a child button has focus: buttons
+    // fire their own click on Enter/Space.
+    if (e.target.matches && e.target.matches(".agent-row, .subagent-row")) {
       e.preventDefault();
       send("focusAgent", {
         sessionId: e.target.getAttribute("data-session") || undefined,
