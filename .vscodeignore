@@ -8,6 +8,7 @@ test/**
 out/test/**
 screenshots/**
 images/**
+docs/**
 playwright.config.js
 playwright-report/**
 test-results/**

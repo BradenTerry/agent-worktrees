@@ -5,13 +5,11 @@ across the git worktrees of a repository. Spin up a Claude session in any
 worktree, watch each one go **active**, **waiting**, or **idle** at a glance, and
 manage the worktrees themselves without leaving the panel.
 
-## Why
-
 Worktrees are the natural unit for running several agents in parallel: each gets
-an isolated checkout, so they never step on each other's files. But coordinating
-them means juggling terminals and `git worktree` commands by hand, with no single
-place to see which agent needs you. This panel puts every worktree, its git
-state, and its running agents in one view.
+an isolated checkout, so they never step on each other's files. Coordinating them
+by hand means juggling terminals and `git worktree` commands with no single place
+to see which agent needs you. This panel puts every worktree, its git state, and
+its running agents in one view.
 
 ## Screenshots
 
@@ -23,204 +21,61 @@ state, and its running agents in one view.
 
 ## Features
 
-- **Worktrees panel** (webview) listing every worktree (primary + linked), with
-  branch name and badges for `Primary` / `detached` / `locked`.
-- **Per-worktree git status** — a clean/changed count, `+`/`−` line totals, and
-  the ahead/behind distance from the upstream branch, refreshed as files change.
-  A per-card **refresh** button re-reads that one worktree's git status (and its
-  PR/CI when the GitHub integration is on) on demand, without a `git fetch`.
-- **GitHub PR status** — when a stored token resolves a PR for the branch, the
-  card shows the PR title (wrapping when long), then its lifecycle state, CI
-  check rollup, review decision and comment counts (polled from the REST API in
-  `src/github.ts` / `src/prs.ts`). Two
-  merge-readiness pills sit beside the state badge: `Out of date` when GitHub's
-  `mergeable_state` is `behind` ("This branch is out-of-date with the base
-  branch"), and `Auto-merge` when auto-merge is enabled on the PR.
-- **Agent** — start one or more Claude CLI sessions in a worktree, each in its
-  own terminal. Sessions can be revealed (focus) or stopped from the panel, and
-  closing a terminal removes its row. The agent whose terminal is currently
-  active is highlighted (blue outline + terminal glyph on its row, and a marker
-  on its worktree's Agents bar for collapsed cards), driven by
-  `onDidChangeActiveTerminal` as a lightweight class toggle — no re-render, no
-  git spawns. The terminal's tab title is left to Claude Code (see
-  [Terminal tab titles](#terminal-tab-titles)).
-- **Agent & Worktree** — create a new worktree with Claude (`claude -w`) and
-  start an agent in it in a single step.
-- **Open in new window** — open any worktree in its own VS Code window from the
-  card header. If a window for that worktree is already open, VS Code focuses it
-  instead of duplicating (the focus behavior uses the `code` CLI when it is on
-  `PATH`; otherwise a fresh window is always opened).
-- **Change branch** — an edit button beside the branch name opens a quick pick of
-  the branches that can be checked out in that worktree (every local/remote branch
-  except the one already there and any held by another worktree, since git allows a
-  branch in only one worktree at a time), plus a **Create new branch** entry that
-  prompts for a name and branches off the worktree's current HEAD. The switch runs
-  `git switch` in that worktree only (`git switch -c` when creating), so the other
-  worktrees stay put; git's own error (a checkout conflict, say) is surfaced
-  verbatim.
-- **Delete Worktree** — `git worktree remove` behind a single confirmation. The
-  modal gathers everything upfront — agents that will be stopped, uncommitted
-  changes that will be discarded, the branch left behind and its unpushed commit
-  count — and offers **Remove** or **Remove and Delete Branch** (never the
-  default branch). Because the consequences were disclosed, no follow-up prompts:
-  a dirty or locked worktree is force-removed (passing `--force` twice, as git
-  requires for locked trees), and the branch delete forces past "not fully
-  merged" when the unpushed commits were already shown. The only second prompt
-  is the rare case where git refuses a delete the modal claimed was loss-free.
-- **Stale lock cleanup** — `claude -w` locks the worktree it creates for the
-  lifetime of the session ("claude session ... (pid ... start ...)"), and a
-  crashed or killed session leaves that lock behind: a `locked` badge with no
-  agents, and a worktree `git worktree remove` refuses to delete. On refresh
-  (and before a delete) the panel unlocks any worktree whose lock reason names
-  a claude pid that is no longer running. Locks with any other reason, or with
-  a live pid, are never touched.
-- **Linked files** — a per-repo list (**Settings → Linked Files**) of
-  repo-relative paths that are symlinked into every worktree the panel creates.
-  `git worktree add` only checks out tracked content, so gitignored local config
-  a build or integration test needs (an `appsettings.*.json`, a `.env`, a certs
-  directory) is missing in a fresh worktree; the link points back at the primary
-  worktree's copy so all worktrees share one source of truth. Paths are added
-  three ways: **Add from .gitignore** lists everything git ignores in a
-  multi-select quick pick (the files this feature exists for are gitignored
-  almost by definition, which is precisely why the worktree lacks them), a folder
-  button opens VS Code's native open dialog (`showOpenDialog`, rooted at the
-  repo, multi-select), or the path is typed. A selection outside the repository
-  is rejected, since a link is only meaningful as a repo-relative path. The
-  ignore list comes from `git ls-files --others --ignored --exclude-standard
-  --directory --no-empty-directory` (`listIgnoredPaths`): `--directory`
-  collapses a wholly-ignored tree into one entry, so `node_modules` is a single
-  row rather than tens of thousands, and `-z` keeps odd filenames parseable.
-  Already-linked paths, git's own `.git`, and the panel's `.claude/worktrees`
-  storage are filtered out (linking a worktree into a worktree would recurse);
-  the list is capped at 2000 entries with the cap stated in the picker title
-  rather than silently truncated. The list lives in
-  the extension's `globalState` keyed by repo root (not in the repo's
-  `.vscode/settings.json`), so each repository keeps its own. Linking runs after
-  both creation paths (**New Worktree** and the branches view's **Create
-  worktree & start agent**), and a **Link existing worktrees** button applies the
-  whole list to worktrees that already exist. `src/links.ts` holds the
-  filesystem logic, VS Code-free and unit-tested: it never replaces a real file,
-  re-points only a link of its own, skips paths absent from the primary worktree
-  or resolving outside the repo, and reports every failure per path without ever
-  aborting the worktree creation. Removing a path from the list unlinks it again,
-  but only where the target is provably ours — a real file, or a link the user
-  pointed elsewhere, is left untouched (and unlinking never affects the data
-  pointed at).
+**Worktrees**
 
-  **Windows.** Creating a *file* symlink on Windows needs Developer Mode or an
-  elevated process, which most users have neither of, so a plain `symlink()`
-  would hand them `EPERM` and nothing else. Two fallbacks keep the feature
-  working unelevated: a directory uses a **junction**, and a file falls back to a
-  **hard link** — neither needs a privilege. A hard link is a second directory
-  entry for the same data, so reads and in-place writes are shared exactly like a
-  symlink, with two limits: both entries must be on one volume (always true here,
-  since worktrees are nested inside the repo), and an editor that saves by
-  writing a temp file and renaming over the original replaces the entry rather
-  than the data, breaking the pairing. Symlinks are therefore always preferred
-  and the hard link is only a fallback (`LinkOutcome.method` records which was
-  used). Three Windows-specific traps are handled explicitly: `readlink` reports
-  a junction as an extended-length path (`\\?\C:\…`), which a naive compare reads
-  as a different target and rebuilds the link on every refresh; a directory
-  junction must be removed with `rmdir`, not `unlink`; and path comparison must
-  be case-insensitive. A hard link is invisible to `lstat`, so it is recognized
-  by device + inode identity instead.
-- **Skills used** — each agent row shows a chip with the count of Claude skills
-  it has invoked; click it for the full list.
-- **Live subagents** — the subagents an agent has in flight *right now* appear
-  as indented rows under it, labelled with the agent type and the `Agent` tool's
-  `description`, plus how long each has been going. `SubagentStart` registers
-  one; `SubagentStop` does *not* retire it, because a stop is not an end — an
-  async subagent that hands work to a background command stops its turn, stays
-  resumable, and is woken when the command lands (Claude Code's own notification
-  says as much: it "fires each time this agent stops with no live background
-  children of its own … the same task-id may notify more than once"). Retiring
-  on the stop made a subagent vanish the moment it backgrounded anything. The
-  authority is instead Claude Code's in-flight registry, stamped on every `Stop`
-  / `SubagentStop` payload as `background_tasks` ("running/pending +
-  backgrounded"): a stop only marks the subagent **paused** (listed, with the
-  working pulse off), and the next registry snapshot — from that same payload,
-  or the parent's next turn end — decides whether it is gone. Once a subagent
-  has appeared in the registry, the registry alone retires it: stopping an agent
-  from Claude Code's own agent manager fires no hook (its turn never ends), so a
-  killed one would otherwise sit in the panel forever. That registry also adopts
-  subagents this extension never saw start, e.g. hooks installed while one was
-  already running. Only `Stop` and `SubagentStop` carry it, so a kill shows up
-  at the next turn end rather than instantly. `SubagentStart` only knows the agent *type*, so the
-  description is parked by the `Agent` tool's `PreToolUse` (the tool was named
-  `Task` before Claude Code 2.1.63; both names count) and claimed by the next
-  start of that type; an unclaimed one expires rather than mislabelling a later
-  subagent. Registry entries carry both fields and need no pairing. A subagent
-  row also marks **which one is waiting on you**: Claude Code's `Notification`
-  is the only trustworthy "needs you" signal but is built without the agent
-  context, so it never says which subagent raised it, while `PermissionRequest`
-  names the asker but fires for silently-allowed calls too. Neither is enough
-  alone, so the panel pairs them — the subagent with an outstanding permission
-  decision is drawn in the waiting yellow only while the session itself is in
-  the waiting state. Elapsed
-  times tick in the webview itself: the extension only re-posts when the payload
-  changes, and a subagent quietly working changes nothing else, so a rendered
-  age would otherwise freeze. The Agents bar carries the worktree-wide count so
-  they stay visible when the list is collapsed. Clicking a subagent row reveals
-  its **parent's** terminal — a subagent has no terminal of its own, so its
-  session is the thing to talk to.
-- **Subagents follow the worktree they were given** — a fan-out (one subagent
-  per ticket, each in its own worktree so concurrent edits cannot collide) puts
-  each subagent's row on the card for the worktree it is actually touching, not
-  under the session that spawned them. Only the events a subagent fires itself
-  carry its `cwd`, so the emitter resolves it there (once, cached against that
-  cwd, so `PreToolUse` does not pay for a `git` spawn on every tool call) and
-  records it on the subagent when it differs from the session's own worktree.
-  The parent's row keeps a count chip of everything it has in flight — without
-  it, the session driving a fan-out would look idle. Note the emitter records the
-  worktree on the *subagent*, never on the session: the parent's row must not
-  move to another card, which is what re-keying on a subagent's cwd used to do.
-  Subagents adopted from the `background_tasks` registry fire no events of their
-  own and so carry no cwd; they stay on the parent's card, as does one whose
-  worktree belongs to no card in this repo (`gatherWorktrees` drops the
-  relocation rather than let the row vanish, and remembers the path so the
-  agent-only refresh does not mistake it for a worktree that just appeared).
-- **Collapsible agent lists** with per-status counts, so a card reads at a glance
-  and expands to the individual sessions on demand.
-- **Waiting-agent badge** — every refresh sets a number badge on the view's
-  Activity Bar icon (`WebviewView.badge`) with the count of agents in the
-  **waiting** state, so a blocked agent surfaces while the panel is hidden.
-  Webview views resolve lazily, so the badge appears once the panel has been
-  opened in the window.
-- **Branches view** — a toolbar button opens a dedicated editor tab listing every
-  branch (local plus remote-only `origin/*`). Each row shows whether a worktree
-  already exists, ahead/behind vs the branch's base, a
-  **Delete Local** action (any local branch; it removes the local ref only and
-  never touches the remote), and — for branches without a worktree — a **Create
-  worktree & start
-  agent** action that creates the worktree in the current window and launches a
-  Claude agent. A header **Fetch** button with a **Prune** toggle pulls from the
-  remote to refresh local branch state (git only), and a **Delete gone** button
-  bulk-deletes every local branch whose upstream is gone (merged or deleted on
-  the remote). The view is **git-first**: each row carries a "last updated" line
-  (the tip commit's committer date as a relative time, and who made it), and the
-  client-side controls are an **Updated by** user filter (the committers of the
-  listed branches), a **Location** multi-select (local only / local + remote /
-  remote only) and a **Sort** by most/least recently updated or name — all
-  derived from git, so they work with or without a token. When a GitHub token is
-  stored, PR/CI status is refreshed automatically when the tab opens (the
-  **Fetch Open PRs** button spins until it lands) and can be re-polled on demand
-  from that button, decoupled from the git fetch, which stays manual; a **PR
-  Status** single-select then appears that narrows the list by PR state — **All**
-  (no filter), **Open**, or **Draft** — alongside a **Reviewer** single-select
-  that narrows to branches whose PR has a review requested from one or more
-  person (**All** or **Review requested**). A **Clear Filters** button resets the
-  author, Location, PR Status and Reviewer filters (enabled only while one is
-  active). A branch's
-  **open** (or draft) PR rollup is shown when one exists, as a hint on the branch
-  row — a dedicated PR view may come later.
+- Every worktree (primary + linked) as a card, with `Primary` / `detached` /
+  `locked` badges and a per-card refresh that re-reads just that worktree.
+- Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
+  upstream. Recomputed on discrete signals, never a workspace-wide file watcher
+  (see [Refresh coalescing](docs/refresh-coalescing.md)).
+- **New Worktree**, **Open in new window** (focuses an existing window via the
+  `code` CLI when it is on `PATH`), and **Change branch** via a quick pick of the
+  branches free to check out, plus a create-new-branch entry. The switch runs
+  `git switch` in that worktree only.
+- **Delete Worktree** behind one modal that discloses everything upfront: agents
+  to be stopped, uncommitted changes to be discarded, the branch left behind and
+  its unpushed commits. Offers **Remove** or **Remove and Delete Branch**, then
+  needs no follow-up prompts.
+- **Stale lock cleanup** for the locks `claude -w` leaves behind when a session
+  crashes. Only locks naming a claude pid that is no longer running are cleared.
+- **[Linked files](docs/linked-files.md)** symlinked into every worktree the panel
+  creates, so gitignored local config (`.env`, `appsettings.*.json`, certs) is not
+  missing from a fresh checkout. Windows falls back to junctions and hard links so
+  it works unelevated.
 
-## Agent status from hooks
+**Agents**
 
-The panel cannot tell on its own whether a Claude session is working, waiting on
-you, or idle. Claude Code's [hooks](https://docs.claude.com/en/docs/claude-code/hooks)
-fire exactly on those transitions, so the extension installs one small emitter
-script wired to a handful of events. The events map to a status shown in the
-panel:
+- Start one or more Claude CLI sessions per worktree, each in its own terminal;
+  reveal or stop them from the panel. The active terminal's agent is highlighted
+  by a class toggle, with no re-render and no git spawns. Titles are left to
+  Claude Code on purpose (see [Terminal tab titles](docs/terminal-titles.md)).
+- **Agent & Worktree** creates a worktree with `claude -w` and starts an agent in
+  it in one step.
+- Status per agent, derived from Claude Code hooks (see
+  [Agent status](docs/agent-status.md)). Collapsible lists with per-status counts,
+  and a number badge on the Activity Bar icon counting **waiting** agents, so a
+  blocked agent surfaces while the panel is hidden.
+- **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
+  type, description and elapsed time, land on the card for the worktree they were
+  actually given, and mark which one is waiting on you.
+- A chip per agent counting the Claude skills it has invoked; click for the list.
+
+**GitHub and branches**
+
+- **PR status** on a card when a stored token resolves a PR for the branch: title,
+  lifecycle state, CI rollup, review decision, comment counts, plus `Out of date`
+  and `Auto-merge` pills (`src/github.ts`, `src/prs.ts`).
+- **[Branches view](docs/branches-view.md)** in a dedicated editor tab: every local
+  and remote-only branch with worktree association, ahead/behind, last-updated,
+  git-based filters and sort, optional PR status, **Create worktree & start
+  agent**, **Delete Local**, **Fetch** with **Prune**, and bulk **Delete gone**.
+
+## Agent status
+
+The panel cannot tell on its own whether a session is working, waiting on you, or
+idle, so the extension installs one small emitter script
+(`hooks/agent-worktrees-emit.mjs`) on Claude Code's
+[hooks](https://docs.claude.com/en/docs/claude-code/hooks):
 
 | Hook                                                                              | Status             |
 | --------------------------------------------------------------------------------- | ------------------ |
@@ -230,140 +85,54 @@ panel:
 | `PermissionRequest`                                                               | unchanged          |
 | `SessionEnd`                                                                      | removed from panel |
 
-`SubagentStart` and `SubagentStop` do double duty: besides the status, they open
-and pause the subagent rows under the agent, which the `background_tasks`
-registry on `Stop`/`SubagentStop` then reconciles (see **Live subagents**
-above). `PermissionRequest` is installed purely to name the subagent behind a
-prompt and deliberately leaves the status alone — it runs in the permission
-decision path, ahead of any prompt, and fires for calls an allowlist or auto
-mode settles silently, so reporting a status from it would clear a genuine
-waiting state (and the Activity Bar badge) while the user was still answering.
+Each event writes one small state file per session into the extension's global
+storage, atomically, which a `FileSystemWatcher` picks up. **Nothing is sent over
+the network**, and nothing of the extension's lives in your `~/.claude` tree apart
+from the hook entries in `settings.json`. Installing the hooks edits your global
+`~/.claude/settings.json`, so it is always gated behind explicit consent in the
+panel. Sessions whose Claude process is gone are retired by a liveness sweep that
+requires positive evidence of death, never merely the absence of evidence of life.
 
-`Notification` is not always "waiting": the emitter reads the payload's
-`notification_type`. `agent_completed` (a background subagent finished; the
-parent is about to pick the result up) keeps the agent **active**.
-`idle_prompt` — fired ~60s after any turn ends with no user input — is not a
-"needs you" signal at all: it also fires when a session simply finished and is
-sitting idle, which used to flag every done agent as waiting and pin a
-permanent count on the Activity Bar badge. It now keeps the agent **active**
-while background subagents are still running, and otherwise preserves the
-prior state (an unanswered permission prompt stays waiting, a finished turn
-stays idle). The pending count comes from the transcript's latest
-`turn_duration` record (`pendingBackgroundAgentCount`), which Claude Code
-appends at every turn end — after the `Stop` hook has already run, so only
-`Notification` (which fires much later) trusts it. All other notification
-types — permission prompts, a subagent needing input, or an older Claude Code
-that sends no type — mark **waiting** as before.
+Details, including the `Notification` type handling, the worktree/branch caching
+that keeps `PreToolUse` cheap, and the sweep's decision tree:
+[docs/agent-status.md](docs/agent-status.md).
 
-Installing the hooks edits your global `~/.claude/settings.json`, so it is always
-gated behind **explicit consent** in the panel — nothing is written until you
-accept. On accept, the bundled `hooks/agent-worktrees-emit.mjs` is copied into
-the extension's global storage and wired into settings (the command passes the
-state directory to the emitter via `--dir`, since that separate process can't
-read the extension's context).
-
-Each hook event runs the emitter, which derives the session's worktree from git
-and writes one small state file per session into the extension's **global
-storage** (atomically, via tmp + rename, so the watcher never reads a
-half-written file). The worktree/branch resolution is cached in that state file
-keyed by the session's `cwd`: `PreToolUse` fires on every tool call and Claude
-Code blocks the tool until the hook exits, so follow-up events reuse the cached
-value instead of spawning `git rev-parse` twice per event — on Windows, where
-process spawns are expensive, that cache is the difference between hooks being
-free and every tool call paying a visible startup tax. `SessionStart`
-re-resolves from git. Events fired *by* a subagent carry its `agent_id` — and,
-when it runs in an isolated worktree, its own `cwd` — so they always reuse the
-parent's cached worktree for the *session*; re-resolving would move the parent's
-row onto the subagent's card. That cwd is resolved separately and recorded on
-the subagent instead, which is what puts its row on the card for the worktree it
-was given (see **Subagents follow the worktree they were given** above); it too
-is cached, against the cwd it was resolved for, so a subagent costs one `git`
-spawn rather than one per tool call. For the same reason the transcript tail read that picks
-up Claude's generated session title always runs on the turn-boundary events
-(`UserPromptSubmit`, `Stop`, `Notification`, `SubagentStop`, `SessionStart`)
-but is kept off the `PreToolUse`/`PostToolUse` hot path once a title is known
-(the prior title is carried forward). While the session has no title yet —
-the first title lands mid-turn, a few seconds after the first prompt — tool
-events do read the tail, throttled to once per 5 seconds, so a busy new
-session picks its summary up without paying the read on every tool call. When the extension launched the agent it passes `claude
---session-id <uuid>` and stamps that same uuid into the terminal env as
-`AGENT_WORKTREES_SID`; the emitter (a child of the Claude process) inherits it
-and keys the state file by it rather than by Claude's live `session_id`. That id
-is stable across `/resume` (Claude's own `session_id` changes, but the launch id
-in the terminal env and the process argv does not), so the panel row, its
-terminal handle, and `pkill -f <id>` stay linked after a resume instead of
-orphaning the row. Sessions not launched by the extension fall back to the live
-`session_id`. The files land in `<globalStorage>/sessions/` (e.g.
-`~/Library/Application Support/Code/User/globalStorage/bradenterry.agent-worktrees/`
-on macOS). The extension watches that directory and groups the sessions by
-worktree. **Nothing is sent over the network** — status flows entirely through
-local files, and nothing of the extension's lives in your `~/.claude` tree apart
-from the hook entries in `settings.json`. Status reporting needs `node` on
-`PATH`.
-
-### Retiring agents that are no longer running
-
-`SessionEnd` deletes a session's state file, so a session that exits cleanly
-takes its row with it. Nothing fires when a session dies *with* its terminal —
-the window was closed, the terminal killed, the machine restarted — so the file
-survives in the shared state dir with whatever status it last had. Since the dir
-is global, the next window to open renders those sessions as live agents that
-have no process and no terminal behind them (often mid-work, with a spinner and
-an Activity Bar badge).
-
-The emitter therefore stamps two liveness markers into every state file, and the
-panel sweeps the dir with them before each refresh (throttled to once every 30s,
-and again on a self-armed timer when a file is younger than the grace period, so
-a window reopened seconds after the previous one closed still clears):
-
-- `pid` — Claude Code runs a hook command as a **direct child** of the session
-  process, so the emitter's parent *is* the agent. Checked with `kill(pid, 0)`:
-  no spawn, and exact modulo pid reuse. Re-stamped on every event, so a session
-  resumed into another process records the pid actually running it; never from a
-  subagent-fired event, whose parent may be shorter-lived than the session.
-- `launched` — set when the id came from `AGENT_WORKTREES_SID`, i.e. the
-  extension started this agent and passed the id on Claude's own argv. Such a
-  session can be found by scanning the running processes' command lines for
-  `--session-id <id>` (`ps -Ao args=`; PowerShell's CIM query on Windows, the
-  same mechanism the Windows stop path uses).
+## Architecture
 
 ```mermaid
-flowchart TD
-  A[session state file] --> B{"last event<br/>< 60s ago?"}
-  B -->|yes| K["keep<br/>(arm a recheck)"]
-  B -->|no| C{"pid alive?"}
-  C -->|yes| K2[keep: its process is there]
-  C -->|no / no pid| D{"launched by<br/>the extension?"}
-  D -->|yes| E{"--session-id id<br/>in a live command line?"}
-  E -->|yes| K3["keep: resumed into<br/>another process"]
-  E -->|"no (scan ran)"| X[delete the state file]
-  E -->|"scan failed"| K4[keep: no evidence]
-  D -->|no| F{"pid recorded,<br/>and trusted here?"}
-  F -->|yes| X
-  F -->|no| K5["keep: 24h backstop<br/>decides"]
+flowchart LR
+    G["git worktree list / status<br/>--porcelain"] --> P[WorktreeWebviewProvider]
+    P --> V[Worktrees panel webview]
+    V -->|Agent| T["createTerminal({ cwd })<br/>claude --session-id"]
+    V -->|Agent & Worktree| TW["createTerminal<br/>claude --session-id -w"]
+    V -->|New / Delete| WT["git worktree add / remove"]
+    H["Claude Code hooks<br/>(~/.claude/settings.json)"] --> E["agent-worktrees-emit.mjs<br/>--dir &lt;globalStorage&gt;/sessions"]
+    E -->|per-session state file| S["extension global storage<br/>&lt;globalStorage&gt;/sessions"]
+    S -->|FileSystemWatcher| P
+    S -->|"liveness sweep:<br/>kill(pid, 0) + argv scan"| L["retire sessions whose<br/>Claude process is gone"]
+    L --> P
+    T --> H
+    TW --> H
 ```
 
-Pruning always requires **positive evidence of death**, never merely the absence
-of evidence of life, because a wrong prune hides a live agent. Two consequences:
-a file written by an emitter too old to record either marker is left to the 24h
-backstop, and a dead pid is not proof on **Windows**, where a hook run through a
-short-lived shell wrapper would make the recorded parent exit immediately and
-look exactly like a dead agent (a *live* pid is trusted everywhere — it can only
-make the sweep more conservative). Windows keeps the argv check, which covers
-every session the extension launched. A wrong prune also self-heals: the state
-file is rewritten by the session's very next hook event, so a live agent that was
-pruned reappears the moment it does anything.
+The panel UI is a webview with no framework: `media/panel.js` renders all markup,
+`media/panel.css` styles it from `--vscode-*` theme tokens. `src/` is the
+extension host: git (`git.ts`), GitHub polling (`github.ts`, `prs.ts`), the
+webview provider (`worktreeWebview.ts`), coalescing (`scheduler.ts`), symlinks
+(`links.ts`), liveness (`liveness.ts`).
 
-Status reporting is best-effort by design. Claude Code surfaces any nonzero
-hook exit — or any stderr output at all — as a
-`hook error ... failed with non-blocking status code` warning in the session,
-and wired to `PreToolUse` that would mean a warning per tool call. So the
-emitter swallows every failure and always exits 0 silently: a state write that
-can't land (deleted global storage, a synced `settings.json` whose `--dir`
-path doesn't exist on this machine, a read-only disk) degrades to a missed
-status update, never a visible error. The hook command also runs
-`node --no-warnings` so node's own startup warnings (deprecation/experimental,
-varying by node version) can't hit stderr before the emitter gets control.
+## Design notes
+
+The rationale behind the parts that are easy to get wrong twice:
+
+| Doc | Covers |
+| --- | --- |
+| [Agent status from hooks](docs/agent-status.md) | The hook wiring, the emitter, and retiring dead sessions |
+| [Subagents](docs/subagents.md) | What registers and retires a subagent row, and which card it lands on |
+| [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the agent-only path, why there is no `**/*` watcher |
+| [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |
+| [Terminal tab titles](docs/terminal-titles.md) | Why the extension does not pass `name` to `createTerminal` |
+| [Linked files](docs/linked-files.md) | The symlink list and the Windows junction/hard-link fallbacks |
 
 ## Requirements
 
@@ -385,452 +154,41 @@ that is a git repository (with worktrees) to populate the panel.
 ### Tests
 
 Two layers, both run on the `ubuntu`/`macos`/`windows` CI matrix
-(`.github/workflows/ci.yml`):
+(`.github/workflows/ci.yml`, which is `pull_request`-only, so land every change
+through a PR):
 
 ```bash
-npm test              # fast: node --test over test/**/*.test.js (pure git/util logic)
+npm test                   # fast: node --test over test/**/*.test.js (pure git/util logic)
 npm run test:integration   # real VS Code extension host (@vscode/test-electron)
 ```
 
 `npm test` exercises the pure logic against the real `git` CLI and never needs
 VS Code. `npm run test:integration` downloads a real VS Code, launches the
 extension host, and runs `src/test/integration/**` (compiled to `out/test/`) with
-the `vscode` API available — this is what gives **real Windows coverage** of the
+the `vscode` API available. That is what gives **real Windows coverage** of the
 parts the unit suite can't reach (activation, commands, the built-in Git
 extension API), which is where the Windows-only panel failures lived. On a
 headless Linux box it needs a display (`xvfb-run -a npm run test:integration`).
 
-## Architecture
-
-```mermaid
-flowchart LR
-    G["git worktree list / status<br/>--porcelain"] --> P[WorktreeWebviewProvider]
-    P --> V[Worktrees panel webview]
-    V -->|Agent| T["createTerminal({ cwd })<br/>claude --session-id"]
-    V -->|Agent & Worktree| TW["createTerminal<br/>claude --session-id -w"]
-    V -->|New / Delete| WT["git worktree add / remove"]
-    H["Claude Code hooks<br/>(~/.claude/settings.json)"] --> E["agent-worktrees-emit.mjs<br/>--dir &lt;globalStorage&gt;/sessions"]
-    E -->|per-session state file| S["extension global storage<br/>&lt;globalStorage&gt;/sessions"]
-    S -->|FileSystemWatcher| P
-    S -->|"liveness sweep:<br/>kill(pid, 0) + argv scan"| L["retire sessions whose<br/>Claude process is gone"]
-    L --> P
-    T --> H
-    TW --> H
-```
-
-### Terminal tab titles
-
-Agent terminals are titled by Claude Code, not by the extension, and the way to
-arrange that is to **not** pass `name` to `createTerminal`.
-
-VS Code treats an extension-supplied `name` as a static API title, and the
-`TitleEventSource.Api` branch disposes the xterm listener that would otherwise
-apply OSC title escape sequences — permanently, since nothing re-registers it.
-Claude Code emits exactly such a sequence, continuously, carrying the same
-generated topic the panel row shows; and since VS Code 1.117 the label computer
-recognises an agent CLI from that sequence (`/claude\s*code/i`) and swaps the
-tab title template to `${sequence}` on its own, gated on
-`terminal.integrated.tabs.allowAgentCliTitle` (default `true`). So naming the
-terminal is precisely what used to suppress the free, always-current title.
-
-There is no API that renames a terminal in the background: `Terminal.name` is
-read-only, `workbench.action.terminal.renameWithArg` is registered as an
-active-instance action, and `workbench.action.terminal.rename` opens a quick
-pick. Renaming therefore meant revealing the terminal first, which is what made
-a background agent steal the terminal tab you were reading whenever it produced
-a new title. Leaving the title to Claude removes the reveal entirely and works
-for terminals that are not visible at all.
-
-```mermaid
-flowchart TD
-    A["agent launch"] --> B{"VS Code >= 1.117<br/>and allowAgentCliTitle?"}
-    B -->|yes| C["createTerminal({ cwd })<br/>no name"]
-    C --> D["OSC title listener stays live"]
-    D --> E["Claude Code's own title<br/>drives the tab, background included"]
-    B -->|no| F["createTerminal({ name: 'Claude · &lt;worktree&gt;' })"]
-    F --> G["syncTerminalNames queues the summary"]
-    G --> H{"is that terminal<br/>the active one?"}
-    H -->|yes| I["renameWithArg — no reveal needed"]
-    H -->|no| J["stay queued until the user<br/>switches back to it"]
-```
-
-The fallback path never reveals a terminal either: a queued rename is applied
-only when its terminal is already `vscode.window.activeTerminal`, in which case
-the command needs no `show()` and cannot disturb the tab selection or pop open a
-hidden panel. A terminal the user never returns to keeps its launch name; its
-panel row still shows the summary.
-
-### Refresh coalescing
-
-The panel refreshes on a few discrete signals: extension load, the manual Refresh
-button, the session-state `FileSystemWatcher` (one event per Claude hook firing,
-which also surfaces an agent creating a new worktree), window focus, and
-source-control scope changes. A full refresh spawns `git status` for every
-worktree (plus a `git diff --numstat HEAD` only for worktrees with tracked
-changes — a clean worktree skips it, halving its per-worktree spawns), so
-reacting to every raw event would peg the CPU - and noticeably worse on Windows,
-where every process spawn is far more expensive than on macOS.
-
-The session-state watcher — by far the most frequent trigger while an agent
-works — does **not** run the full gather. A hook firing means agent state
-changed and files may have changed in that agent's worktree, but not in the
-others, so `refreshAgents` re-reads the session files, swaps the agent VMs into
-the last gathered payload, and re-runs `git status` only for the worktrees
-whose sessions actually fired (the watcher records each changed file's session
-id). It falls back to a full refresh when a session appears in a worktree the
-cached payload does not know (an agent just created one with `claude -w`), and
-when one of those `git status` calls reports a branch other than the one the
-cached payload carries, which is an agent having run `git checkout` (typically
-back to the default branch once its PR merged). A branch change invalidates more
-than the patched fields: the card's branch name, and the PR the PR service is
-targeting, both of which only the full gather can re-derive. The branch comes
-free with the status call, since `git status --porcelain=v2 --branch` already
-prints a `# branch.head` header, so the check costs no extra process. The
-posted-payload dedupe also strips the `lastActivity` heartbeat (bumped by every
-hook event, never rendered) from its signature, so an agent streaming tool
-calls no longer re-posts — and full-DOM-rebuilds — a byte-identical panel.
-
-Because the full and agent-only refreshes run on separate coalescers they can
-overlap, and a slow full refresh reads its session snapshot before the git work
-that delays it — so it could land *after* a faster agent-only update and
-overwrite newer agent state (this is what once left the Activity Bar badge
-showing a waiting agent that had already gone active). Every refresh therefore
-claims a monotonic token before reading session state, and only the newest
-claim is allowed to post (the sidebar counterpart of the branches view's
-`branchPostSeq` guard). A hidden sidebar still runs the git gather — the
-Activity Bar badge needs it — but skips the PR/token/remote work until
-re-shown. The per-worktree statuses run at most
-4 at a time (`mapLimit`) so a many-worktree repo never fires an unbounded spawn
-burst, and a refresh only re-reads the Branches tab while that tab is actually
-visible — hidden behind another editor it skips the (git-heavy) branch listing
-and catches up when revealed.
-
-Deliberately absent is a workspace-wide `**/*` file watcher. Refreshing on every
-saved file is overkill, and because our own `git status` opportunistically
-rewrites `.git/index`, watching the tree fed git's writes straight back into
-another refresh — a perpetual loop that respawned git for every worktree several
-times a second even while idle. The git line is recomputed on the discrete
-signals above instead; read-only git also runs with `GIT_OPTIONAL_LOCKS=0` so it
-never churns the user's index.
-
-These signals funnel through a `Coalescer` (`src/scheduler.ts`): a trailing
-debounce (`REFRESH_DEBOUNCE_MS`, 500ms) that collapses a burst into one refresh,
-with a `maxDelay` cap so a *continuous* stream (a build writing files, an agent
-streaming tool events) still flushes at a bounded rate instead of starving, and
-in-flight coalescing so an async refresh never overlaps itself - triggers that
-arrive mid-refresh fold into a single follow-up. The session-state watcher pokes
-a second `Coalescer` that nudges the (independently throttled) PR poller, so an
-active agent's hook stream doesn't hit the GitHub API per event. The clock is
-injectable, so the coalescing guarantees are unit-tested with virtual time in
-`test/scheduler.test.js`.
-
-### Branches view
-
-The **Branches** toolbar button posts an `openBranches` message to the webview
-provider, which opens (or reveals, if already open) a dedicated webview as an
-editor tab in the active column, filling the editor area. It is a singleton: a
-second click reveals the existing tab rather than duplicating it. The tab loads
-the same `media/panel.js` + `media/panel.css` as the sidebar, switched into
-branches mode by a `window.AWT_VIEW = "branches"` flag set in its HTML. On mount
-the tab requests data with a `loadBranches` message.
-
-On `loadBranches` the provider builds the branch data and posts it back to that
-panel as a `{ type: "branches" }` payload:
-
-- `git.listBranches` enumerates every local branch plus every remote-only
-  `origin/*` branch (each shown once by short name) and annotates whether a
-  worktree already holds it and whether a matching `origin/<name>` exists (so the
-  row can tag itself "local only" / "local + remote" / "remote only"). It then
-  enriches each branch with ahead/behind against its compare base — its upstream
-  when configured, otherwise the repo's default branch (`origin/HEAD`).
-  Ahead/behind comes from `%(upstream:track)` when there is an upstream and, for
-  branches without one, from a single batched
-  `git for-each-ref --format=%(ahead-behind:<default>)` call (git 2.41+) over all
-  refs at once, falling back to a per-branch `git rev-list --left-right --count
-  base...tip` only on older git or when a branch compares to its own
-  `origin/<name>` (a per-branch base that cannot be expressed against a single
-  committish). The branch rows deliberately do **not** show a +/- line diff: that
-  needed one `git diff` process per branch (git has no batch form), which was the
-  main cost on large repos, and the commit ahead/behind is the more useful
-  signal. The per-branch ahead/behind calls run with bounded concurrency so a
-  many-branch repo doesn't spawn a process per branch at once, and any per-branch
-  failure leaves that branch's counts at zero. The same `for-each-ref` calls also
-  read each branch's tip-commit `committerdate`, `committername` and
-  `committeremail` (one extra field per record, no extra git process), which give
-  the row its "last updated" time and the **Updated by** user filter — the
-  git-native signal the view sorts and filters on. Every git call goes through
-  `execFile` (argument arrays, no shell), so there is no per-call `cmd.exe`/`sh`
-  wrapper — on Windows that roughly halves the process count for a branch listing
-  and avoids shell-specific `--format` quoting. Each git call also has a timeout
-  so a wedged invocation cannot hang the view, and git activity plus a per-load
-  timing summary (branch count and ahead/behind call counts) is logged to the
-  "Agent Worktrees" output channel — wired via `setGitLogger` so `git.ts` keeps
-  no dependency on the vscode API. The for-each-ref parsing is split into pure
-  `parseLocalBranchRefs` / `parseRemoteBranchRefs` helpers (unit-tested, CRLF-safe).
-  If listing fails the error is surfaced in the view, not swallowed into an empty
-  list.
-- The optional `Agent Worktrees: Trace` setting turns on verbose tracing of every
-  external call. It is surfaced in the panel under **Settings → Debug** (a
-  toggle plus an **Open log** button), and is also flipped by the "Toggle Debug
-  Tracing" command; both write the same `agentWorktrees.trace` config, which the
-  host's `onDidChangeConfiguration` handler re-applies. `git.ts` and `github.ts`
-  each take an injected tracer
-  (`setGitTracer` / `setGithubTracer`) wired by the extension host to the
-  diagnostics channel, so both modules stay free of a *runtime* vscode dependency
-  (their `vscode` imports are type-only and elided, which is what lets the unit
-  tests load them without a vscode stub). Each git invocation and each GitHub
-  `fetch` is logged with its command/URL, duration, and result; request headers
-  (which carry the token) are never logged. Off by default, zero overhead when
-  off (the tracer is null, so no trace strings are built).
-- The git-only branch list paints first, so the tab is responsive immediately,
-  then PR data is fetched in the background: when the PR integration is enabled
-  with a token connected, opening the tab kicks off a GitHub refresh on load (the
-  **Fetch Open PRs** button spins until it lands) and that button re-polls on
-  demand afterwards. The git fetch is **not** run on open — it stays the manual
-  **Fetch** button. With no token the view stays git-only and never calls the API.
-- When that fetch runs (on open or on demand) and the PR integration is enabled
-  with a token connected, `github.fetchPrsByBranch` lists the repo's **open** PRs
-  with a single REST `GET /repos/{owner}/{repo}/pulls?state=open` (paged from
-  most-recently-updated, so one call for the common case, no per-PR follow-ups).
-  Open-only on purpose: the view only renders open/draft PRs, and a repo carries
-  far more closed/merged PRs than live branches, so `state=all` used to page
-  through up to ~1000 historical PRs to surface a handful of open ones. It returns
-  those PRs with the fields the list endpoint carries — state, author, assignees,
-  requested reviewers and auto-merge. The list endpoint has **no** CI-check,
-  review-decision or comment data, so those badges are left empty in the branches
-  view; pulling them would require a per-PR follow-up the bulk path deliberately
-  skips. The result is mapped to branches by head ref client-side, and the fetch
-  time is surfaced as the header's **Last refreshed** label. A failure degrades
-  the whole view to "no PR data"; rows still render, and the failure reason
-  (`fetchPrsByBranch` returns an `error`) plus a "fetched N PRs, matched M
-  branches" tally are logged to the "Agent Worktrees" output channel. Because the
-  bulk list is a plain `GET /pulls`, a fine-grained PAT only needs
-  **Pull requests: Read** — the previous GraphQL path failed with "Resource not
-  accessible by personal access token" on tokens denied GraphQL, which this
-  avoids.
-
-The worktree-card poll (`PrService`) shares the bulk-list technique but stays a
-separate path, because the cards do show checks and reviews. Each poll starts
-with one bulk `GET /pulls?state=open` per repo — the repo's worktrees share it —
-mapped by head ref, instead of one `?head=` list call per worktree. Follow-ups
-are then fetched only where something can have changed: a PR whose `updated_at`
-and head SHA match the cache is reused outright (zero requests), with two
-blind spots `updated_at` cannot see covered separately — checks are refetched
-while the cached rollup is pending (check completion does not bump
-`updated_at`), and an aux refresh of detail + checks runs at most every five
-minutes to catch base-branch movement (the "Out of date" pill) and re-runs of
-completed checks. Reviews and comments refetch only on an `updated_at` change.
-A branch with no open PR in the bulk list: a cached merged/closed PR is
-terminal and never refetched (anything new would be an open PR and appear in
-the bulk list), and such PRs no longer count toward the fast poll cadence; an
-uncached branch, or one whose PR just left the open list, pays one `state=all`
-lookup to learn its state.
-
-Every cache entry is tagged with the branch it was fetched for, and the panel
-reads it back by (worktree, branch). A worktree that changes branch therefore
-reads as "not known yet" rather than showing the branch it left. The case that
-matters is a merged PR, because the terminal-state rule above means a stale one
-would otherwise sit on the card forever, never re-checked. The tag also guards
-the write side: a poll that started before the switch does not store its result
-against the new branch (and does not reuse the old branch's value as its
-`prior`), and a refresh requested while one is already in flight is queued
-rather than dropped, so the new branch is fetched as soon as the running poll
-finishes instead of at the next timer tick. Every request stays ETag-conditional (304 replies
-do not count against the rate limit), and the token is memoized instead of
-re-read from SecretStorage on every call (invalidated via
-`secrets.onDidChange`, so a token change in another window is picked up).
-
-The view is git-first, so its **Updated by** and **Location** filters and
-**Sort** are git-based and run entirely client-side over the cached payload —
-changing any of them issues no network request, and all work with no token at
-all. The **Updated by** filter is
-a multi-select of the branches' tip-commit committers (`userOptions`, viewer
-pinned first when a committer name matches the GitHub login); the **Location**
-filter is a multi-select over where a branch lives — `Local only` /
-`Local + remote` / `Remote only`, matching the tag each row displays
-(`branchKind`), with an empty selection meaning no filter; the **Sort** is
-single-select over `Recently updated` / `Least recently updated` (tip-commit
-`committerdate`) and `Name (A–Z)`. Two **PR-aware** single-selects round out the
-bar, each shown **only** when GitHub PR data is available (and ignored if their
-persisted state is stale while the integration is off, so neither can blank the
-list): **PR Status** narrows by PR state — `All` (no filter), `Open`, or `Draft`
-(the fetch is open-only, so those are the only states it can match) — and
-**Reviewer** narrows to branches whose PR has a review requested from the
-signed-in user (`reviewRequestedFromViewer`), i.e. the PRs they still have to
-review — `All` (no filter) or `Review requested`. A
-**Clear Filters** button (right-aligned, `data-action="clearFilters"`) resets the
-**Updated by**, **Location**, **PR Status** and **Reviewer** filters in one click
-(Sort is an ordering, not a filter, so it is left alone); it is `disabled` unless
-a filter is actually narrowing the list (`users.length > 0 ||
-locations.length > 0 || (prStatus !== "all" && prAvailable) ||
-(reviewer !== "all" && prAvailable)`), the same predicate
-`visibleBranches` filters on. A
-branch's open (or draft) PR rollup is rendered as a hint on its row when one
-exists; the fetch is open-only, so merged/closed PRs are not loaded. Deleting a
-squash-merged branch therefore falls back to git's "not fully merged" prompt
-(one extra confirmation) rather than skipping it. The selected filters and sort
-persist across reopens via the webview state.
-
-A branch with no worktree shows a **Create worktree & start agent** action; one
-that already has a worktree shows a **Worktree exists** marker plus a **Start
-agent** action that posts an `agent` message to launch a Claude agent in that
-existing worktree. Clicking create posts a `worktreeFromBranch` message; the
-provider runs
-`git.addBranchWorktree` (checking out an existing local branch, or creating a
-local tracking branch for a remote-only branch), starts a Claude agent in it via
-the existing `agent(dir)` flow in the current window, then refreshes the sidebar
-and re-posts the branch data so the row flips to the marker.
-
-Worktrees the extension creates (this action and the New Worktree command) are
-placed inside the primary worktree at `.claude/worktrees/<branch>` — the same
-location `claude -w` uses — rather than in the repo's parent directory
-(`worktreeUtils.worktreeDirFor`). The extension never edits the repo's ignore
-rules: exactly as with `claude -w`, the nested directory shows as an untracked
-entry in `git status` unless the user excludes it themselves (one
-`/.claude/worktrees/` line in `.git/info/exclude` or `.gitignore`).
-
-**Deleting branches.** Delete is local-only: every branch with a local ref shows
-a **Delete Local** action that removes the local branch and never touches the
-remote. A remote-only branch has no local ref, so it shows no action. The repo's
-default branch (origin/HEAD's short name, carried on each row as `isDefault`) is
-never deletable: the row shows no Delete action and `deleteBranchAction` refuses
-it server-side (via `defaultBranchName`) even if a crafted message asks. Clicking
-it posts a `deleteBranch` message carrying the branch name and whether its PR is
-`merged`.
-
-Git refuses to delete a branch that is checked out in a worktree, so
-`deleteBranchAction` inspects `listWorktrees` first. If the **primary** worktree
-(this repo dir) is on the branch, the delete is blocked with a "switch away
-first" message. If a **linked** worktree is on it, the delete is allowed but
-guarded: a modal warns it will leave that worktree on a detached HEAD, and the
-provider runs `detachWorktreeHead` (a `git checkout --detach` in that worktree)
-to free the ref before deleting.
-
-Before the delete it computes `unpushedCommitCount` — commits not on the branch's
-upstream, or (with no upstream) not on the default branch — and, when non-zero
-and the PR is not flagged merged, surfaces the count in a confirm (a second modal
-in the linked-worktree path) and force-deletes on consent. When a branch still
-carries a known-merged PR the row passes a `merged` flag to skip the "not fully
-merged" prompt — but the branches view now fetches **open** PRs only, so a
-squash-merged branch usually arrives without that flag and instead hits the
-fallback below. `git.deleteBranch` runs `git branch -d`/`-D`; an unmerged refusal
-falls back to an explicit force prompt (one extra confirmation for the
-squash-merge case). Both views refresh afterward so the row drops.
-
-**Bulk "Delete gone".** The header **Delete gone** button posts `deleteGoneBranches`.
-`git.goneBranches` reads `git for-each-ref ... %(upstream:track,nobracket)` and
-returns the local branches whose track is `gone` (the upstream was deleted, what
-`git branch -vv` shows as `[gone]`), so it reflects the last fetch; pair it with
-**Prune** to register a just-deleted remote. `deleteGoneBranchesAction` drops the
-default branch, skips any branch checked out in a worktree (it never bulk-detaches,
-and reports the skipped count), lists the rest in one confirm, then deletes with
-`-d`. Branches that refuse as "not fully merged" (squash-merges) are collected and
-force-deleted only after a second, explicit confirm naming them.
-
-**No delete flicker.** A delete triggers a refresh, but a routine refresh already
-in flight may have started its `gatherBranches()` before the delete and resolve
-*after* it, re-posting the deleted branch, which the next refresh then removes
-again (the "branch flickers back, then gone" report). `postBranches` guards against
-this with a monotonic `branchPostSeq`: each call claims the latest token before
-awaiting git/GitHub and only posts if it is still the latest when it resolves, so a
-stale gather can't clobber a newer render.
-
-**GitHub links.** When `origin` is a github.com remote the provider attaches
-`repoUrl` (`https://github.com/<owner>/<repo>`) to the payload. Each row links its
-name to the branch tree (`/tree/<branch>`, each path segment encoded so slashes
-survive), and the header carries a **Branches on GitHub** link to `/branches`.
-These are plain `<a target="_blank">` anchors that VS Code opens externally — no
-round-trip.
-
-**Refresh and fetch.** `fetchRemotes(cwd, { prune })` runs `git fetch --all`
-(with `--prune` unless disabled), so stale `refs/remotes/origin/*` (branches
-deleted on the remote) are dropped and no longer surface as phantom "remote only"
-/ "local + remote" rows. Opening the tab (`loadBranches`) posts the local list
-immediately and **without** awaiting the GitHub token probe (`connection()`, a
-network round trip that used to gate the first paint): it synthesizes a
-`hasToken` connection from the local `getToken()` so the Fetch Open PRs button
-still shows (flagged `githubRefreshing` when a token is present, so it spins),
-then does the rest in the background — the real `connection()` probe, then (when
-a token is connected) `postBranches(true)` for PR/CI status, then a background
-`refresh(false)` for the sidebar. The background posts are awaited in sequence so
-the slow GitHub post isn't dropped by the `branchPostSeq` staleness guard. No git
-fetch runs on open; that stays the manual
-**Fetch** button, which posts `fetchBranches` with the
-**Prune** checkbox state; the provider fetches with the chosen prune setting, then
-re-reads both views (without a second fetch) and re-posts the branches reusing the
-cached PR map (`postBranches(false)`) — so the git fetch never hits the GitHub
-API. The Prune choice is persisted in the webview state.
-
-**GitHub refresh (on open and on demand).** PR/CI status is fetched by
-`postBranches(true)` — the only path that runs `fetchPrsByBranch` and stamps
-`branchPrsAt` — shown next to a **Last refreshed** label (the fetch time, or
-**Never** before the first refresh) when a token is stored (`github.hasToken`).
-Two things call it: opening the tab (`loadBranches`, see above) and the **Refresh
-GitHub** button (`refreshGithub`) on demand. Every other path (the git Fetch,
-watcher-driven refreshes, worktree/branch mutations) calls `postBranches(false)`
-and reuses the cached PR map, so they re-render rows without touching the GitHub
-API. The GitHub refresh stays the API-only counterpart to the git-only Fetch;
-the two are independent so refreshing PR state never triggers a git fetch and
-vice versa.
-
-**Performance.** The webview only rebuilds the DOM when the posted payload
-actually changed (it compares a JSON signature, mirroring the settings view's
-`ghSig` guard), so a routine poll no longer wipes the list or resets the user's
-scroll position; renders that do happen restore the `.brows` scroll offset. The
-filtered list is paginated client-side (25 per page) with a Prev/Next pager, and
-the page resets to the first whenever a filter or sort changes.
-
-**In-progress buttons.** Buttons that kick off real git/network/window work
-(`agent`, `agentWorktree`, `openWindow`, `openBranches`, `worktreeFromBranch`,
-`fetchBranches`, `refreshGithub` — see `BUSY_ACTIONS` in `panel.js`) swap their
-icon for a spinning ring and disable themselves on click (`markBusy`). The state
-is transient DOM: the next `update`/`branches` payload re-renders the view with
-the real icon restored, so it clears automatically when the work lands. A no-op
-fetch that returns an unchanged payload re-renders only when a spinner is pending
-(so background polls still skip the rebuild), and a 15s safety timeout restores
-any button that never sees a re-render.
-
-```mermaid
-flowchart TD
-    TB["sidebar panel.js toolbar"] -->|openBranches| WV[WorktreeWebviewProvider]
-    WV -->|create/reveal singleton| EP["Branches editor tab<br/>AWT_VIEW=branches<br/>same panel.js + panel.css"]
-    EP -->|loadBranches on mount| WV
-    WV --> LB["git.listBranches<br/>local + remote-only,<br/>worktree association"]
-    WV --> FPB["github.fetchPrsByBranch<br/>GET /pulls?state=open,<br/>open PRs (no checks/reviews)"]
-    WV -->|type: branches| BO["Branches view<br/>rows reuse prLine"]
-    BO --> FB["Filter / Sort bar<br/>Updated by (git committer) · Location (local / local + remote / remote only) · Sort (last commit / name) · PR Status select: All/Open/Draft (when PR data available) · Clear Filters (when a filter is active)"]
-    FB --> CS["Client-side filter + sort<br/>over cached payload<br/>(no new requests)"]
-    CS --> PG["Client-side pagination<br/>25/page, Prev/Next"]
-    PG --> ROWS[Branch rows]
-    ROWS -->|no worktree, worktreeFromBranch| WV
-    ROWS -->|"authored branch, deleteBranch"| DB["git.deleteBranch<br/>branch -d/-D and/or<br/>push origin --delete<br/>(modal: local/remote/both)"]
-    ROWS -->|"name / header links"| GH["github.com/owner/repo<br/>/tree/branch · /branches"]
-    EP -->|"fetchBranches (git only)"| FET["fetchRemotes(prune)<br/>then postBranches(false):<br/>reuse cached PR map"]
-    EP -->|"refreshGithub (API only)"| RGH["postBranches(true):<br/>re-run fetchPrsByBranch,<br/>no git fetch"]
-    WV --> AW["git.addBranchWorktree<br/>+ remote-tracking path"]
-    WV --> AG["agent(dir): Claude terminal<br/>in current window"]
-    AW --> RF[refresh] --> BO
-    DB --> RF
-    FET --> BO
-    RGH --> BO
-    PRS["PrService REST fetchPr<br/>worktree cards, unchanged"] -. separate path .- FPB
-```
+`npm run screenshots` regenerates `images/*.png` for the marketplace listing by
+rendering the real `panel.js` / `panel.css` in a browser with fake data. Re-run it
+after a UI change.
 
 ## Caveats
 
 - The repository is located from the first workspace folder.
+- Webview views resolve lazily, so the waiting-agent badge on the Activity Bar
+  icon only appears once the panel has been opened in that window.
 - Agent terminals are tracked in memory; after an extension-host reload the panel
   can still show and stop agents (by session id / working directory) but loses
   the terminal handle used to reveal them.
 - The session list lives in global storage shared by every VS Code window, but
-  terminal handles are per-window. So a window can show (and stop) an agent that
+  terminal handles are per-window. A window can show and stop an agent that
   another window launched, yet clicking it cannot reveal a terminal it does not
   own; the panel says so instead of silently doing nothing.
 - A terminal closed without `/exit` never fires `SessionEnd`; the liveness sweep
-  retires that session once its process is gone (see **Retiring agents that are
-  no longer running**), and a file the sweep cannot judge is pruned once it is
-  older than 24 hours.
+  retires that session once its process is gone, and a file the sweep cannot
+  judge is pruned once it is older than 24 hours.
 - The sweep answers "is this process alive", not "can this window reach it". An
   agent running in another window, or in a terminal outside VS Code, stays listed
-  as it should — clicking it still explains that its terminal lives elsewhere.
-</content>
+  as it should.
