@@ -2,7 +2,7 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## 3.8.0
+## 3.7.2
 
 - **A subagent working in its own worktree is now shown on that worktree's
   card** - agents increasingly fan work out one subagent per ticket, each in a
