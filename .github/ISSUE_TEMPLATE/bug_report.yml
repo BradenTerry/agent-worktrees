@@ -1,0 +1,92 @@
+name: Bug report
+description: Something in the Agent Worktrees panel is broken or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The extension reads git and GitHub state and watches
+        Claude Code hook events, so the versions and log output below are usually
+        what makes a bug reproducible.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: I am on the latest published version of the extension
+          required: false
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+      description: Extensions view, "Agent Worktrees" entry.
+      placeholder: 3.7.2
+    validations:
+      required: true
+
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code version
+      description: Code > About Visual Studio Code (Help > About on Windows and Linux).
+      placeholder: 1.95.3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Include the shape of your setup where it matters: number of worktrees,
+        whether the repo has a GitHub remote, whether agents were running.
+      placeholder: |
+        1. Open a repo with 3 worktrees
+        2. Start a Claude agent in one of them
+        3. The panel shows ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: >
+        Run "Worktrees: Toggle Debug Tracing" from the command palette, reproduce
+        the problem, then run "Worktrees: Show Log" and paste the relevant lines.
+        Redact anything private: the log can contain branch names and paths.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots of the panel, relevant settings, or related issues.
+    validations:
+      required: false

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: How the extension works
+    url: https://github.com/BradenTerry/agent-worktrees#readme
+    about: Architecture, the hook and emitter pipeline, settings, and how to build it.
+  - name: Marketplace listing
+    url: https://marketplace.visualstudio.com/items?itemName=bradenterry.agent-worktrees
+    about: What the panel does from a user's point of view, with screenshots.
