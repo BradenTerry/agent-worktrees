@@ -33,7 +33,11 @@ single view.
 - Terminal tabs are titled by Claude Code itself, so each tab tracks that
   session's current topic, background tabs included, and the terminal you are
   reading is never pulled away when another agent answers.
-- A robot count shows how many subagents each agent has spawned.
+- Subagents an agent is running right now are listed under it, with what each
+  one is doing and how long it has been at it. They clear themselves when they
+  finish, so the panel shows live work, not a running total. A subagent parked
+  on a background command is dimmed rather than dropped, and when an agent needs
+  you the row tells you which of its subagents is asking.
 - Click an agent's skill chip to see which Claude skills it has used.
 
 <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills one agent has invoked" width="380">

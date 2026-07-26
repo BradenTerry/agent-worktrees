@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { AgentVM, AgentStatus, normalize } from "./worktreeData";
+import { AgentVM, AgentStatus, SubagentVM, normalize } from "./worktreeData";
 
 /** Raw per-session state written by the emitter hook. */
 interface SessionState {
@@ -11,8 +11,8 @@ interface SessionState {
   task?: string;
   /** Bare names of skills this session has invoked (deduped, in first-use order). */
   skills?: string[];
-  /** Count of subagents this session has spawned via the Agent (Task) tool. */
-  subagents?: number;
+  /** Subagents the emitter currently believes are running. */
+  subagents?: unknown;
   /** Epoch ms when the session was first seen. */
   startedAt?: number;
   /** Epoch ms of the most recent hook event. */
@@ -25,6 +25,32 @@ interface SessionState {
 const SESSION_MAX_AGE = 24 * 3_600_000;
 
 const VALID: AgentStatus[] = ["active", "waiting", "idle"];
+
+/**
+ * The live subagents of one session, sanitized for the webview. State files are
+ * written by a separate process and may be from an older extension version, so
+ * anything malformed (including the numeric tally this field used to hold) is
+ * dropped rather than trusted.
+ */
+function readSubagents(raw: unknown, fallbackTs: number): SubagentVM[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SubagentVM[] = [];
+  for (const s of raw) {
+    if (!s || typeof s !== "object") continue;
+    const { id, type, task, paused, awaitingPermission, startedAt } =
+      s as Record<string, unknown>;
+    if (typeof id !== "string" || !id) continue;
+    out.push({
+      id,
+      ...(typeof type === "string" && type ? { type } : {}),
+      ...(typeof task === "string" && task ? { task } : {}),
+      ...(paused === true ? { paused: true } : {}),
+      ...(awaitingPermission === true ? { awaitingPermission: true } : {}),
+      startedAt: typeof startedAt === "number" ? startedAt : fallbackTs,
+    });
+  }
+  return out;
+}
 
 /**
  * Read every session state file and group the agents by worktree path.
@@ -72,8 +98,7 @@ export async function readSessionsByWorktree(
         const skills = Array.isArray(s.skills)
           ? s.skills.filter((x) => typeof x === "string")
           : [];
-        const subagents =
-          typeof s.subagents === "number" && s.subagents > 0 ? s.subagents : 0;
+        const subagents = readSubagents(s.subagents, s.ts);
         return {
           sessionId: s.sessionId,
           // The work summary, then an ordinal until Claude generates a title.

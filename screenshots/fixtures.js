@@ -124,7 +124,26 @@ function overviewData() {
             label: "Rework cart summary component",
             summary: "Rework the cart summary component and wire the new totals API",
             skills: ["task-spec", "source-generator"],
-            subagents: 3,
+            subagents: [
+              {
+                id: "sub-co-1a",
+                type: "Explore",
+                task: "Map the totals API callers",
+                // This agent's card is in the waiting state, and this is the
+                // subagent holding the permission prompt behind it.
+                awaitingPermission: true,
+                startedAt: ago(4 * MIN),
+              },
+              {
+                id: "sub-co-1b",
+                type: "general-purpose",
+                task: "Port the summary tests",
+                // Stopped its turn, parked on a background command: still in
+                // flight, so it stays listed without the working pulse.
+                paused: true,
+                startedAt: ago(50 * 1000),
+              },
+            ],
             status: "waiting",
             startedAt: ago(18 * MIN),
             lastActivity: ago(20 * 1000),
@@ -134,7 +153,14 @@ function overviewData() {
             label: "Add Playwright coverage",
             summary: "Add Playwright coverage for the checkout flow",
             skills: ["verify"],
-            subagents: 1,
+            subagents: [
+              {
+                id: "sub-co-2a",
+                type: "Explore",
+                task: "Find existing checkout fixtures",
+                startedAt: ago(2 * MIN),
+              },
+            ],
             status: "active",
             startedAt: ago(6 * MIN),
             lastActivity: ago(5 * 1000),
@@ -171,7 +197,6 @@ function overviewData() {
             label: "Fix session token race",
             summary: "Fix the session token refresh race on concurrent requests",
             skills: [],
-            subagents: 2,
             status: "active",
             startedAt: ago(31 * MIN),
             lastActivity: ago(15 * 1000),

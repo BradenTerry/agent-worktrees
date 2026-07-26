@@ -194,36 +194,299 @@ test("Stop marks idle", () => {
   assert.strictEqual(s.state, "idle");
 });
 
-test("counts each Agent/Task tool call as a subagent and carries the tally forward", () => {
+test("tracks only the subagents that are running right now", () => {
   const sid = "session-subagents";
-  // No subagents yet: a plain prompt leaves the count off the state file.
+  // Nothing running: a plain prompt leaves the field off the state file.
   run({ hook_event_name: "UserPromptSubmit", session_id: sid, cwd: repo });
   assert.strictEqual(stateOf(sid).subagents, undefined);
 
-  // One Agent spawn (the tool's current name) and one Task spawn (its name
-  // before Claude Code 2.1.63) -> two subagents, accumulated across events.
+  // The Agent tool call parks its description; the SubagentStart that follows
+  // claims it, so the row is labelled with the work, not just the agent type.
   run({
     hook_event_name: "PreToolUse",
     session_id: sid,
     cwd: repo,
     tool_name: "Agent",
+    tool_input: { subagent_type: "Explore", description: "Map the callers" },
   });
+  assert.strictEqual(stateOf(sid).subagents, undefined);
+  run({
+    hook_event_name: "SubagentStart",
+    session_id: sid,
+    cwd: repo,
+    agent_id: "sub-1",
+    agent_type: "Explore",
+  });
+  const started = stateOf(sid);
+  assert.strictEqual(started.state, "active");
+  assert.deepStrictEqual(
+    started.subagents.map((s) => [s.id, s.type, s.task]),
+    [["sub-1", "Explore", "Map the callers"]]
+  );
+  // The parked description was consumed, not left to mislabel a later start.
+  assert.strictEqual(started.pendingSubagents, undefined);
+
+  // A second, concurrent subagent. `Task` is the Agent tool's name before
+  // Claude Code 2.1.63 and parks a description the same way.
   run({
     hook_event_name: "PreToolUse",
     session_id: sid,
     cwd: repo,
     tool_name: "Task",
+    tool_input: { subagent_type: "nocturne", description: "Port the tests" },
   });
-  assert.strictEqual(stateOf(sid).subagents, 2);
+  run({
+    hook_event_name: "SubagentStart",
+    session_id: sid,
+    cwd: repo,
+    agent_id: "sub-2",
+    agent_type: "nocturne",
+  });
+  assert.deepStrictEqual(
+    stateOf(sid).subagents.map((s) => s.id),
+    ["sub-1", "sub-2"]
+  );
 
-  // A non-subagent tool does not bump the count, but keeps the carried tally.
+  // Finishing one retires exactly that one. The stop carries Claude Code's
+  // in-flight registry, which no longer lists it: it is done for good.
+  run({
+    hook_event_name: "SubagentStop",
+    session_id: sid,
+    cwd: repo,
+    agent_id: "sub-1",
+    background_tasks: [
+      { id: "sub-2", type: "subagent", status: "running", agent_type: "nocturne" },
+    ],
+  });
+  assert.deepStrictEqual(
+    stateOf(sid).subagents.map((s) => s.id),
+    ["sub-2"]
+  );
+
+  // When the last one finishes the field disappears entirely: the panel shows
+  // nothing rather than a tally of everything the session ever ran.
+  run({
+    hook_event_name: "SubagentStop",
+    session_id: sid,
+    cwd: repo,
+    agent_id: "sub-2",
+    background_tasks: [],
+  });
+  assert.strictEqual(stateOf(sid).subagents, undefined);
+});
+
+// A subagent that hands work to a background command stops its turn and waits
+// to be woken. Claude Code still lists it as in flight, and retiring it there
+// made the row vanish while the subagent was very much still around.
+test("a subagent parked on background work stays listed", () => {
+  const sid = "session-sub-parked";
+  const base = { session_id: sid, cwd: repo };
+  run({ hook_event_name: "SessionStart", ...base, source: "startup" });
+  run({
+    hook_event_name: "PreToolUse",
+    ...base,
+    tool_name: "Agent",
+    tool_input: { subagent_type: "general-purpose", description: "Idle test agent" },
+  });
+  run({
+    hook_event_name: "SubagentStart",
+    ...base,
+    agent_id: "sub-bg",
+    agent_type: "general-purpose",
+  });
+
+  // It starts a background sleep and its turn ends. The registry on the stop
+  // still lists it, so it stays — flagged paused rather than dropped.
+  run({
+    hook_event_name: "SubagentStop",
+    ...base,
+    agent_id: "sub-bg",
+    background_tasks: [
+      { id: "sub-bg", type: "subagent", status: "running", agent_type: "general-purpose" },
+      { id: "task-sleep", type: "shell", status: "running", command: "sleep 60" },
+    ],
+  });
+  let s = stateOf(sid).subagents;
+  assert.deepStrictEqual(
+    s.map((x) => [x.id, x.task, x.paused]),
+    [["sub-bg", "Idle test agent", true]]
+  );
+
+  // The parent's own turn ends while the subagent is still parked: still there.
+  run({
+    hook_event_name: "Stop",
+    ...base,
+    background_tasks: [
+      { id: "sub-bg", type: "subagent", status: "running", agent_type: "general-purpose" },
+    ],
+  });
+  assert.strictEqual(stateOf(sid).subagents.length, 1);
+
+  // The sleep lands and the subagent picks up where it left off: no longer
+  // paused, and its start time is not reset.
+  const startedAt = stateOf(sid).subagents[0].startedAt;
+  run({
+    hook_event_name: "PostToolUse",
+    ...base,
+    agent_id: "sub-bg",
+    agent_type: "general-purpose",
+    tool_name: "Bash",
+  });
+  s = stateOf(sid).subagents;
+  assert.strictEqual(s[0].paused, undefined);
+  assert.strictEqual(s[0].startedAt, startedAt);
+
+  // It finishes for real: the stop's registry no longer lists it.
+  run({
+    hook_event_name: "SubagentStop",
+    ...base,
+    agent_id: "sub-bg",
+    background_tasks: [],
+  });
+  assert.strictEqual(stateOf(sid).subagents, undefined);
+});
+
+// Notification, the real "needs you" signal, never says which subagent it came
+// from. PermissionRequest does, so the two together identify the subagent
+// holding a prompt — but PermissionRequest alone must not touch the status.
+test("PermissionRequest flags the asking subagent and leaves the status alone", () => {
+  const sid = "session-sub-permission";
+  const base = { session_id: sid, cwd: repo };
+  run({ hook_event_name: "SessionStart", ...base, source: "startup" });
+  run({
+    hook_event_name: "SubagentStart",
+    ...base,
+    agent_id: "sub-ask",
+    agent_type: "general-purpose",
+  });
+  run({
+    hook_event_name: "SubagentStart",
+    ...base,
+    agent_id: "sub-quiet",
+    agent_type: "Explore",
+  });
+
+  // A decision for one of them: flagged, and the state is untouched. Reporting
+  // "active" here would clear a waiting state (and the badge) while the user is
+  // still answering another prompt.
+  run({ hook_event_name: "Notification", ...base, notification_type: "permission_prompt" });
+  assert.strictEqual(stateOf(sid).state, "waiting");
+  run({
+    hook_event_name: "PermissionRequest",
+    ...base,
+    agent_id: "sub-ask",
+    agent_type: "general-purpose",
+    tool_name: "Bash",
+    tool_input: { command: "rm -rf build" },
+  });
+  let s = stateOf(sid);
+  assert.strictEqual(s.state, "waiting");
+  assert.deepStrictEqual(
+    s.subagents.map((x) => [x.id, x.awaitingPermission]),
+    [
+      ["sub-ask", true],
+      ["sub-quiet", undefined],
+    ]
+  );
+
+  // Answering it lets the tool run, and the subagent's own event clears the flag.
+  run({
+    hook_event_name: "PostToolUse",
+    ...base,
+    agent_id: "sub-ask",
+    agent_type: "general-purpose",
+    tool_name: "Bash",
+  });
+  s = stateOf(sid);
+  assert.strictEqual(s.state, "active");
+  assert.strictEqual(s.subagents[0].awaitingPermission, undefined);
+});
+
+// Stopping an agent from Claude Code's agent manager fires no hook at all: its
+// turn never ends, so nothing marks it paused. The registry is what retires it.
+test("a backgrounded subagent that is killed leaves the list", () => {
+  const sid = "session-sub-killed";
+  const base = { session_id: sid, cwd: repo };
+  const task = (id) => ({
+    id,
+    type: "subagent",
+    status: "running",
+    agent_type: "Explore",
+    description: "Long-running UI test agent",
+  });
+  run({ hook_event_name: "SessionStart", ...base, source: "startup" });
+  run({
+    hook_event_name: "Stop",
+    ...base,
+    background_tasks: [task("sub-a"), task("sub-b")],
+  });
+  assert.strictEqual(stateOf(sid).subagents.length, 2);
+
+  // The user stops the first one. The next turn end is the first payload that
+  // can say so, and it does: only the survivor is still in flight.
+  run({ hook_event_name: "Stop", ...base, background_tasks: [task("sub-b")] });
+  assert.deepStrictEqual(
+    stateOf(sid).subagents.map((s) => s.id),
+    ["sub-b"]
+  );
+});
+
+// Claude Code's registry is authoritative, so it also recovers subagents this
+// session never saw start — hooks installed while one was already running.
+test("the in-flight registry adopts subagents we never saw start", () => {
+  const sid = "session-sub-adopt";
+  const base = { session_id: sid, cwd: repo };
+  run({ hook_event_name: "SessionStart", ...base, source: "startup" });
+  run({
+    hook_event_name: "Stop",
+    ...base,
+    background_tasks: [
+      {
+        id: "sub-orphan",
+        type: "subagent",
+        status: "running",
+        agent_type: "Explore",
+        description: "Map the callers",
+      },
+      { id: "cron-1", type: "monitor", status: "running" },
+    ],
+  });
+  assert.deepStrictEqual(
+    stateOf(sid).subagents.map((s) => [s.id, s.type, s.task]),
+    [["sub-orphan", "Explore", "Map the callers"]]
+  );
+});
+
+test("a subagent's own events re-register it and never move its parent's row", () => {
+  const sid = "session-sub-events";
+  const other = path.join(dir, "other-worktree");
+  fs.mkdirSync(other, { recursive: true });
+  execFileSync("git", ["init", "-b", "main"], { cwd: other, stdio: "ignore" });
+
+  run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo, source: "startup" });
+  const home = stateOf(sid).worktree;
+
+  // A subagent running in an isolated worktree fires tool events with ITS cwd.
+  // Those are still the parent's events, so the parent's card must not move —
+  // and the subagent registers even though we never saw its SubagentStart.
   run({
     hook_event_name: "PreToolUse",
     session_id: sid,
-    cwd: repo,
+    cwd: other,
+    agent_id: "sub-iso",
+    agent_type: "general-purpose",
     tool_name: "Bash",
   });
-  assert.strictEqual(stateOf(sid).subagents, 2);
+  const s = stateOf(sid);
+  assert.strictEqual(s.worktree, home);
+  assert.deepStrictEqual(
+    s.subagents.map((x) => [x.id, x.type]),
+    [["sub-iso", "general-purpose"]]
+  );
+
+  // Restarting the session clears them: subagents do not survive the process.
+  run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo, source: "resume" });
+  assert.strictEqual(stateOf(sid).subagents, undefined);
 });
 
 test("SubagentStop marks active", () => {

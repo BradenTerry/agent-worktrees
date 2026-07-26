@@ -2,6 +2,43 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.7.0
+
+- **Subagents are now shown live, under the agent running them** - the panel
+  used to carry a robot chip counting every subagent a session had ever spawned.
+  That number only went up: a session that fanned out to five subagents an hour
+  ago still advertised five long after they had all finished, so the count said
+  nothing about what was actually running. Each running subagent is now a row
+  indented under its parent, labelled with its agent type and the work it was
+  given, with how long it has been going; the row disappears the moment it
+  finishes. The Agents bar carries the live count so it stays visible when the
+  agent list is collapsed. Tracking uses Claude Code's `SubagentStart` /
+  `SubagentStop` hooks, which bracket foreground and background subagents alike
+  and both carry the subagent's id - `SubagentStart` is a new managed hook and
+  is added to `~/.claude/settings.json` automatically for anyone who already
+  consented. A subagent that hands work to a background command stops its turn
+  but stays in flight, so a stop is not treated as an end: it marks the row
+  paused (listed, without the working pulse) and Claude Code's own in-flight
+  registry, stamped on every stop as `background_tasks`, decides whether the
+  subagent is really gone. The registry is also the only thing that catches a
+  subagent you stop from Claude Code's agent manager - that fires no hook at
+  all, since the agent's turn never ends - and it picks up subagents that were
+  already running before the hooks were installed. When an agent needs you, the
+  subagent behind the prompt is marked too: Claude Code's "needs you"
+  notification never says which subagent raised it, and the hook that names the
+  asker also fires for calls auto mode allows silently, so the panel pairs the
+  two and only flags a subagent while the session itself is waiting.
+  `PermissionRequest` is the second new managed hook and is likewise added
+  automatically; it is used for that identification only and never reports a
+  status of its own. Elapsed times tick in the panel itself, so they keep
+  counting while a subagent works quietly and the extension has nothing new to
+  post.
+- **A subagent working in an isolated worktree no longer moves its parent's
+  row** - hooks fired by a subagent report *its* working directory, which the
+  emitter treated as the session's, so a subagent running in its own worktree
+  re-keyed the parent and jumped that agent onto a different card until the next
+  event moved it back. Subagent events now always keep the parent's worktree.
+
 ## 3.6.0
 
 - **A clearer Marketplace listing** - the listing had grown to a 261-line body

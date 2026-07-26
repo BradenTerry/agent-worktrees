@@ -89,10 +89,23 @@ export const HOOKS: HookSpec[] = [
       "Marks an agent Active again when a tool finishes — the first signal after you approve a permission prompt or answer its question.",
   },
   {
+    event: "PermissionRequest",
+    matcher: "*",
+    label: "PermissionRequest",
+    description:
+      "Identifies which subagent asked for permission, so the one blocking on you is marked instead of just its parent. Never changes an agent's status on its own.",
+  },
+  {
+    event: "SubagentStart",
+    label: "SubagentStart",
+    description:
+      "Lists a subagent under its parent agent the moment it starts, so you can see what is running right now.",
+  },
+  {
     event: "SubagentStop",
     label: "SubagentStop",
     description:
-      "Marks an agent Active when one of its subagents finishes — it is about to pick the result up, not waiting on you.",
+      "Removes a finished subagent from its parent's row, and marks the parent Active — it is about to pick the result up, not waiting on you.",
   },
   {
     event: "Notification",

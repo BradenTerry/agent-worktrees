@@ -22,6 +22,26 @@ import { diag } from "./diagnostics";
  */
 export type AgentStatus = "active" | "waiting" | "idle";
 
+/** A subagent that is running right now under a parent session. */
+export interface SubagentVM {
+  /** Claude Code's id for the subagent; unique within its parent session. */
+  id: string;
+  /** Agent type, e.g. "Explore" or "general-purpose", when known. */
+  type?: string;
+  /** What the Agent tool was asked to do (its `description`), when known. */
+  task?: string;
+  /** True when the subagent has stopped its turn but is still in flight —
+   *  parked on a background command that will wake it again. */
+  paused?: boolean;
+  /** True when a permission decision for one of this subagent's tool calls is
+   *  outstanding. On its own this does not mean the user is being asked (auto
+   *  mode and allowlists settle most of them); it identifies WHICH subagent is
+   *  behind the prompt when the session as a whole is waiting. */
+  awaitingPermission?: boolean;
+  /** Epoch ms when the subagent started. */
+  startedAt: number;
+}
+
 /** A single agent session created within a worktree. */
 export interface AgentVM {
   /** Claude session id; ties the panel row to its terminal and state file. */
@@ -32,8 +52,9 @@ export interface AgentVM {
   summary?: string;
   /** Bare names of skills this session has invoked (deduped, in first-use order). */
   skills?: string[];
-  /** Count of subagents this session has spawned via the Agent (Task) tool. */
-  subagents?: number;
+  /** Subagents currently running under this session, oldest first. Finished
+   *  ones are dropped, so this is "what is running now", not a tally. */
+  subagents?: SubagentVM[];
   status: AgentStatus;
   /** Epoch ms when the session was first seen. */
   startedAt: number;
