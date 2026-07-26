@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest a change or addition to the panel
+labels: ["enhancement"]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Panel UI and layout
+        - Worktree and branch handling
+        - PR and CI status
+        - Agent detection and hooks
+        - Settings
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: >
+        Describe the situation you hit, not just the feature. What were you doing
+        with your worktrees or agents when the panel fell short?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Existing settings, other extensions, or a manual workaround.
+    validations:
+      required: false

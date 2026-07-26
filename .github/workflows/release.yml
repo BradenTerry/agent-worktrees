@@ -17,6 +17,17 @@ name: Release
 # Publishing any pre-release build is what makes the "Switch to Pre-Release Version"
 # button appear on the listing; users opt in per-install. Versions are one continuous
 # line that always increments - the channel is an independent per-run choice.
+#
+# Both triggers already require push/write access, so a random fork or contributor
+# cannot start a release. Two further gates narrow that to the owner:
+#
+#   - the guard job below fails the run unless github.actor is the repository owner;
+#   - the publish job targets the protected "release" environment, which requires an
+#     approval from BradenTerry and only accepts main or a v* tag. VSCE_PAT lives in
+#     that environment, so no other job in any workflow can read it, and editing this
+#     file to drop the guard does not get you the token.
+#
+# The environment approval is the real enforcement; the guard just fails fast.
 on:
   push:
     tags:
@@ -40,8 +51,21 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  publish:
+  # Fail fast, and before any secret is in scope, if the run was not started by the
+  # repository owner. String comparison in GitHub expressions is case-insensitive.
+  guard:
     runs-on: ubuntu-latest
+    steps:
+      - name: Only the repository owner may release
+        if: github.actor != github.repository_owner
+        run: |
+          echo "::error::Release refused: ${{ github.actor }} is not the repository owner (${{ github.repository_owner }})."
+          exit 1
+
+  publish:
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: release
     env:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:

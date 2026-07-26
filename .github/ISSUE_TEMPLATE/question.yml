@@ -1,0 +1,28 @@
+name: Question
+description: Ask how something works or whether a setup is supported
+labels: ["question"]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I checked the README and the marketplace listing
+          required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: >
+        Extension version, VS Code version, OS, and anything about your repo or
+        agent setup that is relevant.
+    validations:
+      required: false

@@ -118,6 +118,12 @@ Pushing directly (or admin-merging a red PR) skips the only full-matrix gate, so
 an OS-specific or extension-host regression can reach a release untested. If a PR
 must be admin-merged past branch protection, get its CI green first.
 
+Releases are owner-only. `release.yml` has a `guard` job that fails unless
+`github.actor` is the repository owner, and its `publish` job targets the
+protected `release` environment (approval required, restricted to `main` and `v*`
+tags). A release run therefore pauses for an approval in the Actions UI before it
+publishes - expect that wait, it is not a hang.
+
 ## Conventions
 
 - Spaces, not tabs. No em dashes or emojis in UI copy.
