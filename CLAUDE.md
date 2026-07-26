@@ -17,7 +17,11 @@ updated:
 
 - `README.md` - development-focused. The repo landing page: architecture, how the
   hook/emitter pipeline works, how to build and contribute. Describe features in
-  terms of how they work.
+  terms of how they work. **Keep it a landing page.** It is deliberately short and
+  links out; the long rationale lives in `docs/*.md` (agent status, subagents,
+  refresh coalescing, branches view, terminal titles, linked files). A change to
+  one of those subsystems belongs in its doc, with at most a line in the README
+  feature list. Don't grow the README back.
 - `MARKETPLACE.md` - usage-focused. The VS Code Marketplace listing the user
   reads before installing. Describe features in terms of what the user gets,
   with no build/internals detail.
