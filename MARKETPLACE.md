@@ -39,6 +39,12 @@ single view.
   on a background command is dimmed rather than dropped, and when an agent needs
   you the row tells you which of its subagents is asking.
 - Click an agent's skill chip to see which Claude skills it has used.
+- Agents that are no longer running are retired on their own. An agent that dies
+  with its terminal (you closed the window, killed the terminal, restarted the
+  machine) never gets to report that it exited, so the panel checks whether each
+  session's process is still there and drops the ones that are gone. A window you
+  reopen shows the agents that are actually running, not yesterday's rows with no
+  terminal behind them.
 
 <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills one agent has invoked" width="380">
 

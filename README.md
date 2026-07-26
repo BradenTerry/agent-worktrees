@@ -279,6 +279,59 @@ local files, and nothing of the extension's lives in your `~/.claude` tree apart
 from the hook entries in `settings.json`. Status reporting needs `node` on
 `PATH`.
 
+### Retiring agents that are no longer running
+
+`SessionEnd` deletes a session's state file, so a session that exits cleanly
+takes its row with it. Nothing fires when a session dies *with* its terminal —
+the window was closed, the terminal killed, the machine restarted — so the file
+survives in the shared state dir with whatever status it last had. Since the dir
+is global, the next window to open renders those sessions as live agents that
+have no process and no terminal behind them (often mid-work, with a spinner and
+an Activity Bar badge).
+
+The emitter therefore stamps two liveness markers into every state file, and the
+panel sweeps the dir with them before each refresh (throttled to once every 30s,
+and again on a self-armed timer when a file is younger than the grace period, so
+a window reopened seconds after the previous one closed still clears):
+
+- `pid` — Claude Code runs a hook command as a **direct child** of the session
+  process, so the emitter's parent *is* the agent. Checked with `kill(pid, 0)`:
+  no spawn, and exact modulo pid reuse. Re-stamped on every event, so a session
+  resumed into another process records the pid actually running it; never from a
+  subagent-fired event, whose parent may be shorter-lived than the session.
+- `launched` — set when the id came from `AGENT_WORKTREES_SID`, i.e. the
+  extension started this agent and passed the id on Claude's own argv. Such a
+  session can be found by scanning the running processes' command lines for
+  `--session-id <id>` (`ps -Ao args=`; PowerShell's CIM query on Windows, the
+  same mechanism the Windows stop path uses).
+
+```mermaid
+flowchart TD
+  A[session state file] --> B{"last event<br/>< 60s ago?"}
+  B -->|yes| K["keep<br/>(arm a recheck)"]
+  B -->|no| C{"pid alive?"}
+  C -->|yes| K2[keep: its process is there]
+  C -->|no / no pid| D{"launched by<br/>the extension?"}
+  D -->|yes| E{"--session-id id<br/>in a live command line?"}
+  E -->|yes| K3["keep: resumed into<br/>another process"]
+  E -->|"no (scan ran)"| X[delete the state file]
+  E -->|"scan failed"| K4[keep: no evidence]
+  D -->|no| F{"pid recorded,<br/>and trusted here?"}
+  F -->|yes| X
+  F -->|no| K5["keep: 24h backstop<br/>decides"]
+```
+
+Pruning always requires **positive evidence of death**, never merely the absence
+of evidence of life, because a wrong prune hides a live agent. Two consequences:
+a file written by an emitter too old to record either marker is left to the 24h
+backstop, and a dead pid is not proof on **Windows**, where a hook run through a
+short-lived shell wrapper would make the recorded parent exit immediately and
+look exactly like a dead agent (a *live* pid is trusted everywhere — it can only
+make the sweep more conservative). Windows keeps the argv check, which covers
+every session the extension launched. A wrong prune also self-heals: the state
+file is rewritten by the session's very next hook event, so a live agent that was
+pruned reappears the moment it does anything.
+
 Status reporting is best-effort by design. Claude Code surfaces any nonzero
 hook exit — or any stderr output at all — as a
 `hook error ... failed with non-blocking status code` warning in the session,
@@ -337,6 +390,8 @@ flowchart LR
     H["Claude Code hooks<br/>(~/.claude/settings.json)"] --> E["agent-worktrees-emit.mjs<br/>--dir &lt;globalStorage&gt;/sessions"]
     E -->|per-session state file| S["extension global storage<br/>&lt;globalStorage&gt;/sessions"]
     S -->|FileSystemWatcher| P
+    S -->|"liveness sweep:<br/>kill(pid, 0) + argv scan"| L["retire sessions whose<br/>Claude process is gone"]
+    L --> P
     T --> H
     TW --> H
 ```
@@ -749,6 +804,11 @@ flowchart TD
   terminal handles are per-window. So a window can show (and stop) an agent that
   another window launched, yet clicking it cannot reveal a terminal it does not
   own; the panel says so instead of silently doing nothing.
-- A terminal closed without `/exit` never fires `SessionEnd`; its state file is
-  pruned automatically once it is older than 24 hours.
+- A terminal closed without `/exit` never fires `SessionEnd`; the liveness sweep
+  retires that session once its process is gone (see **Retiring agents that are
+  no longer running**), and a file the sweep cannot judge is pruned once it is
+  older than 24 hours.
+- The sweep answers "is this process alive", not "can this window reach it". An
+  agent running in another window, or in a terminal outside VS Code, stays listed
+  as it should — clicking it still explains that its terminal lives elsewhere.
 </content>
