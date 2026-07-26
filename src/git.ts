@@ -148,6 +148,11 @@ export interface GitStatus {
   ahead: number;
   /** Commits behind the upstream branch. */
   behind: number;
+  /** Short branch name HEAD points at, or undefined when detached. Read from
+   *  the `# branch.head` header the status call already emits, so callers that
+   *  only re-run status (the agent-only refresh) can still spot a worktree that
+   *  changed branches without re-listing every worktree. */
+  branch?: string;
 }
 
 /**
@@ -187,6 +192,7 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
   let tracked = 0;
   let ahead = 0;
   let behind = 0;
+  let branch: string | undefined;
   try {
     const { stdout } = await git(
       ["status", "--porcelain=v2", "--branch"],
@@ -202,6 +208,10 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
           ahead = Number(m[1]);
           behind = Number(m[2]);
         }
+      } else if (line.startsWith("# branch.head ")) {
+        // e.g. "# branch.head main", or "(detached)" with no branch.
+        const name = line.slice("# branch.head ".length).trim();
+        if (name && name !== "(detached)") branch = name;
       } else if (!line.startsWith("#")) {
         // 1/2 = changed tracked, u = unmerged, ? = untracked, ! = ignored.
         if (line[0] !== "!") dirty++;
@@ -218,7 +228,7 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
   // that makes loading many worktrees on Windows noticeably faster.
   const { insertions, deletions } =
     tracked > 0 ? await getDiffStat(cwd) : { insertions: 0, deletions: 0 };
-  return { dirty, insertions, deletions, ahead, behind };
+  return { dirty, insertions, deletions, ahead, behind, branch };
 }
 
 /**

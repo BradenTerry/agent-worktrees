@@ -50,13 +50,21 @@ export class PrService implements vscode.Disposable {
   readonly onChange = this._onChange.event;
 
   private targets: PrTarget[] = [];
-  /** key -> PR status (null = looked up, no PR). Absent = not yet fetched. */
-  private cache = new Map<string, PrInfo | null>();
+  /** key -> the branch that was fetched and its PR status (null = looked up, no
+   *  PR). Absent = not yet fetched. The branch is stored with the value so a
+   *  result can never be shown for (or reused as `prior` on) a branch other than
+   *  the one it was fetched for. */
+  private cache = new Map<string, { branch: string; pr: PrInfo | null }>();
   private enabled: boolean;
   private visible = true;
   private timer?: ReturnType<typeof setTimeout>;
   private lastFetch = 0;
   private inFlight = false;
+  /** Set when a refresh is asked for while one is already running (a branch
+   *  switch during a poll, say). Dropping it would leave the new target
+   *  unfetched until the next timer tick, so it re-runs when the current one
+   *  finishes. `true` when any of the queued requests was forced. */
+  private pending?: { force: boolean };
   /** Last seen head SHA per target, to detect a push between fetches. */
   private headShas = new Map<string, string | undefined>();
   /** Epoch ms of each target's last detail/checks (aux) fetch; see AUX_REFRESH_MS. */
@@ -92,9 +100,18 @@ export class PrService implements vscode.Disposable {
     }
   }
 
-  /** Cached PR status for a worktree, or undefined when not (yet) known. */
-  get(key: string): PrInfo | null | undefined {
-    return this.cache.get(key);
+  /**
+   * Cached PR status for a worktree, or undefined when not (yet) known. Pass
+   * the branch the worktree currently has checked out: a value fetched for a
+   * different branch is treated as not-known rather than shown, so a merged PR
+   * can never linger on a card whose worktree has moved on (e.g. an agent
+   * checking main back out after its PR merged).
+   */
+  get(key: string, branch?: string): PrInfo | null | undefined {
+    const hit = this.cache.get(key);
+    if (!hit) return undefined;
+    if (branch !== undefined && hit.branch !== branch) return undefined;
+    return hit.pr;
   }
 
   /** Replace the set of branches to track; kicks a refresh when it changed. */
@@ -105,9 +122,6 @@ export class PrService implements vscode.Disposable {
         .sort()
         .join("\n");
     const changed = sig(targets) !== sig(this.targets);
-    // The branch each worktree was tracking before this update, so we can spot a
-    // worktree that switched branches (same key, different branch).
-    const prevBranch = new Map(this.targets.map((t) => [t.key, t.branch]));
     this.targets = targets;
     // Forget cache entries for worktrees that are gone.
     const live = new Set(targets.map((t) => t.key));
@@ -121,15 +135,18 @@ export class PrService implements vscode.Disposable {
       }
     }
     // A worktree that switched branches must not keep showing the old branch's
-    // PR (e.g. a merged one tied to a branch the worktree left). Drop its cached
-    // entry now so the stale PR clears on the next render, ahead of the refetch
-    // for the new branch below.
+    // PR (e.g. a merged one tied to a branch the worktree left). Compare against
+    // the branch each cached value was fetched for, not against the previous
+    // target list: the switch may have happened while the panel was hidden, or
+    // across several target updates, so the previous list is not a reliable
+    // record of what the cached value belongs to.
     for (const t of targets) {
-      const prev = prevBranch.get(t.key);
-      if (prev !== undefined && prev !== t.branch) {
-        if (this.cache.delete(t.key)) pruned = true;
+      const hit = this.cache.get(t.key);
+      if (hit && hit.branch !== t.branch) {
+        this.cache.delete(t.key);
         this.headShas.delete(t.key);
         this.lastAuxAt.delete(t.key);
+        pruned = true;
       }
     }
     if (pruned) this._onChange.fire();
@@ -172,10 +189,10 @@ export class PrService implements vscode.Disposable {
     // can never settle, so one stale terminal entry must not pin the whole
     // board at the active poll rate.
     const anyPending = [...this.cache.values()].some(
-      (p) =>
-        p &&
-        (p.state === "open" || p.state === "draft") &&
-        p.checks === "pending"
+      ({ pr }) =>
+        pr &&
+        (pr.state === "open" || pr.state === "draft") &&
+        pr.checks === "pending"
     );
     const pushing = Date.now() < this.fastUntil;
     const delay = pushing ? PUSH_MS : anyPending ? ACTIVE_MS : IDLE_MS;
@@ -193,7 +210,12 @@ export class PrService implements vscode.Disposable {
   async refresh(force: boolean): Promise<void> {
     this.stop();
     if (!this.enabled || !this.visible) return;
-    if (this.inFlight) return;
+    if (this.inFlight) {
+      // Queue it rather than drop it: the caller may have just re-targeted a
+      // worktree onto a new branch, which this run cannot pick up.
+      this.pending = { force: force || !!this.pending?.force };
+      return;
+    }
     const now = Date.now();
     if (!force && now - this.lastFetch < THROTTLE_MS) {
       this.ensureScheduled();
@@ -236,11 +258,18 @@ export class PrService implements vscode.Disposable {
           );
         })
       );
+      // Where each key stands NOW, after the awaits above: a worktree may have
+      // switched branches (setTargets) while this fetch was in flight. Writing a
+      // result for the branch it no longer has would resurrect exactly the stale
+      // PR setTargets just pruned, and (once that value is a merged PR)
+      // nextFor's zero-request path would pin it there indefinitely.
+      const current = new Map(this.targets.map((t) => [t.key, t.branch]));
       targets.forEach((t) => {
         if (!results.has(t.key)) return;
+        if (current.get(t.key) !== t.branch) return;
         const next = results.get(t.key) ?? null;
-        if (sigOf(this.cache.get(t.key)) !== sigOf(next)) changed = true;
-        this.cache.set(t.key, next);
+        if (sigOf(this.cache.get(t.key)?.pr) !== sigOf(next)) changed = true;
+        this.cache.set(t.key, { branch: t.branch, pr: next });
         // A new head SHA means a push landed; the fresh checks may not exist
         // yet, so poll fast for a window instead of dropping back to idle.
         const prevSha = this.headShas.get(t.key);
@@ -254,7 +283,18 @@ export class PrService implements vscode.Disposable {
       this.inFlight = false;
     }
     if (changed) this._onChange.fire();
+    const queued = this.pending;
+    this.pending = undefined;
+    if (queued) return this.refresh(queued.force);
     this.ensureScheduled();
+  }
+
+  /** Cached value for a key when it was fetched for `branch`; undefined when
+   *  absent or fetched for a different branch (so it must not be reused). */
+  private priorFor(key: string, branch: string): PrInfo | null | undefined {
+    const hit = this.cache.get(key);
+    if (!hit || hit.branch !== branch) return undefined;
+    return hit.pr;
   }
 
   /**
@@ -276,9 +316,9 @@ export class PrService implements vscode.Disposable {
     open: Map<string, RawPr> | undefined,
     now: number
   ): Promise<PrInfo | null> {
-    const prior = this.cache.has(t.key)
-      ? (this.cache.get(t.key) as PrInfo | null)
-      : undefined;
+    // Only a value fetched for this same branch is a valid `prior`: reusing one
+    // from a branch the worktree has left would carry its PR forward.
+    const prior = this.priorFor(t.key, t.branch);
     try {
       const raw = open?.get(t.branch);
       if (raw) {
@@ -316,17 +356,18 @@ export class PrService implements vscode.Disposable {
     try {
       // Forced by the user, so always refresh detail + checks (refreshAux);
       // prior still lets an unchanged PR skip the reviews call.
-      const prior = this.cache.has(key)
-        ? (this.cache.get(key) as PrInfo | null)
-        : undefined;
+      const prior = this.priorFor(key, target.branch);
       this.lastAuxAt.set(key, Date.now());
       next = await fetchPr(token, target.repo, target.branch, prior, true);
     } catch {
       // Keep whatever we had on a hard failure.
-      next = this.cache.has(key) ? (this.cache.get(key) as PrInfo | null) : null;
+      next = this.priorFor(key, target.branch) ?? null;
     }
-    const changed = sigOf(this.cache.get(key)) !== sigOf(next);
-    this.cache.set(key, next);
+    // The worktree may have switched branches while this call was in flight;
+    // dropping the result is better than caching it against the new branch.
+    if (this.targets.find((t) => t.key === key)?.branch !== target.branch) return;
+    const changed = sigOf(this.priorFor(key, target.branch)) !== sigOf(next);
+    this.cache.set(key, { branch: target.branch, pr: next });
     // A new head SHA means a push landed; poll fast for a window (mirrors refresh).
     const prevSha = this.headShas.get(key);
     if (prevSha && next?.headSha && prevSha !== next.headSha) {

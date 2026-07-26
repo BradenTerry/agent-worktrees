@@ -66,6 +66,9 @@ Connect a GitHub token and each worktree card grows a PR rollup.
 - An **Out of date** pill when the branch is behind its base.
 - An **Auto-merge** pill when auto-merge is enabled.
 - Refreshed as your agents work, plus a per-card refresh button.
+- Always the PR for the branch the worktree has checked out right now. Switch
+  branches, or let an agent check the default branch back out once its PR
+  merged, and the old branch's PR clears instead of lingering on the card.
 
 | On the worktree card | Connecting a token |
 | :--- | :--- |
