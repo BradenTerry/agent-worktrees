@@ -401,7 +401,14 @@ others, so `refreshAgents` re-reads the session files, swaps the agent VMs into
 the last gathered payload, and re-runs `git status` only for the worktrees
 whose sessions actually fired (the watcher records each changed file's session
 id). It falls back to a full refresh when a session appears in a worktree the
-cached payload does not know — an agent just created one with `claude -w`. The
+cached payload does not know (an agent just created one with `claude -w`), and
+when one of those `git status` calls reports a branch other than the one the
+cached payload carries, which is an agent having run `git checkout` (typically
+back to the default branch once its PR merged). A branch change invalidates more
+than the patched fields: the card's branch name, and the PR the PR service is
+targeting, both of which only the full gather can re-derive. The branch comes
+free with the status call, since `git status --porcelain=v2 --branch` already
+prints a `# branch.head` header, so the check costs no extra process. The
 posted-payload dedupe also strips the `lastActivity` heartbeat (bumped by every
 hook event, never rendered) from its signature, so an agent streaming tool
 calls no longer re-posts — and full-DOM-rebuilds — a byte-identical panel.
@@ -540,7 +547,18 @@ A branch with no open PR in the bulk list: a cached merged/closed PR is
 terminal and never refetched (anything new would be an open PR and appear in
 the bulk list), and such PRs no longer count toward the fast poll cadence; an
 uncached branch, or one whose PR just left the open list, pays one `state=all`
-lookup to learn its state. Every request stays ETag-conditional (304 replies
+lookup to learn its state.
+
+Every cache entry is tagged with the branch it was fetched for, and the panel
+reads it back by (worktree, branch). A worktree that changes branch therefore
+reads as "not known yet" rather than showing the branch it left. The case that
+matters is a merged PR, because the terminal-state rule above means a stale one
+would otherwise sit on the card forever, never re-checked. The tag also guards
+the write side: a poll that started before the switch does not store its result
+against the new branch (and does not reuse the old branch's value as its
+`prior`), and a refresh requested while one is already in flight is queued
+rather than dropped, so the new branch is fetched as soon as the running poll
+finishes instead of at the next timer tick. Every request stays ETag-conditional (304 replies
 do not count against the rate limit), and the token is memoized instead of
 re-read from SecretStorage on every call (invalidated via
 `secrets.onDidChange`, so a token change in another window is picked up).

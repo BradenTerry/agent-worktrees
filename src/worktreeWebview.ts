@@ -461,6 +461,19 @@ export class WorktreeWebviewProvider
       )
     );
     const statuses = await mapLimit(touched, 4, (wt) => getStatus(wt.path));
+    // An agent that ran `git checkout` (typically back to main once its PR
+    // merged) changed more than this cached payload can patch: the card's
+    // branch name, and the PR status keyed off it. The status call already
+    // reports the checked-out branch, so a mismatch here means the cache is
+    // stale in ways only a full gather can fix, including re-targeting the PR
+    // service, which otherwise keeps polling (and showing) the old branch's PR.
+    // Only a positively reported, different branch counts: a status that failed
+    // (or a detached HEAD) reports none, and treating that as a switch would
+    // fall back to a full refresh on every hook event.
+    const switched = touched.some(
+      (wt, i) => !!statuses[i].branch && statuses[i].branch !== wt.branch
+    );
+    if (switched) return this.refresh();
     touched.forEach((wt, i) => (wt.git = statuses[i]));
     for (const wt of data.worktrees) {
       wt.agents = agents.get(normalize(wt.path)) ?? [];
@@ -526,7 +539,11 @@ export class WorktreeWebviewProvider
     }
 
     for (const wt of data.worktrees) {
-      const pr = this.prService.get(normalize(wt.path));
+      if (!wt.branch) continue;
+      // Branch-matched: a value cached for a branch this worktree no longer has
+      // checked out reads as unknown, so a merged PR never outlives the branch
+      // it belonged to.
+      const pr = this.prService.get(normalize(wt.path), wt.branch);
       if (pr !== undefined) wt.pr = pr;
     }
   }
