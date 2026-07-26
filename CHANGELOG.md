@@ -24,6 +24,23 @@ All notable changes to the Agent Worktrees extension are documented here.
   session's next hook event. A dead pid is deliberately not treated as proof on
   Windows, where a hook run through a short-lived shell wrapper would look exactly
   like a dead agent; the argv check covers Windows instead.
+- **A merged PR no longer lingers after the worktree changes branch** - a card
+  could keep showing the pull request of the branch its worktree had left, and it
+  never cleared, because a merged PR is terminal and the quiet path never
+  refetched it. Two things kept it there. The PR poller wrote its results back
+  keyed only by worktree path, so a poll already in flight when an agent ran
+  `git checkout` restored the old branch's PR moments after the switch had pruned
+  it, and the refresh the switch asked for was dropped outright because one was
+  already running. Cache entries now carry the branch they were fetched for, a
+  value from another branch reads as not-known, the write-back is skipped when
+  the branch moved mid-fetch, and a refresh requested during an in-flight one is
+  queued instead of dropped. Separately, the hook-driven agent refresh patches
+  the cached payload rather than re-gathering, so an agent's checkout never
+  re-targeted the PR service at all; it now falls back to a full refresh when
+  `git status` reports a different branch, read from the status output already
+  being collected so the check costs no extra process. Switching branches from
+  the panel usually won that race, which is why this mostly showed up after an
+  agent switched branches.
 
 ## 3.7.0
 
