@@ -2,7 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { AgentVM, AgentStatus, SubagentVM, normalize } from "./worktreeData";
 
-/** Raw per-session state written by the emitter hook. */
+/** Raw per-session state written by the emitter hook. The liveness markers it
+ *  also writes (`pid`, `launched`) are read by pruneDeadSessions in liveness.ts,
+ *  which retires the files this reader would otherwise keep showing. */
 interface SessionState {
   sessionId: string;
   worktree: string;
@@ -21,7 +23,10 @@ interface SessionState {
 
 // A session whose state file is older than this is treated as gone: a terminal
 // closed without /exit never fires SessionEnd, so its last (usually idle) file
-// would otherwise linger forever.
+// would otherwise linger forever. Only the backstop for files the liveness sweep
+// (pruneDeadSessions) cannot judge — written by an emitter too old to record
+// either marker; a session whose process can be probed is retired as soon as it
+// dies.
 const SESSION_MAX_AGE = 24 * 3_600_000;
 
 const VALID: AgentStatus[] = ["active", "waiting", "idle"];

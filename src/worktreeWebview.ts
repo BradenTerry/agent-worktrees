@@ -45,6 +45,7 @@ import {
 } from "./git";
 import { hooksInstalled, installHooks, sessionsDir, HOOKS } from "./hooks";
 import { readSessionsByWorktree } from "./sessionStore";
+import { pruneDeadSessions } from "./liveness";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import {
   initGithub,
@@ -64,6 +65,14 @@ import { diag } from "./diagnostics";
  *  Refreshing spawns git per worktree, so coalescing keeps a flood of watcher
  *  events (heaviest on Windows) down to one refresh. */
 const REFRESH_DEBOUNCE_MS = 500;
+
+/** Minimum gap (ms) between liveness sweeps of the session-state dir. The sweep
+ *  reads every state file and, when one looks dead, scans the process table, so
+ *  it must not ride along with every refresh (window focus alone can trigger
+ *  those). Sessions are retired within a sweep of dying, which for the case that
+ *  matters — a reopened window showing agents from the closed one — is the
+ *  activation refresh, before anything is ever rendered. */
+const LIVENESS_SWEEP_MS = 30_000;
 
 /** globalState key for the opt-in Source Control scope button. */
 const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
@@ -197,6 +206,14 @@ export class WorktreeWebviewProvider
   /** Names waiting to be applied, for sessions whose terminal is not the one
    *  the user is currently looking at; see flushTerminalNames. */
   private desiredTerminalNames = new Map<string, string>();
+  /** When the last liveness sweep ran; 0 so the first refresh always sweeps. */
+  private lastLivenessSweep = 0;
+  /** A sweep is in flight; refreshes overlap (they are debounced separately),
+   *  and two concurrent sweeps would scan the process table twice. */
+  private sweeping = false;
+  /** Pending self-triggered re-sweep for sessions the last one found too recent
+   *  to judge; see sweepDeadAgents. */
+  private livenessRecheck?: ReturnType<typeof setTimeout>;
   /** Where the emitter writes per-session state, under the extension's global
    *  storage (so nothing of ours lives in ~/.claude). Derived from the context. */
   private readonly sessionsDir: string;
@@ -291,6 +308,7 @@ export class WorktreeWebviewProvider
   dispose(): void {
     this.watcher?.dispose();
     this.branchesPanel?.dispose();
+    if (this.livenessRecheck) clearTimeout(this.livenessRecheck);
     this.refreshDebounce.cancel();
     this.prNudge.cancel();
     this.agentsDebounce.cancel();
@@ -351,6 +369,7 @@ export class WorktreeWebviewProvider
     if (!this.view) return;
     const seq = ++this.updateSeq;
     const installed = await hooksInstalled();
+    if (installed) await this.sweepDeadAgents();
     const agents = installed
       ? await readSessionsByWorktree(this.sessionsDir)
       : undefined;
@@ -449,6 +468,11 @@ export class WorktreeWebviewProvider
     const seq = ++this.updateSeq;
     const changed = new Set(this.pendingSessionIds);
     this.pendingSessionIds.clear();
+    // Throttled, so a busy agent's hook stream doesn't sweep on every event. It
+    // still belongs on this path: an agent dying in another window is not a
+    // signal this window gets, so without it a stale row could sit there until
+    // the next full refresh.
+    await this.sweepDeadAgents();
     const agents = await readSessionsByWorktree(this.sessionsDir);
     this.syncTerminalNames(agents);
     const known = new Set(data.worktrees.map((wt) => normalize(wt.path)));
@@ -1201,6 +1225,62 @@ export class WorktreeWebviewProvider
     terminal.show();
     terminal.sendText(`claude --session-id ${sessionId} -w`);
     await this.refresh();
+  }
+
+  /**
+   * Retire agents whose Claude process is gone (see pruneDeadSessions). The
+   * session list lives in global storage shared by every window and nothing
+   * cleans it up when a session dies with its terminal, so a window that opens
+   * later would otherwise show those agents as live rows it has no terminal for.
+   *
+   * Throttled and single-flight; failures are swallowed, since a sweep that
+   * cannot run just leaves the rows as they are today.
+   */
+  private async sweepDeadAgents(force = false): Promise<void> {
+    const now = Date.now();
+    if (this.sweeping) return;
+    if (!force && now - this.lastLivenessSweep < LIVENESS_SWEEP_MS) return;
+    this.sweeping = true;
+    this.lastLivenessSweep = now;
+    try {
+      const { dead, recheckIn } = await pruneDeadSessions(this.sessionsDir);
+      // A session that died seconds ago is held back by the sweep's grace
+      // period, and its file will never be written again — so nothing would
+      // bring us back to it. Come back once the grace has passed (a window
+      // reopened right after the one running those agents was closed).
+      this.armLivenessRecheck(recheckIn);
+      for (const id of dead) {
+        // Drop any terminal handle for it. On a reopened window this is the
+        // revived (process-less) terminal VS Code restored for the dead agent,
+        // which reclaimTerminal linked purely by its env marker.
+        this.terminals.delete(id);
+        this.appliedTerminalNames.delete(id);
+        this.desiredTerminalNames.delete(id);
+      }
+      if (dead.length) {
+        diag(`retired ${dead.length} dead session(s): ${dead.join(", ")}`);
+        // Rows to remove: push the new state now rather than waiting for the
+        // caller's next refresh cycle (the timer path has none).
+        this.scheduleRefresh();
+      }
+    } catch {
+      /* best effort: a failed sweep leaves the rows alone */
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
+  /** Schedule the one follow-up sweep a grace-deferred session needs, replacing
+   *  any pending one (the earliest deadline is always the useful one). */
+  private armLivenessRecheck(delay: number): void {
+    if (this.livenessRecheck) clearTimeout(this.livenessRecheck);
+    this.livenessRecheck = undefined;
+    if (delay <= 0) return;
+    this.livenessRecheck = setTimeout(() => {
+      this.livenessRecheck = undefined;
+      // Forced: the deadline is shorter than the sweep throttle.
+      void this.sweepDeadAgents(true);
+    }, delay + 1_000);
   }
 
   /** Reveal the terminal backing an agent (if this window launched it). */

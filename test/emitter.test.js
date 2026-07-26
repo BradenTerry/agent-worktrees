@@ -664,6 +664,61 @@ test("a state write that cannot land never fails the hook", () => {
   assert.strictEqual(r.stdout, "");
 });
 
+test("records the pid of the process that ran the hook", () => {
+  // Claude Code runs a hook as a direct child of the session process, so the
+  // emitter's parent IS the agent — here, this test process. That pid is what
+  // lets the panel retire a session that died without firing SessionEnd.
+  const sid = "session-pid";
+  const r = run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo });
+  assert.strictEqual(r.status, 0);
+  const s = stateOf(sid);
+  assert.strictEqual(s.pid, process.pid);
+  assert.ok(!s.launched, "no launch marker without AGENT_WORKTREES_SID");
+});
+
+test("marks a session the extension launched", () => {
+  // The launch id is also on the live process's argv (`claude --session-id`),
+  // so the panel can check that session's liveness without reading parents.
+  const sid = "session-launched";
+  const env = {
+    ...process.env,
+    AGENT_WORKTREES_DIR: sessions,
+    AGENT_WORKTREES_SID: sid,
+  };
+  const r = spawnSync("node", [EMITTER], {
+    input: JSON.stringify({
+      hook_event_name: "SessionStart",
+      session_id: "some-other-live-id",
+      cwd: repo,
+    }),
+    cwd: repo,
+    encoding: "utf8",
+    env,
+  });
+  assert.strictEqual(r.status, 0);
+  const s = stateOf(sid);
+  assert.strictEqual(s.launched, true);
+  assert.strictEqual(s.sessionId, sid);
+});
+
+test("a subagent's event does not re-stamp the session's pid", () => {
+  // Subagent-fired hooks may come from a shorter-lived process whose exit says
+  // nothing about the session, so the pid recorded for the session is kept.
+  const sid = "session-subpid";
+  run({ hook_event_name: "SessionStart", session_id: sid, cwd: repo });
+  const file = path.join(sessions, sid + ".json");
+  const seeded = { ...JSON.parse(fs.readFileSync(file, "utf8")), pid: 4242 };
+  fs.writeFileSync(file, JSON.stringify(seeded));
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Read",
+    session_id: sid,
+    agent_id: "sub-1",
+    cwd: repo,
+  });
+  assert.strictEqual(stateOf(sid).pid, 4242);
+});
+
 test("SessionEnd removes the state file", () => {
   const r = run({ hook_event_name: "SessionEnd", session_id: SID, cwd: repo });
   assert.strictEqual(r.status, 0);

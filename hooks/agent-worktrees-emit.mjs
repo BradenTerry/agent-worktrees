@@ -17,7 +17,7 @@
  *   ($AGENT_WORKTREES_SID, stable across /resume) when present, else the live
  *   session_id.
  *   = { sessionId, worktree, branch, cwd, state, task, skills, subagents,
- *       pendingSubagents, model, startedAt, titleCheckTs, ts }
+ *       pendingSubagents, model, pid, launched, startedAt, titleCheckTs, ts }
  * SessionEnd removes the file so the agent disappears when its session exits.
  */
 import { execFileSync } from "node:child_process";
@@ -294,7 +294,8 @@ function main() {
   // working after a resume. For sessions NOT launched by the extension (no env
   // marker) we key by the live session id, falling back to a sanitized worktree
   // name so a bare session that named no id still tracks.
-  let id = safeId(process.env.AGENT_WORKTREES_SID) || safeId(payload.session_id);
+  const launchId = safeId(process.env.AGENT_WORKTREES_SID);
+  let id = launchId || safeId(payload.session_id);
   if (!id) {
     resolved = resolveGit(cwd);
     id =
@@ -592,6 +593,32 @@ function main() {
     pendingSubs = [];
   }
 
+  // Liveness markers, so a state file left behind by a session that died without
+  // ever firing SessionEnd (its window was closed, its terminal killed, a crash)
+  // can be told apart from a live agent that is merely sitting idle. Without
+  // them the panel has only the file's age to go on, so a dead agent shows as a
+  // row — often mid-work — for a whole day, and in a freshly opened window there
+  // is no terminal behind it at all.
+  //
+  // Claude Code runs a hook command as a direct child of the session process, so
+  // our parent pid IS the agent: if that pid is gone, so is the agent. Stamped
+  // on every event, so a session that is resumed into (or re-execs as) another
+  // process re-stamps the pid that is actually running it. Never from a
+  // subagent-fired event: those may come from a shorter-lived process whose exit
+  // says nothing about the session. A parent that has already exited leaves us
+  // reparented to init (ppid 1), which is not a pid worth recording.
+  //
+  // `launched` marks the id as one the extension generated and passed on Claude's
+  // own argv (`claude --session-id <id>`), so its liveness can also be checked by
+  // looking for that id in the running processes' command lines — the check that
+  // still works where reading another process's parent does not.
+  const pid =
+    !subagentId && Number.isInteger(process.ppid) && process.ppid > 1
+      ? process.ppid
+      : typeof prior.pid === "number"
+      ? prior.pid
+      : 0;
+
   const ev = {
     sessionId: id,
     worktree: top,
@@ -603,6 +630,8 @@ function main() {
     model: payload.model || "claude",
     startedAt,
     ts: now,
+    ...(pid ? { pid } : {}),
+    ...(launchId ? { launched: true } : {}),
     ...(titleCheckTs ? { titleCheckTs } : {}),
     ...(task ? { task } : {}),
     ...(skills.length ? { skills } : {}),

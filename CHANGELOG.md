@@ -2,6 +2,46 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.7.1
+
+- **Agents that are no longer running are retired instead of lingering** - a
+  session that exits cleanly fires `SessionEnd` and removes its own row, but one
+  that dies with its terminal never gets the chance: closing the VS Code window,
+  killing the terminal or restarting the machine all leave the session's state
+  file behind with whatever status it last had. Since that state lives in storage
+  shared by every window, reopening a window showed those agents as live rows -
+  frequently mid-work, with a spinner and an Activity Bar badge - with no process
+  and no terminal anywhere behind them, and only a 24 hour age cutoff to clear
+  them. The panel now checks whether each session's process is actually there and
+  drops the ones that are gone. Two markers make that possible: Claude Code runs
+  a hook as a direct child of the session process, so the emitter records its
+  parent pid (checked with a signal-0 probe, no process spawn), and sessions the
+  extension launched are also matched by the `--session-id` it passed on Claude's
+  own argv, which is how a session resumed into a different process is recognised
+  as still alive. A retirement needs positive evidence of death, never just the
+  absence of evidence of life, so an agent running in another window or in a
+  terminal outside VS Code stays listed, and a wrong call self-heals on the
+  session's next hook event. A dead pid is deliberately not treated as proof on
+  Windows, where a hook run through a short-lived shell wrapper would look exactly
+  like a dead agent; the argv check covers Windows instead.
+- **A merged PR no longer lingers after the worktree changes branch** - a card
+  could keep showing the pull request of the branch its worktree had left, and it
+  never cleared, because a merged PR is terminal and the quiet path never
+  refetched it. Two things kept it there. The PR poller wrote its results back
+  keyed only by worktree path, so a poll already in flight when an agent ran
+  `git checkout` restored the old branch's PR moments after the switch had pruned
+  it, and the refresh the switch asked for was dropped outright because one was
+  already running. Cache entries now carry the branch they were fetched for, a
+  value from another branch reads as not-known, the write-back is skipped when
+  the branch moved mid-fetch, and a refresh requested during an in-flight one is
+  queued instead of dropped. Separately, the hook-driven agent refresh patches
+  the cached payload rather than re-gathering, so an agent's checkout never
+  re-targeted the PR service at all; it now falls back to a full refresh when
+  `git status` reports a different branch, read from the status output already
+  being collected so the check costs no extra process. Switching branches from
+  the panel usually won that race, which is why this mostly showed up after an
+  agent switched branches.
+
 ## 3.7.0
 
 - **Subagents are now shown live, under the agent running them** - the panel
