@@ -36,6 +36,12 @@ its running agents in one view.
   to be stopped, uncommitted changes to be discarded, the branch left behind and
   its unpushed commits. Offers **Remove** or **Remove and Delete Branch**, then
   needs no follow-up prompts.
+- **[Run and Debug](docs/debug-sessions.md)** per worktree: a Debug button (only on
+  cards whose worktree has launch configurations) picks one of its
+  `.vscode/launch.json` targets, with or without the debugger, and rows underneath
+  stop the sessions it started. The Run and Debug view itself cannot be retargeted
+  by an extension, so the panel drives `debug.startDebugging` with the folder
+  variables rewritten to the worktree.
 - **Stale lock cleanup** for the locks `claude -w` leaves behind when a session
   crashes. Only locks naming a claude pid that is no longer running are cleared.
 - **[Linked files](docs/linked-files.md)** symlinked into every worktree the panel
@@ -131,6 +137,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | [Subagents](docs/subagents.md) | What registers and retires a subagent row, and which card it lands on |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the agent-only path, why there is no `**/*` watcher |
 | [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |
+| [Run and Debug in a worktree](docs/debug-sessions.md) | Why the debug view can't be retargeted, launch.json parsing, session tracking |
 | [Terminal tab titles](docs/terminal-titles.md) | Why the extension does not pass `name` to `createTerminal` |
 | [Linked files](docs/linked-files.md) | The symlink list and the Windows junction/hard-link fallbacks |
 

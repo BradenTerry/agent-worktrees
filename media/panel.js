@@ -41,6 +41,13 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
+    // Run and Debug: VS Code's own play-with-bug shape, so the action reads as
+    // "debug" rather than a generic play.
+    debug:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M4 2.8l7 5.2-7 5.2z"/><circle cx="7.4" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>',
+    // A running debug session, mirroring VS Code's debug-stop square.
+    debugStop:
+      '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>',
     // A running subagent: an elbow connector down from the parent row into a
     // node, so a subagent reads as belonging to the agent above it.
     subagent:
@@ -800,6 +807,59 @@
       icons.window +
       "</button>";
 
+    // Run and Debug for this worktree. Only rendered when the worktree has
+    // launch configurations of its own; a repo with no debug setup gets no
+    // button. It shares the action row with New agent (which is right-aligned),
+    // so it fills space the card already had rather than adding a row.
+    const debugSessions = wt.debugSessions || [];
+    const debugBtn = wt.canDebug
+      ? '<button class="act ghost debug' +
+        (debugSessions.length ? " running" : "") +
+        '" data-action="debugWorktree" data-path="' +
+        esc(wt.path) +
+        '" data-tip="' +
+        (debugSessions.length
+          ? "Start another launch configuration in this worktree"
+          : "Run a launch configuration from this worktree (with or without debugging)") +
+        '">' +
+        icons.debug +
+        "<span>Debug</span></button>"
+      : "";
+
+    // Rows for the sessions this panel started. VS Code's debug toolbar can stop
+    // them too, but it acts on the one session it considers active, so the card
+    // carries a stop button per session: that is the only place a specific
+    // worktree's session can be named and stopped.
+    const debugRows = debugSessions.length
+      ? '<div class="debug-rows">' +
+        debugSessions
+          .map(
+            (s) =>
+              '<div class="debug-row">' +
+              '<span class="debug-ico">' +
+              icons.debug +
+              "</span>" +
+              '<span class="debug-label" data-tip="' +
+              esc(s.label) +
+              '">' +
+              esc(s.label) +
+              "</span>" +
+              (s.noDebug
+                ? '<span class="debug-chip" data-tip="Started without debugging (no breakpoints)">no debug</span>'
+                : "") +
+              '<span class="row-actions">' +
+              '<button class="iconbtn" data-action="stopDebug" data-debug="' +
+              esc(s.id) +
+              '" title="Stop this session">' +
+              icons.debugStop +
+              "</button>" +
+              "</span>" +
+              "</div>"
+          )
+          .join("") +
+        "</div>"
+      : "";
+
     // Delete (git worktree remove) — never for the primary worktree.
     const deleteBtn = wt.isPrimary
       ? ""
@@ -831,8 +891,10 @@
       gitLine(wt.git, wt.path, wt.scmActive) +
       "</div>" +
       '<div class="agent-action-row">' +
+      debugBtn +
       agentBtn +
       "</div>" +
+      debugRows +
       prLine(wt.pr) +
       agentsBar(agents, wt.path, foreign) +
       '<div class="card-body">' +
@@ -2228,6 +2290,15 @@
       // Fetch Open PRs: API-only re-poll of open PR/CI status, no git fetch.
       if (action === "refreshGithub") {
         send("refreshGithub");
+        return;
+      }
+      // Stop one debug session by its VS Code session id. The row is removed by
+      // the extension's terminate event, not here, so a session that refuses to
+      // die keeps its stop button.
+      if (action === "stopDebug") {
+        send("stopDebug", {
+          debugId: btn.getAttribute("data-debug") || undefined,
+        });
         return;
       }
       send(action, {

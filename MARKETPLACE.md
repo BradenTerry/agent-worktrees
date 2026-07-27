@@ -18,6 +18,8 @@ single view.
 - **Watch each agent's status live**: active, waiting, or idle.
 - **Get a badge on the Activity Bar** the moment an agent is blocked on you.
 - **Read PR state, CI checks and reviews** on the worktree card, no browser tab.
+- **Run or debug a worktree's launch configuration** without opening it in another
+  window, and stop the session from the same card.
 - **Work every branch in the repo** from a dedicated Branches tab.
 
 ## Agents
@@ -126,6 +128,29 @@ your build or tests depend on is simply missing, and they fail.
 - A file a worktree genuinely owns is never overwritten.
 - Works on Windows without Developer Mode or administrator rights: folders use a
   junction, files fall back to a hard link.
+
+## Run and Debug a worktree
+
+VS Code's Run and Debug view always launches out of your main folder, so debugging
+the code in a worktree normally means opening that worktree in its own window
+first. The panel adds a **Debug** button to each card instead.
+
+- **Pick any launch configuration from that worktree's own `launch.json`**, so a
+  branch that added or changed a configuration offers it.
+- **Run with or without the debugger**: accept a configuration to debug it, or
+  click the play icon on its row to run it without breakpoints.
+- **Compounds work too**, starting their configurations in order.
+- **The program runs in the worktree.** `${workspaceFolder}` and the working
+  directory point at that checkout, not your main one.
+- **The build runs there too.** A configuration's `preLaunchTask` is run against
+  the worktree, so you debug the change you just made in it rather than whatever
+  your main checkout last built. If the build fails, nothing launches.
+- **Stop it from the same card.** Each running session gets a row with a stop
+  button, named after the configuration and the worktree, so with several
+  worktrees running you always stop the right one.
+
+The button appears only on worktrees that have launch configurations, so a repo
+with no debug setup gets no extra clutter.
 
 ## Also included
 

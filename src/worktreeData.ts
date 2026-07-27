@@ -11,6 +11,7 @@ import {
   GitStatus,
 } from "./git";
 import { normalizePath } from "./worktreeUtils";
+import { DebugSessionVM } from "./debugRun";
 import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
 import { diag } from "./diagnostics";
 
@@ -123,6 +124,13 @@ export interface WorktreeVM {
    *  Control view (i.e. the scope is "set"). Only set when the SCM integration
    *  is enabled. */
   scmActive?: boolean;
+  /** True when this worktree has launch configurations of its own, which is what
+   *  puts the Debug button on the card. Re-read on each full refresh. */
+  canDebug?: boolean;
+  /** Debug sessions this extension started in this worktree, so the card can
+   *  offer a stop button for each (the Run and Debug view cannot be retargeted,
+   *  so the panel owns both ends). */
+  debugSessions?: DebugSessionVM[];
 }
 
 export interface WorktreeData {

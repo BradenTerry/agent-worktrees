@@ -48,6 +48,11 @@ import { readSessionsByWorktree } from "./sessionStore";
 import { pruneDeadSessions } from "./liveness";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import {
+  DebugSessionTracker,
+  hasDebugTargets,
+  startWorktreeDebug,
+} from "./debugRun";
+import {
   initGithub,
   connection,
   setToken,
@@ -124,9 +129,13 @@ interface ActionMessage {
     | "refreshGithub"
     | "worktreeFromBranch"
     | "deleteBranch"
-    | "deleteGoneBranches";
+    | "deleteGoneBranches"
+    | "debugWorktree"
+    | "stopDebug";
   path?: string;
   sessionId?: string;
+  /** Debug session id, for stopDebug. */
+  debugId?: string;
   /** GitHub PAT, for setGithubToken. */
   token?: string;
   /** New on/off state, for togglePr; or the Prune choice for fetchBranches. */
@@ -229,10 +238,15 @@ export class WorktreeWebviewProvider
   /** True once we've subscribed to the Git extension's repo open/close events,
    *  so the panel re-renders when the Source Control scope changes. */
   private scmWatchSet = false;
+  /** Debug sessions the panel started, so a card can stop what it launched. */
+  private readonly debugSessions = new DebugSessionTracker();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     initGithub(context);
     this.prService = new PrService(context);
+    // A session starting or ending only changes the debug rows, so patch the
+    // cached payload rather than re-running the git gather for every worktree.
+    this.debugSessions.onDidChange(() => this.postDebugState());
     this.refreshDebounce = new Coalescer(
       () => this.refresh(),
       REFRESH_DEBOUNCE_MS
@@ -317,6 +331,9 @@ export class WorktreeWebviewProvider
     this.refreshDebounce.cancel();
     this.prNudge.cancel();
     this.agentsDebounce.cancel();
+    // Only stops tracking: the sessions themselves belong to VS Code and keep
+    // running, exactly as they would if they had been started from the debug view.
+    this.debugSessions.dispose();
   }
 
   /** Coalesce bursts of discrete events (window focus, SCM scope changes) into a
@@ -385,6 +402,7 @@ export class WorktreeWebviewProvider
     this.unplacedSubagents = sessions?.unplaced ?? new Set();
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
+    await this.annotateDebug(data);
     data.traceEnabled = vscode.workspace
       .getConfiguration()
       .get<boolean>(TRACE_SETTING, false);
@@ -671,9 +689,67 @@ export class WorktreeWebviewProvider
         return void vscode.commands.executeCommand("worktreeView.showLog");
       case "scopeScm":
         return this.scopeScm(msg.path);
+      case "debugWorktree":
+        return this.debugWorktree(msg.path);
+      case "stopDebug":
+        return this.stopDebug(msg.debugId);
       case "openBranches":
         return this.openBranchesPanel();
     }
+  }
+
+  // --- Run and Debug ---------------------------------------------------------
+
+  /**
+   * Start a debug session in a worktree. The target quick pick lives in
+   * debugRun.ts; this only resolves which card was clicked and re-renders, since
+   * a started session adds a row (the tracker's onDidChange also fires, so this
+   * post is only for the case where nothing started).
+   */
+  private async debugWorktree(fsPath?: string): Promise<void> {
+    if (!fsPath) return;
+    const wt = this.lastData?.worktrees.find(
+      (w) => normalize(w.path) === normalize(fsPath)
+    );
+    await startWorktreeDebug(fsPath, wt?.name ?? path.basename(fsPath));
+  }
+
+  /** Stop one debug session the panel started. */
+  private async stopDebug(id?: string): Promise<void> {
+    if (!id) return;
+    await this.debugSessions.stop(id);
+  }
+
+  /**
+   * Record which worktrees can be debugged and which have sessions running.
+   * The launch.json read is one file read per worktree, on the full refresh
+   * only, so adding a launch.json shows up on the next one rather than instantly.
+   */
+  private async annotateDebug(data: WorktreeData): Promise<void> {
+    await Promise.all(
+      data.worktrees.map(async (wt) => {
+        wt.canDebug = await hasDebugTargets(wt.path);
+        const sessions = this.debugSessions.forWorktree(wt.path);
+        if (sessions.length) wt.debugSessions = sessions;
+      })
+    );
+  }
+
+  /**
+   * Re-post with fresh debug-session rows. Called when a session starts or ends:
+   * the sessions are the only thing that changed, so this patches the cached
+   * payload instead of re-running the git gather (the same trick refreshAgents
+   * uses for hook events).
+   */
+  private postDebugState(): void {
+    const data = this.lastData;
+    if (!this.view || !data) return;
+    for (const wt of data.worktrees) {
+      const sessions = this.debugSessions.forWorktree(wt.path);
+      if (sessions.length) wt.debugSessions = sessions;
+      else delete wt.debugSessions;
+    }
+    this.postData(data, ++this.updateSeq);
   }
 
   // --- Source Control --------------------------------------------------------
