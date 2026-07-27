@@ -2,6 +2,36 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.8.0
+
+- **Run and debug a worktree from its card** - VS Code's Run and Debug view
+  always launches out of your main folder, and no extension can retarget it: its
+  dropdown is built from the workspace folders' launch configurations and the
+  selection belongs to the user. Debugging a change made in a worktree therefore
+  meant opening that worktree in its own window first. Cards whose worktree has
+  launch configurations of its own now carry a **Debug** button, sharing the row
+  with New agent so it costs the card no space. It lists that worktree's
+  `.vscode/launch.json` targets, including compounds, and starts one with the
+  debugger, or without it via the play icon on the row. The program really does
+  run in the worktree: `${workspaceFolder}`, `${workspaceRoot}` and
+  `${workspaceFolderBasename}` are rewritten to that checkout throughout the
+  configuration, including inside nested `args` and `env` values, and the working
+  directory defaults to it unless the configuration sets one. Every other
+  `${...}` variable is still resolved by VS Code. A configuration's
+  `preLaunchTask` runs in the worktree too, which is what makes the session
+  reflect the change you just made rather than whatever your main checkout last
+  built: the label is resolved against the worktree's own `tasks.json` (or its
+  package.json for an auto-detected `npm: <script>`), run with the worktree as
+  its working directory, and a failing build stops the launch instead of debugging
+  output it never produced. A task type that cannot be reproduced faithfully, a
+  background watch task, and `postDebugTask` are each reported rather than
+  silently skipped. Because these sessions start outside the debug view, the card
+  also carries the way out: each running session gets a row naming its
+  configuration and worktree, with a stop button that is always visible, so with
+  several worktrees running something you stop the right one. Only sessions the
+  panel started are listed, never one you launched yourself, and the sessions
+  keep running if the extension host reloads.
+
 ## 3.7.2
 
 - **A subagent working in its own worktree is now shown on that worktree's

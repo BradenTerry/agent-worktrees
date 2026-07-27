@@ -93,6 +93,8 @@ function overviewData() {
         locked: false,
         inWorkspace: true,
         git: { dirty: 0, insertions: 0, deletions: 0, ahead: 0, behind: 2 },
+        // Has launch configurations, nothing running: the Debug button only.
+        canDebug: true,
         agents: [
           {
             sessionId: "s-main-1",
@@ -130,6 +132,16 @@ function overviewData() {
         // renders filled while the others show the inactive state.
         scmActive: true,
         git: { dirty: 4, insertions: 212, deletions: 38, ahead: 3, behind: 0 },
+        // A debug session the panel started in this worktree, with the stop
+        // button that is the way back out of it.
+        canDebug: true,
+        debugSessions: [
+          {
+            id: "dbg-checkout-api",
+            label: "Run API (feat/checkout-redesign)",
+            noDebug: false,
+          },
+        ],
         agents: [
           {
             sessionId: "s-co-1",
@@ -203,6 +215,16 @@ function overviewData() {
         locked: false,
         inWorkspace: false,
         git: { dirty: 1, insertions: 9, deletions: 4, ahead: 1, behind: 0 },
+        // Started with "Run without debugging", so the row carries the chip that
+        // says no debugger is attached.
+        canDebug: true,
+        debugSessions: [
+          {
+            id: "dbg-login-web",
+            label: "Web (fix/login-race)",
+            noDebug: true,
+          },
+        ],
         agents: [
           {
             sessionId: "s-lf-1",
