@@ -7,7 +7,9 @@ The panel cannot tell on its own whether a Claude session is working, waiting on
 you, or idle. Claude Code's
 [hooks](https://docs.claude.com/en/docs/claude-code/hooks) fire exactly on those
 transitions, so the extension installs one small emitter script wired to a handful
-of events.
+of events. Claude also records a status for each session itself, which the panel
+prefers wherever it is available - see
+[Claude's own status wins](#claudes-own-status-wins).
 
 | Hook                                                                              | Status             |
 | --------------------------------------------------------------------------------- | ------------------ |
@@ -27,6 +29,61 @@ Two of those do more than set a status:
   path, ahead of any prompt, and fires for calls an allowlist or auto mode settles
   silently, so reporting a status from it would clear a genuine waiting state (and
   the Activity Bar badge) while the user was still answering.
+
+## Claude's own status wins
+
+Claude Code keeps a registry of its live sessions at
+`~/.claude/sessions/<pid>.json` (`$CLAUDE_CONFIG_DIR/sessions` when that is set),
+and since **v2.1.119** records what each one is doing in a `status` field that it
+rewrites on every transition:
+
+```json
+{ "pid": 567, "sessionId": "...", "cwd": "/repo", "status": "busy",
+  "startedAt": 1785193745550, "version": "2.1.220", "kind": "interactive",
+  "name": "agent-worktrees-9f" }
+```
+
+That answers the same question the emitter answers by watching events go by,
+except it comes from the process itself, so `src/sessionRegistry.ts` reads it on
+every refresh and it takes precedence:
+
+| Claude's `status` | Panel   |
+| ----------------- | ------- |
+| `busy`            | active  |
+| `shell`           | active  |
+| `waiting`         | waiting |
+| `idle`            | idle    |
+
+- `shell` is a local bash command rather than an LLM turn, but it is work in
+  progress as far as the user is concerned.
+- A status this table does not list maps to **nothing**, leaving the hook-derived
+  state alone. A new status Claude adds should be added here rather than
+  collapsing to a default.
+- Reading the registry costs no process: the hooks stay as they are, and the
+  status they derive is the fallback for anything the registry cannot answer.
+
+**Why prefer it.** The event stream can be wrong in ways the process never is: a
+session resumed in another terminal, a `Notification` that arrived while no
+window was open, a long `Bash` call that looks identical to a finished turn.
+
+**What it cannot do.** The registry has no subagents, no skills and no work
+summary, and no `status` at all on older versions — observed missing on 2.1.220
+for a session whose `entrypoint` was not a local one. Everything it does not
+know is left exactly as the hook state files described it, which is why the hooks
+are still what the panel is built on.
+
+**Sessions only Claude knows about** become rows of their own, placed on the card
+whose worktree path contains their `cwd` (longest match, so a nested worktree
+keeps its own agents). That is how a session started before the hooks were
+installed still shows up. A session working outside every worktree has no card to
+land on and is skipped.
+
+**Liveness.** Claude deletes a session's file when it exits, but a killed process
+leaves one behind, so each is confirmed with its recorded pid. Unlike the pid in
+our own state files — the hook's parent, which is why
+[the sweep](#retiring-agents-that-are-no-longer-running) will not trust a missing one
+on Windows — this pid is the Claude process itself, so its absence is proof
+everywhere.
 
 ## `Notification` is not always "waiting"
 

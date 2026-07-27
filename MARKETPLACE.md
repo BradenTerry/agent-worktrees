@@ -59,9 +59,11 @@ single view.
 
 ### Status
 
-Status comes from Claude Code's hooks, which the extension installs only with
-your explicit consent. **Nothing is sent over the network.** State flows through
-local files, and you can remove the hooks anytime by editing
+Status comes from Claude Code itself: it records what each session is doing, and
+the panel reads that. Everything else on a row - the work summary, skills and
+subagents - comes from Claude Code's hooks, which the extension installs only
+with your explicit consent. **Nothing is sent over the network.** State flows
+through local files, and you can remove the hooks anytime by editing
 `~/.claude/settings.json`.
 
 | Status      | When                                                                       |
