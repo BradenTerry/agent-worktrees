@@ -45,6 +45,7 @@ import {
 } from "./git";
 import { hooksInstalled, installHooks, sessionsDir, HOOKS } from "./hooks";
 import { readSessionsByWorktree } from "./sessionStore";
+import { mergeRegistry, readRegistry, registryDir } from "./sessionRegistry";
 import { pruneDeadSessions } from "./liveness";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import {
@@ -398,7 +399,11 @@ export class WorktreeWebviewProvider
     if (sessions) {
       this.syncTerminalNames(sessions.agents);
     }
-    const data = await gatherWorktrees(sessions, installed, force);
+    // Claude's own status for each live session. gatherWorktrees folds it in
+    // once it knows which cards exist; it is only useful alongside the state
+    // files, which carry everything else a row shows.
+    const registry = sessions ? await readRegistry(registryDir()) : [];
+    const data = await gatherWorktrees(sessions, installed, force, registry);
     this.unplacedSubagents = sessions?.unplaced ?? new Set();
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
@@ -498,6 +503,11 @@ export class WorktreeWebviewProvider
     // the next full refresh.
     await this.sweepDeadAgents();
     const sessions = await readSessionsByWorktree(this.sessionsDir);
+    mergeRegistry(
+      sessions,
+      await readRegistry(registryDir()),
+      data.worktrees.map((wt) => wt.path)
+    );
     this.syncTerminalNames(sessions.agents);
     const known = new Set(data.worktrees.map((wt) => normalize(wt.path)));
     // A worktree the cache has never heard of needs a full gather to get a card
@@ -1934,6 +1944,9 @@ export class WorktreeWebviewProvider
     const inScope = (key: string) =>
       key === target || key.startsWith(target + path.sep);
     const sessions = await readSessionsByWorktree(this.sessionsDir);
+    // Including the sessions only Claude's registry knows about: they are agents
+    // this removal would stop just the same, so they belong in the count.
+    mergeRegistry(sessions, await readRegistry(registryDir()), [target]);
     const agents: AgentVM[] = [];
     for (const [key, list] of sessions.agents) {
       if (inScope(key)) agents.push(...list);
