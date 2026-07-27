@@ -1,7 +1,12 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { AgentStatus, AgentVM, SessionIndex } from "./worktreeData";
+import {
+  AgentStatus,
+  AgentVM,
+  SessionIndex,
+  WorktreeSubagentVM,
+} from "./worktreeData";
 import { systemProbes } from "./liveness";
 // The VS Code-free path key, so this module stays requirable (and unit-testable)
 // outside the extension host, exactly like sessionStore.
@@ -160,6 +165,24 @@ function placeIn(cwd: string, keys: string[]): string | undefined {
   return best;
 }
 
+/**
+ * A subagent given a worktree of its own is rendered on THAT card, and carries a
+ * copy of its parent's label and status so the row can say who it belongs to and
+ * whether that agent is blocked. Both copies are taken when the state files are
+ * read, so anything changed afterwards has to be pushed through to them.
+ */
+function eachSubagentOf(
+  index: SessionIndex,
+  sessionId: string,
+  fn: (sub: WorktreeSubagentVM) => void
+): void {
+  for (const subs of index.subagents.values()) {
+    for (const sub of subs) {
+      if (sub.parentSessionId === sessionId) fn(sub);
+    }
+  }
+}
+
 /** Default labels are positional, so they have to be reassigned whenever the
  *  membership of a worktree's list changes. An agent with a summary keeps it. */
 function relabel(list: AgentVM[], index: SessionIndex): void {
@@ -169,13 +192,7 @@ function relabel(list: AgentVM[], index: SessionIndex): void {
     const label = `Claude ${i + 1}`;
     if (agent.label === label) return;
     agent.label = label;
-    // The subagents rendered on other cards carry their parent's label with
-    // them; leaving it stale would name the wrong agent.
-    for (const subs of index.subagents.values()) {
-      for (const sub of subs) {
-        if (sub.parentSessionId === agent.sessionId) sub.parentLabel = label;
-      }
-    }
+    eachSubagentOf(index, agent.sessionId, (sub) => (sub.parentLabel = label));
   });
 }
 
@@ -208,7 +225,16 @@ export function mergeRegistry(
   for (const session of registry) {
     const agent = known.get(session.sessionId);
     if (agent) {
-      if (session.status) agent.status = session.status;
+      if (session.status && session.status !== agent.status) {
+        agent.status = session.status;
+        // The panel flags a relocated subagent whose parent is waiting on you,
+        // from the copy it carries; a status corrected here has to reach it.
+        eachSubagentOf(
+          index,
+          agent.sessionId,
+          (sub) => (sub.parentStatus = agent.status)
+        );
+      }
       continue;
     }
     const key = placeIn(session.cwd, keys);

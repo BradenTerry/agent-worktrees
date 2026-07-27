@@ -174,6 +174,28 @@ test("a session in both sources takes its status from Claude", () => {
   assert.strictEqual(idx.agents.get(REPO).length, 1, "no duplicate row");
 });
 
+test("a corrected status reaches the subagents rendered on other cards", () => {
+  // A subagent given its own worktree renders on that card with a cue for
+  // "the agent that owns me is blocked on you", from the copy it carries. A
+  // status the registry corrects has to reach that copy or the cue lies.
+  const parent = agent({ sessionId: "s1", status: "active", summary: "port tests" });
+  const sub = {
+    id: "sub1",
+    startedAt: 10,
+    parentSessionId: "s1",
+    parentLabel: "port tests",
+    parentStatus: "active",
+  };
+  const idx = index(new Map([[REPO, [parent]]]), new Map([[FEATURE, [sub]]]));
+  mergeRegistry(
+    idx,
+    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "waiting", startedAt: 1, lastActivity: 2 }],
+    [REPO]
+  );
+  assert.strictEqual(parent.status, "waiting");
+  assert.strictEqual(sub.parentStatus, "waiting");
+});
+
 test("a status Claude did not record leaves the hook state alone", () => {
   const a = agent({ status: "waiting" });
   const idx = index(new Map([[REPO, [a]]]));
