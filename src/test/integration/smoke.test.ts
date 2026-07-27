@@ -90,12 +90,18 @@ suite("Agent Worktrees extension host", () => {
       );
 
       const stateDir = path.join(dir, "session state");
-      const win = process.platform === "win32";
-      const quote = (v: string) => (win ? `"${v}"` : v);
-      const res = spawnSync(quote(file), ["--dir", quote(stateDir)], {
-        encoding: "utf8",
-        shell: win, // node refuses to spawn a .cmd without a shell
-      });
+      // Windows needs a shell (node refuses to spawn a .cmd without one), and a
+      // shell takes the whole command as one string: passing an args array
+      // alongside `shell` is what DEP0190 warns about, since node concatenates
+      // them unescaped. Quoting here is the same thing the hook command in
+      // settings.json does, which is what this is standing in for.
+      const res =
+        process.platform === "win32"
+          ? spawnSync(`"${file}" --dir "${stateDir}"`, {
+              encoding: "utf8",
+              shell: true,
+            })
+          : spawnSync(file, ["--dir", stateDir], { encoding: "utf8" });
 
       assert.strictEqual(res.status, 0, `launcher failed: ${res.stderr}`);
       // Claude Code reports any hook stderr as an error in the session, so the

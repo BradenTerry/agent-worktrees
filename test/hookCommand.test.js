@@ -151,12 +151,17 @@ test("a generated launcher really runs the script with the args it was given", (
 
     // A dir with a space in it: the quoting is the point of the test.
     const stateDir = path.join(dir, "session state");
-    const win = process.platform === "win32";
-    const quote = (v) => (win ? `"${v}"` : v);
-    const res = spawnSync(quote(file), ["--dir", quote(stateDir)], {
-      encoding: "utf8",
-      shell: win, // node refuses to spawn a .cmd without a shell
-    });
+    // Windows needs a shell (node refuses to spawn a .cmd without one), and a
+    // shell takes the whole command as one string: an args array alongside
+    // `shell` is what DEP0190 warns about, since node concatenates them
+    // unescaped. Quoting here mirrors the hook command in settings.json.
+    const res =
+      process.platform === "win32"
+        ? spawnSync(`"${file}" --dir "${stateDir}"`, {
+            encoding: "utf8",
+            shell: true,
+          })
+        : spawnSync(file, ["--dir", stateDir], { encoding: "utf8" });
 
     assert.strictEqual(res.status, 0, res.stderr);
     assert.strictEqual(res.stderr, "", "stderr becomes a Claude hook error");
