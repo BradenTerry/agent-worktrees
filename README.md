@@ -145,7 +145,9 @@ The rationale behind the parts that are easy to get wrong twice:
 
 - The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`)
   on your `PATH`.
-- `git` and `node` on your `PATH`.
+- `git` on your `PATH`. Node is not required: the status hooks use a `node` from
+  your `PATH` when there is one and VS Code's own otherwise
+  ([details](docs/agent-status.md#which-node-runs-the-emitter)).
 - A workspace whose first folder is inside a git repository.
 
 ## Develop

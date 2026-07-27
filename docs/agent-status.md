@@ -57,6 +57,38 @@ later, trusts it.
 - The command passes the state directory to the emitter via `--dir`, since that
   separate process cannot read the extension's context.
 
+### Which Node runs the emitter
+
+The emitter is a Node script Claude Code spawns through your shell, so the
+command has to name an interpreter (`src/nodeRuntime.ts`). It used to name a
+bare `node`, which made a Node install a hard requirement: Claude Code ships as
+a native binary, so `claude` on your `PATH` does not imply `node` on it, and a
+missing one surfaced as a hook error per event instead of degrading quietly.
+
+- **A `node` on `PATH`** is still preferred, and is recorded by **absolute
+  path** - the hook runs in Claude Code's shell, whose `PATH` is not necessarily
+  the extension host's. A Node older than 18 is treated as absent.
+- **Otherwise VS Code's own Node**, which is always there. On a remote or server
+  host `process.execPath` is already a plain Node and is invoked directly; on the
+  desktop it is Electron, which behaves as Node only with
+  `ELECTRON_RUN_AS_NODE=1`.
+- Microsoft's builds ship Electron with the `runAsNode` fuse disabled, so the
+  env var alone is ignored there and `--ms-enable-electron-run-as-node` has to
+  go with it. Only their builds know that flag (`process.versions`
+  `microsoft-build` gates it), and it is passed **after** the emitter path, as
+  VS Code does in its own askpass spawn: before it, a build that does not know
+  it dies on an unknown option; after it, it is just an argument the emitter
+  ignores.
+- That env var is why there is a **launcher** (`agent-worktrees-emit.sh`, or
+  `.cmd` on Windows) beside the emitter: a hook command is one string handed to
+  whichever shell the user has, and an env-var prefix cannot be written once for
+  both cmd.exe and `sh`. It is generated next to the emitter on every start, and
+  rewritten only when its body changes, so a VS Code update that moves the
+  executable is picked up without touching a launcher some hook may be running.
+- Both shapes are recognized as ours by the shared `agent-worktrees-emit` stem,
+  so switching between them repairs the existing hook entries rather than
+  duplicating them.
+
 ## What the emitter writes
 
 - One small state file per session, into the extension's **global storage**,
@@ -68,7 +100,7 @@ later, trusts it.
   worktree.
 - **Nothing is sent over the network.** Status flows entirely through local files,
   and nothing of the extension's lives in your `~/.claude` tree apart from the hook
-  entries in `settings.json`. Status reporting needs `node` on `PATH`.
+  entries in `settings.json`.
 
 ## Keeping the hot path cheap
 
@@ -177,6 +209,6 @@ to `PreToolUse` that would mean a warning per tool call.
   that cannot land (deleted global storage, a synced `settings.json` whose `--dir`
   path does not exist on this machine, a read-only disk) degrades to a missed
   status update, never a visible error.
-- The hook command runs `node --no-warnings`, so node's own startup warnings
-  (deprecation/experimental, varying by node version) cannot hit stderr before the
-  emitter gets control.
+- The hook command runs the interpreter with `--no-warnings` (in the launcher
+  too), so Node's own startup warnings (deprecation/experimental, varying by
+  version) cannot hit stderr before the emitter gets control.

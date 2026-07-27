@@ -170,7 +170,7 @@ with no debug setup gets no extra clutter.
 
 - The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on
   your `PATH`.
-- `git` and `node` on your `PATH`.
+- `git` on your `PATH`.
 - A workspace whose first folder is inside a git repository.
 
 ## Getting started

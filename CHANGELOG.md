@@ -2,6 +2,23 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.8.1
+
+- **Node is no longer required for agent status** - the hook command that
+  reports what each agent is doing ran a bare `node`, which quietly made a Node
+  install a requirement of the extension. Claude Code ships as a native binary
+  now, so having `claude` on your `PATH` no longer means having `node` on it,
+  and on a machine without one every hook event turned into a "hook error" in
+  the session rather than degrading quietly. The extension now picks the
+  interpreter itself: a `node` from your `PATH` when there is a usable one,
+  recorded by absolute path so it still resolves in whatever shell Claude Code
+  runs hooks with, and otherwise VS Code's own Node, which is always present. On
+  the desktop that means running the VS Code binary as Node, which takes an
+  environment variable and therefore a small launcher script generated beside
+  the emitter, since one hook command string has to work in both cmd.exe and
+  `sh`. Existing hook entries are repaired in place rather than duplicated, and
+  `node` is gone from the extension's requirements.
+
 ## 3.8.0
 
 - **Run and debug a worktree from its card** - VS Code's Run and Debug view
