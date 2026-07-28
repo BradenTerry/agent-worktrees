@@ -91,8 +91,14 @@ body {
   line-height: 1.5;
 }
 
-/* Consent page shown until the agent-status hooks are accepted. */
+/* Consent page shown until the agent-status hooks are accepted. It is the only
+   child of #root (a full-height flex column), so it owns the scroll region -
+   body is overflow:hidden and would otherwise clip the hook list and the
+   Accept button in a short panel. */
 .consent {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   padding: 6px 6px 12px;
   line-height: 1.5;
 }
