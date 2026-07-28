@@ -7,9 +7,7 @@ The panel cannot tell on its own whether a Claude session is working, waiting on
 you, or idle. Claude Code's
 [hooks](https://docs.claude.com/en/docs/claude-code/hooks) fire exactly on those
 transitions, so the extension installs one small emitter script wired to a handful
-of events. Claude also records a status for each session itself, which the panel
-prefers wherever it is available - see
-[Claude's own status wins](#claudes-own-status-wins).
+of events.
 
 | Hook                                                                              | Status             |
 | --------------------------------------------------------------------------------- | ------------------ |
@@ -29,61 +27,6 @@ Two of those do more than set a status:
   path, ahead of any prompt, and fires for calls an allowlist or auto mode settles
   silently, so reporting a status from it would clear a genuine waiting state (and
   the Activity Bar badge) while the user was still answering.
-
-## Claude's own status wins
-
-Claude Code keeps a registry of its live sessions at
-`~/.claude/sessions/<pid>.json` (`$CLAUDE_CONFIG_DIR/sessions` when that is set),
-and since **v2.1.119** records what each one is doing in a `status` field that it
-rewrites on every transition:
-
-```json
-{ "pid": 567, "sessionId": "...", "cwd": "/repo", "status": "busy",
-  "startedAt": 1785193745550, "version": "2.1.220", "kind": "interactive",
-  "name": "agent-worktrees-9f" }
-```
-
-That answers the same question the emitter answers by watching events go by,
-except it comes from the process itself, so `src/sessionRegistry.ts` reads it on
-every refresh and it takes precedence:
-
-| Claude's `status` | Panel   |
-| ----------------- | ------- |
-| `busy`            | active  |
-| `shell`           | active  |
-| `waiting`         | waiting |
-| `idle`            | idle    |
-
-- `shell` is a local bash command rather than an LLM turn, but it is work in
-  progress as far as the user is concerned.
-- A status this table does not list maps to **nothing**, leaving the hook-derived
-  state alone. A new status Claude adds should be added here rather than
-  collapsing to a default.
-- Reading the registry costs no process: the hooks stay as they are, and the
-  status they derive is the fallback for anything the registry cannot answer.
-
-**Why prefer it.** The event stream can be wrong in ways the process never is: a
-session resumed in another terminal, a `Notification` that arrived while no
-window was open, a long `Bash` call that looks identical to a finished turn.
-
-**What it cannot do.** The registry has no subagents, no skills and no work
-summary, and no `status` at all on older versions — observed missing on 2.1.220
-for a session whose `entrypoint` was not a local one. Everything it does not
-know is left exactly as the hook state files described it, which is why the hooks
-are still what the panel is built on.
-
-**Sessions only Claude knows about** become rows of their own, placed on the card
-whose worktree path contains their `cwd` (longest match, so a nested worktree
-keeps its own agents). That is how a session started before the hooks were
-installed still shows up. A session working outside every worktree has no card to
-land on and is skipped.
-
-**Liveness.** Claude deletes a session's file when it exits, but a killed process
-leaves one behind, so each is confirmed with its recorded pid. Unlike the pid in
-our own state files — the hook's parent, which is why
-[the sweep](#retiring-agents-that-are-no-longer-running) will not trust a missing one
-on Windows — this pid is the Claude process itself, so its absence is proof
-everywhere.
 
 ## `Notification` is not always "waiting"
 
@@ -114,38 +57,6 @@ later, trusts it.
 - The command passes the state directory to the emitter via `--dir`, since that
   separate process cannot read the extension's context.
 
-### Which Node runs the emitter
-
-The emitter is a Node script Claude Code spawns through your shell, so the
-command has to name an interpreter (`src/nodeRuntime.ts`). It used to name a
-bare `node`, which made a Node install a hard requirement: Claude Code ships as
-a native binary, so `claude` on your `PATH` does not imply `node` on it, and a
-missing one surfaced as a hook error per event instead of degrading quietly.
-
-- **A `node` on `PATH`** is still preferred, and is recorded by **absolute
-  path** - the hook runs in Claude Code's shell, whose `PATH` is not necessarily
-  the extension host's. A Node older than 18 is treated as absent.
-- **Otherwise VS Code's own Node**, which is always there. On a remote or server
-  host `process.execPath` is already a plain Node and is invoked directly; on the
-  desktop it is Electron, which behaves as Node only with
-  `ELECTRON_RUN_AS_NODE=1`.
-- Microsoft's builds ship Electron with the `runAsNode` fuse disabled, so the
-  env var alone is ignored there and `--ms-enable-electron-run-as-node` has to
-  go with it. Only their builds know that flag (`process.versions`
-  `microsoft-build` gates it), and it is passed **after** the emitter path, as
-  VS Code does in its own askpass spawn: before it, a build that does not know
-  it dies on an unknown option; after it, it is just an argument the emitter
-  ignores.
-- That env var is why there is a **launcher** (`agent-worktrees-emit.sh`, or
-  `.cmd` on Windows) beside the emitter: a hook command is one string handed to
-  whichever shell the user has, and an env-var prefix cannot be written once for
-  both cmd.exe and `sh`. It is generated next to the emitter on every start, and
-  rewritten only when its body changes, so a VS Code update that moves the
-  executable is picked up without touching a launcher some hook may be running.
-- Both shapes are recognized as ours by the shared `agent-worktrees-emit` stem,
-  so switching between them repairs the existing hook entries rather than
-  duplicating them.
-
 ## What the emitter writes
 
 - One small state file per session, into the extension's **global storage**,
@@ -157,7 +68,7 @@ missing one surfaced as a hook error per event instead of degrading quietly.
   worktree.
 - **Nothing is sent over the network.** Status flows entirely through local files,
   and nothing of the extension's lives in your `~/.claude` tree apart from the hook
-  entries in `settings.json`.
+  entries in `settings.json`. Status reporting needs `node` on `PATH`.
 
 ## Keeping the hot path cheap
 
@@ -266,6 +177,6 @@ to `PreToolUse` that would mean a warning per tool call.
   that cannot land (deleted global storage, a synced `settings.json` whose `--dir`
   path does not exist on this machine, a read-only disk) degrades to a missed
   status update, never a visible error.
-- The hook command runs the interpreter with `--no-warnings` (in the launcher
-  too), so Node's own startup warnings (deprecation/experimental, varying by
-  version) cannot hit stderr before the emitter gets control.
+- The hook command runs `node --no-warnings`, so node's own startup warnings
+  (deprecation/experimental, varying by node version) cannot hit stderr before the
+  emitter gets control.

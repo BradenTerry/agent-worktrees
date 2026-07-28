@@ -57,8 +57,7 @@ its running agents in one view.
   Claude Code on purpose (see [Terminal tab titles](docs/terminal-titles.md)).
 - **Agent & Worktree** creates a worktree with `claude -w` and starts an agent in
   it in one step.
-- Status per agent, taken from Claude Code's own session registry where it
-  records one and derived from its hooks otherwise (see
+- Status per agent, derived from Claude Code hooks (see
   [Agent status](docs/agent-status.md)). Collapsible lists with per-status counts,
   and a number badge on the Activity Bar icon counting **waiting** agents, so a
   blocked agent surfaces while the panel is hidden.
@@ -100,15 +99,8 @@ from the hook entries in `settings.json`. Installing the hooks edits your global
 panel. Sessions whose Claude process is gone are retired by a liveness sweep that
 requires positive evidence of death, never merely the absence of evidence of life.
 
-Claude Code also keeps its own registry of live sessions
-(`~/.claude/sessions/<pid>.json`) and records a `status` in it, which the panel
-reads on every refresh and prefers over the hook-derived state: it comes from the
-process itself, so it stays right where the event stream can drift. The hooks
-remain what everything else on a row is built from.
-
-Details, including the status mapping and what the registry cannot answer, the
-`Notification` type handling, the worktree/branch caching that keeps `PreToolUse`
-cheap, and the sweep's decision tree:
+Details, including the `Notification` type handling, the worktree/branch caching
+that keeps `PreToolUse` cheap, and the sweep's decision tree:
 [docs/agent-status.md](docs/agent-status.md).
 
 ## Architecture
@@ -153,9 +145,7 @@ The rationale behind the parts that are easy to get wrong twice:
 
 - The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`)
   on your `PATH`.
-- `git` on your `PATH`. Node is not required: the status hooks use a `node` from
-  your `PATH` when there is one and VS Code's own otherwise
-  ([details](docs/agent-status.md#which-node-runs-the-emitter)).
+- `git` and `node` on your `PATH`.
 - A workspace whose first folder is inside a git repository.
 
 ## Develop
