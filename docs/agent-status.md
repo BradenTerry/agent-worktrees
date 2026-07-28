@@ -66,6 +66,17 @@ The same tail read also collects the ids of tool calls whose results have landed
 which is what retires a finished subagent (see [Subagents](subagents.md)), and
 any skills invoked in it — one pass over the bytes rather than three.
 
+`src/transcript.ts` reads the newest of those from the tail of
+`~/.claude/projects/<project>/<sessionId>.jsonl`, whichever kind wrote it. Only
+the tail is read, so the cost does not grow with the transcript; the result is
+cached per session and re-read only when the file's mtime moves, so a settled
+title costs one stat per refresh. The project directory name is Claude's
+encoding of the cwd, so rather than reproduce that encoding the reader looks for
+the session's own `<sessionId>.jsonl`.
+
+A session Claude has not summarized yet has no title, and its row falls back to
+`Claude 1`, `Claude 2` - ordinals counted per card, oldest first.
+
 ### Skills
 
 A Skill tool call is an ordinary `tool_use` block, so the chip on an agent row is
@@ -78,17 +89,6 @@ over a whole session, so one used an hour ago is far behind the end of the file.
 `scanSkills` walks the transcript once, the first time a window sees that
 session, and every tail read after that tops the list up — anything new is by
 definition at the end.
-
-`src/transcript.ts` reads the newest of those from the tail of
-`~/.claude/projects/<project>/<sessionId>.jsonl`, whichever kind wrote it. Only
-the tail is read, so the cost does not grow with the transcript; the result is
-cached per session and re-read only when the file's mtime moves, so a settled
-title costs one stat per refresh. The project directory name is Claude's
-encoding of the cwd, so rather than reproduce that encoding the reader looks for
-the session's own `<sessionId>.jsonl`.
-
-A session Claude has not summarized yet has no title, and its row falls back to
-`Claude 1`, `Claude 2` - ordinals counted per card, oldest first.
 
 ## Retiring agents that are no longer running
 
