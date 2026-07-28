@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 3.8.1
+
+- **The consent page scrolls** - the page asking you to accept the agent-status
+  hooks was a plain block inside a full-height, overflow-hidden column, so on a
+  short panel the hook list and the **Accept** button were clipped with no way
+  to reach them, and agent status could not be turned on at all. It now owns its
+  own scroll region, the same way the worktree list and the settings body do.
+
 ## 3.8.0
 
 - **Run and debug a worktree from its card** - VS Code's Run and Debug view
