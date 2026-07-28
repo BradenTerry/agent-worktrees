@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { WorktreeWebviewProvider } from "./worktreeWebview";
-import { removeManagedHooks } from "./hooks";
+import { syncHooks } from "./hooks";
 import { setGitLogger, setGitTracer } from "./git";
 import { setGithubTracer } from "./github";
 import {
@@ -33,7 +33,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Refresh/repair/complete already-accepted hooks (including events a new
   // version adds); never installs from scratch without consent.
-  void removeManagedHooks(context);
+  void syncHooks(context);
 
   const provider = new WorktreeWebviewProvider(context);
 

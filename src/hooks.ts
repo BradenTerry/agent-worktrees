@@ -2,91 +2,317 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { pruneOurHooks, Settings } from "./hookCleanup";
 
 /**
- * Removing the hooks this extension used to install.
+ * Hook-backed agent status detection.
  *
- * Agent status came from Claude Code hooks: an emitter script wired to ten
- * events, writing a state file per session. Claude Code now records what each
- * session is doing itself, in its own registry (see sessionRegistry), so none of
- * that is needed - and everything about it was a cost the user paid. It edited
- * their global settings.json, which is why it needed a consent page; it spawned
- * a process per event, on the tool-call hot path; and it needed an interpreter
- * to spawn.
+ * The panel cannot tell on its own whether a Claude session is working, waiting
+ * on you, or idle. Claude Code's hooks fire exactly on those transitions, so we
+ * install one emitter script (hooks/agent-worktrees-emit.mjs) wired to a handful
+ * of events. The emitter writes a small state file per session that the panel
+ * watches and groups by worktree.
  *
- * All that is left is taking it back out. This runs on activation, is
- * idempotent, and touches nothing it did not put there: hook entries whose
- * command names our emitter, the copies of the emitter and its launcher in
- * global storage, and the state files they wrote.
+ * Installing the hooks edits the user's global ~/.claude/settings.json, so it is
+ * always gated behind explicit consent in the panel — nothing is written until
+ * the user accepts.
  */
 
 const HOME = os.homedir();
 const SETTINGS_PATH = path.join(HOME, ".claude", "settings.json");
-/** Where the emitter and session data lived before they moved into global
- *  storage. Older installs wrote here. */
+const EMITTER = "agent-worktrees-emit.mjs";
+/** Where session data + the emitter lived before they moved into the extension's
+ *  global storage. Cleaned up on activation so nothing of ours lingers in the
+ *  user's ~/.claude tree. */
 const LEGACY_DIR = path.join(HOME, ".claude", "agent-worktrees");
 
-/** Global-storage directories the hooks used: the emitter plus its launcher,
- *  and the per-session state files they wrote. */
-function ourDirs(context: vscode.ExtensionContext): string[] {
-  const base = context.globalStorageUri.fsPath;
-  return [path.join(base, "hooks"), path.join(base, "sessions")];
+/** Where the emitter writes per-session state files: under the extension's
+ *  global storage, so nothing of ours lives in the user's ~/.claude tree. */
+export function sessionsDir(context: vscode.ExtensionContext): string {
+  return path.join(context.globalStorageUri.fsPath, "sessions");
+}
+/** Stable home for the emitter script. Global storage persists across extension
+ *  updates (the versioned install dir does not), so the command we write into
+ *  settings.json keeps resolving after an update — a running session can invoke
+ *  the cached path. */
+export function hooksDir(context: vscode.ExtensionContext): string {
+  return path.join(context.globalStorageUri.fsPath, "hooks");
+}
+
+/** Best-effort removal of the pre-global-storage data/emitter directory. Safe to
+ *  call repeatedly: the emitter is a fresh process per hook event reading the
+ *  (repaired) command from settings.json, so the old copy is never in use. */
+async function cleanupLegacy(): Promise<void> {
+  try {
+    await fs.promises.rm(LEGACY_DIR, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
+}
+
+/** A Claude Code hook this extension manages. Every hook runs the same emitter;
+ *  they differ only by the event (and an optional tool matcher). */
+export interface HookSpec {
+  event: string;
+  /** human label shown on the consent page (= the Claude Code event name) */
+  label: string;
+  /** why the extension needs this event, shown on the consent page */
+  description: string;
+  /** optional tool matcher so the hook only fires for the tools it cares about */
+  matcher?: string;
+}
+
+export const HOOKS: HookSpec[] = [
+  {
+    event: "SessionStart",
+    label: "SessionStart",
+    description:
+      "Detects when a Claude session starts in a worktree so it shows up as an agent (idle).",
+  },
+  {
+    event: "UserPromptSubmit",
+    label: "UserPromptSubmit",
+    description:
+      "Marks an agent Active the moment you send it a prompt, without waiting for its first tool call.",
+  },
+  {
+    event: "PreToolUse",
+    matcher: "*",
+    label: "PreToolUse",
+    description:
+      "Keeps an agent marked Active while it is running tools and doing work.",
+  },
+  {
+    event: "PostToolUse",
+    matcher: "*",
+    label: "PostToolUse",
+    description:
+      "Marks an agent Active again when a tool finishes — the first signal after you approve a permission prompt or answer its question.",
+  },
+  {
+    event: "PermissionRequest",
+    matcher: "*",
+    label: "PermissionRequest",
+    description:
+      "Identifies which subagent asked for permission, so the one blocking on you is marked instead of just its parent. Never changes an agent's status on its own.",
+  },
+  {
+    event: "SubagentStart",
+    label: "SubagentStart",
+    description:
+      "Lists a subagent under its parent agent the moment it starts, so you can see what is running right now.",
+  },
+  {
+    event: "SubagentStop",
+    label: "SubagentStop",
+    description:
+      "Removes a finished subagent from its parent's row, and marks the parent Active — it is about to pick the result up, not waiting on you.",
+  },
+  {
+    event: "Notification",
+    label: "Notification",
+    description:
+      "Marks an agent Waiting the instant it needs you — a permission prompt or a question.",
+  },
+  {
+    event: "Stop",
+    label: "Stop",
+    description:
+      "Marks an agent Idle when it finishes responding and is awaiting your next instruction.",
+  },
+  {
+    event: "SessionEnd",
+    label: "SessionEnd",
+    description: "Removes the agent from the panel when its session exits.",
+  },
+];
+
+/** The command every managed hook runs: the emitter, told where to write state.
+ *  The `--dir` arg is how the (separate, Claude-spawned) emitter process learns
+ *  the global-storage path; it cannot read the extension's context. */
+function hookCommand(context: vscode.ExtensionContext): string {
+  const emitter = path.join(hooksDir(context), EMITTER);
+  // --no-warnings: Claude Code surfaces ANY stderr output as a per-event
+  // "hook error", and node's startup warnings (deprecation/experimental,
+  // varying by node version) hit stderr before the emitter runs a single
+  // line, so they can only be silenced from the command line.
+  return `node --no-warnings "${emitter}" --dir "${sessionsDir(context)}"`;
 }
 
 /**
  * Whether this host may write the user's global ~/.claude/settings.json.
  *
- * False in the extension-host test runner. `@vscode/test-cli` boots VS Code with
- * a throwaway `--user-data-dir`, but settings.json is NOT sandboxed with it: it
- * is the real user's file, shared by every Claude session on the machine. A test
- * run must not edit it, in either direction - removing hooks from a developer's
- * real settings as a side effect of `npm run test:integration` would be exactly
- * as unwelcome as adding them once was.
+ * False in the extension-host test runner. `@vscode/test-cli` boots VS Code
+ * with a throwaway `--user-data-dir` (`.vscode-test/user-data/...`), so
+ * `globalStorageUri` — and therefore the `--dir` in hookCommand — points at a
+ * temporary directory. settings.json is NOT sandboxed with it: it is the real
+ * user's file, shared by every Claude session on the machine. Letting a test
+ * run repair the command path there rewires every session's emitter to write
+ * state into the test's scratch dir, where no installed extension is watching.
+ * The user's panel then shows no new agents at all (their existing rows just
+ * age out) until a real activation happens to repair the path back — and the
+ * next `npm test` breaks it again. Tests get the same isolation from our
+ * settings writes that they already get from VS Code's own storage.
  */
 export function managesUserSettings(mode: vscode.ExtensionMode): boolean {
   return mode !== vscode.ExtensionMode.Test;
 }
 
-async function readSettings(): Promise<Settings | undefined> {
+// --- settings.json plumbing -------------------------------------------------
+
+type HookEntry = {
+  matcher?: string;
+  hooks?: { type?: string; command?: string }[];
+};
+type Settings = { hooks?: Record<string, HookEntry[]>; [k: string]: unknown };
+
+async function readSettings(): Promise<Settings> {
   try {
     const raw = await fs.promises.readFile(SETTINGS_PATH, "utf8");
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Settings) : undefined;
+    return parsed && typeof parsed === "object" ? (parsed as Settings) : {};
   } catch {
-    return undefined; // missing or unreadable: nothing of ours to remove
+    return {}; // missing or unreadable -> start fresh (write creates it)
   }
 }
 
 async function writeSettings(settings: Settings): Promise<void> {
-  // pid-suffixed so two VS Code windows activating at once never interleave
-  // writes/renames on the same tmp file.
+  await fs.promises.mkdir(path.dirname(SETTINGS_PATH), { recursive: true });
+  // pid-suffixed so two VS Code windows activating at once (both syncing hooks)
+  // never interleave writes/renames on the same tmp file.
   const tmp = `${SETTINGS_PATH}.agent-worktrees.${process.pid}.tmp`;
   await fs.promises.writeFile(tmp, JSON.stringify(settings, null, 2) + "\n");
   await fs.promises.rename(tmp, SETTINGS_PATH);
 }
 
+/** Our hook in an event is the one whose command runs our emitter script. */
+function findHook(
+  settings: Settings,
+  spec: HookSpec
+): { command?: string } | undefined {
+  const entries = settings.hooks?.[spec.event];
+  if (!Array.isArray(entries)) return undefined;
+  for (const entry of entries) {
+    for (const h of entry.hooks ?? []) {
+      if (typeof h.command === "string" && h.command.includes(EMITTER))
+        return h;
+    }
+  }
+  return undefined;
+}
+
+function addHook(settings: Settings, spec: HookSpec, command: string): void {
+  settings.hooks ??= {};
+  const entry: HookEntry = spec.matcher
+    ? { matcher: spec.matcher, hooks: [{ type: "command", command }] }
+    : { hooks: [{ type: "command", command }] };
+  (settings.hooks[spec.event] ??= []).push(entry);
+}
+
+// --- public API -------------------------------------------------------------
+
+/** hooksInstalled runs on every panel refresh; cache its verdict keyed on the
+ *  settings file's mtime so the steady state is one stat() instead of a full
+ *  read + JSON.parse each time. Any write (ours or an external edit) changes
+ *  the mtime and re-reads. */
+let installedCache: { mtimeMs: number; installed: boolean } | undefined;
+
+/** The in-flight activation repair (syncHooks). hooksInstalled awaits it so the
+ *  panel's first render cannot race the repair: without this, an update that
+ *  adds a new managed event could read settings.json before syncHooks has
+ *  completed the install and flash the consent page at an already-consented
+ *  user. */
+let syncPending: Promise<void> = Promise.resolve();
+
+/** True only when every managed hook is present in global settings.json. */
+export async function hooksInstalled(): Promise<boolean> {
+  await syncPending;
+  let mtimeMs = -1;
+  try {
+    mtimeMs = (await fs.promises.stat(SETTINGS_PATH)).mtimeMs;
+  } catch {
+    /* missing file: mtime stays -1, still a valid cache key */
+  }
+  if (installedCache && installedCache.mtimeMs === mtimeMs) {
+    return installedCache.installed;
+  }
+  const settings = await readSettings();
+  const installed = HOOKS.every((spec) => !!findHook(settings, spec));
+  installedCache = { mtimeMs, installed };
+  return installed;
+}
+
+/** Copy the bundled emitter into the stable hooks dir, overwriting in place so
+ *  updates ship a new body to the path the command already points at. */
+async function ensureEmitter(context: vscode.ExtensionContext): Promise<void> {
+  const dir = hooksDir(context);
+  await fs.promises.mkdir(dir, { recursive: true });
+  const src = path.join(context.extensionUri.fsPath, "hooks", EMITTER);
+  await fs.promises.copyFile(src, path.join(dir, EMITTER));
+}
+
 /**
- * Take out everything the hook-based status pipeline left behind: our entries in
- * the user's global settings.json, the emitter and launcher in global storage,
- * the state files they wrote, and the pre-global-storage directory.
- *
- * Best effort throughout. A failure here costs nothing at runtime - the panel
- * reads Claude's registry either way - so it must never block activation. An
- * emitter left on disk with no hook entry pointing at it is inert.
+ * Install every managed hook into global settings.json (and repair the command
+ * path of any already present). Copies the emitter to its stable location
+ * first. Call only after the user has consented in the panel.
  */
-export async function removeManagedHooks(
+export async function installHooks(
   context: vscode.ExtensionContext
 ): Promise<void> {
-  try {
-    if (managesUserSettings(context.extensionMode)) {
-      const settings = await readSettings();
-      if (settings && pruneOurHooks(settings)) await writeSettings(settings);
+  if (!managesUserSettings(context.extensionMode)) return;
+  await ensureEmitter(context);
+  const settings = await readSettings();
+  const command = hookCommand(context);
+  let changed = false;
+  for (const spec of HOOKS) {
+    const existing = findHook(settings, spec);
+    if (!existing) {
+      addHook(settings, spec, command);
+      changed = true;
+    } else if (existing.command !== command) {
+      existing.command = command; // repair a stale path after an update
+      changed = true;
     }
-    for (const dir of [...ourDirs(context), LEGACY_DIR]) {
-      await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
-    }
-  } catch {
-    /* best effort: leftovers are inert, and this must not block activation */
   }
+  if (changed) await writeSettings(settings);
+  await fs.promises.mkdir(sessionsDir(context), { recursive: true });
+  await cleanupLegacy();
+}
+
+/**
+ * On activation, if the hooks are already installed, refresh the stable emitter
+ * copy, repair any command path drift from a prior extension version, and add
+ * any events this version newly manages (all hooks run the same consented
+ * emitter; without this, an update that adds an event would flip
+ * hooksInstalled to false and re-show the consent page to a user who already
+ * accepted). Never installs from scratch — a user who has not consented has no
+ * emitter hooks at all, and none are added. In a test host it does nothing at
+ * all (see managesUserSettings).
+ */
+export function syncHooks(context: vscode.ExtensionContext): Promise<void> {
+  syncPending = (async () => {
+    try {
+      if (!managesUserSettings(context.extensionMode)) return;
+      const settings = await readSettings();
+      const anyInstalled = HOOKS.some((spec) => !!findHook(settings, spec));
+      if (!anyInstalled) return;
+      await ensureEmitter(context);
+      const command = hookCommand(context);
+      let changed = false;
+      for (const spec of HOOKS) {
+        const existing = findHook(settings, spec);
+        if (!existing) {
+          addHook(settings, spec, command);
+          changed = true;
+        } else if (existing.command !== command) {
+          existing.command = command;
+          changed = true;
+        }
+      }
+      if (changed) await writeSettings(settings);
+      await cleanupLegacy();
+    } catch {
+      /* best effort: a repair failure shouldn't block activation */
+    }
+  })();
+  return syncPending;
 }
