@@ -210,11 +210,18 @@ const SILENT_FOR_FINISHED = 10 * 60_000;
 /**
  * The subagents still running, oldest first.
  *
- * A subagent is finished when the parent's transcript carries a tool result for
- * the `Agent` call that started it. That result lands at the end of the
- * transcript as it happens, so a window that is open sees every one; `finished`
- * accumulates across refreshes so a result seen once is never forgotten when it
- * later falls out of the tail being read.
+ * `finished` is every id the parent's transcript has said is done, which arrives
+ * in one of two shapes depending on how the subagent was launched:
+ *
+ *  - backgrounded (the default): a `<task-notification>` naming the subagent's
+ *    own **id**. The `Agent` call itself was answered at launch, so its tool
+ *    result says nothing about whether the work is over;
+ *  - synchronous: a tool result for the `Agent` call, i.e. its **toolUseId**.
+ *
+ * Either retires the row, so both are looked up. The signal lands at the end of
+ * the transcript as it happens, so a window that is open sees every one, and
+ * `finished` accumulates across refreshes so one seen once is never forgotten
+ * when it later falls out of the tail being read.
  *
  * The mtime backstop covers the remaining case: a window opened long after a
  * subagent finished, whose result was never in any tail this window read. Shown
@@ -228,6 +235,7 @@ export function liveSubagents(
 ): FoundSubagent[] {
   return found
     .filter((s) => {
+      if (finished.has(s.id)) return false;
       if (s.toolUseId && finished.has(s.toolUseId)) return false;
       return now - s.lastActivity < SILENT_FOR_FINISHED;
     })

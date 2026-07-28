@@ -73,13 +73,45 @@ function skillsInLine(rec: Record<string, unknown>): string[] {
   return out;
 }
 
+/** Wraps the id of a subagent that has just finished. Cheap reject first, then
+ *  the id itself: `<task-id>aa339f147faafaf68</task-id>`. */
+const TASK_MARK = "<task-notification>";
+const TASK_ID = /<task-id>([A-Za-z0-9_-]+)<\/task-id>/g;
+
+/** The opening words of the result an `Agent` call gets the moment it launches
+ *  a background subagent. */
+const ASYNC_LAUNCH = "Async agent launched successfully";
+
+/**
+ * Whether a tool result is the receipt for launching a background subagent
+ * rather than the outcome of one.
+ *
+ * Subagents run in the background by default, and a backgrounded `Agent` call is
+ * answered immediately: the parent gets a result saying the agent is now working
+ * and that a notification will follow. Treating that as the call's outcome is
+ * what retired every subagent within a second or two of it starting - the row
+ * existed, it was simply never alive by the time anything rendered. A subagent
+ * launched synchronously still gets its real result here, so the two are told
+ * apart by the receipt's text rather than by ignoring results altogether.
+ */
+function isAsyncLaunch(content: unknown): boolean {
+  if (typeof content === "string") return content.startsWith(ASYNC_LAUNCH);
+  if (!Array.isArray(content)) return false;
+  return content.some((b) => {
+    const text = (b as { type?: string; text?: unknown })?.text;
+    return typeof text === "string" && text.startsWith(ASYNC_LAUNCH);
+  });
+}
+
 /** What one pass over a transcript's tail yields. */
 export interface TranscriptTail {
   /** Newest title, or "" when the session has not been summarized yet. */
   title: string;
-  /** Ids of the tool calls whose results appear in the tail. A subagent's
-   *  `Agent` call landing here is what says it has finished (see subagents.ts). */
-  toolResults: string[];
+  /** Ids seen in the tail that retire a subagent: the `<task-id>` of every
+   *  completion notification, plus the `tool_use_id` of every genuine tool
+   *  result. Matched against both a subagent's id and its `toolUseId`, since
+   *  which one arrives depends on how it was launched (see subagents.ts). */
+  finished: string[];
   /** Skills invoked in the tail, bare names, in first-use order. */
   skills: string[];
 }
@@ -89,11 +121,11 @@ export interface TranscriptTail {
  *
  * Scans backwards so the newest title wins. The first line read is usually
  * partial, since the read starts mid-file; `JSON.parse` throws on it and the
- * scan moves on. Tool results are collected across the whole tail rather than
+ * scan moves on. Finished ids are collected across the whole tail rather than
  * stopping at the first, since several subagents can finish in one window.
  */
 export function readTail(file: string): TranscriptTail {
-  const out: TranscriptTail = { title: "", toolResults: [], skills: [] };
+  const out: TranscriptTail = { title: "", finished: [], skills: [] };
   let fd: number | undefined;
   try {
     fd = fs.openSync(file, "r");
@@ -111,6 +143,12 @@ export function readTail(file: string): TranscriptTail {
         (line.indexOf("ai-title") !== -1 || line.indexOf("custom-title") !== -1);
       const maybeResult = line.indexOf("tool_result") !== -1;
       const maybeSkill = line.indexOf(SKILL_MARK) !== -1;
+      // A completion notification is XML inside a record's text, and it is
+      // written twice (queued, then delivered), so it is read off the raw line
+      // and deduped by the caller's set rather than parsed out of either shape.
+      if (line.indexOf(TASK_MARK) !== -1) {
+        for (const m of line.matchAll(TASK_ID)) out.finished.push(m[1]);
+      }
       if (!maybeTitle && !maybeResult && !maybeSkill) continue;
       let rec: Record<string, unknown>;
       try {
@@ -134,10 +172,10 @@ export function readTail(file: string): TranscriptTail {
       const content = (rec.message as { content?: unknown })?.content;
       if (!Array.isArray(content)) continue;
       for (const block of content) {
-        const b = block as { type?: string; tool_use_id?: string };
-        if (b?.type === "tool_result" && typeof b.tool_use_id === "string") {
-          out.toolResults.push(b.tool_use_id);
-        }
+        const b = block as { type?: string; tool_use_id?: string; content?: unknown };
+        if (b?.type !== "tool_result" || typeof b.tool_use_id !== "string") continue;
+        if (isAsyncLaunch(b.content)) continue;
+        out.finished.push(b.tool_use_id);
       }
     }
   } catch {
@@ -231,7 +269,8 @@ export function readTitle(file: string): string {
  * session sitting idle costs one stat per refresh.
  */
 export class TranscriptReader {
-  private readonly located = new Map<string, string | undefined>();
+  /** Only sessions whose transcript has been found; see transcript(). */
+  private readonly located = new Map<string, string>();
   private readonly cache = new Map<string, { mtimeMs: number; tail: TranscriptTail }>();
   /** Skills this session has invoked, scanned in full once and topped up from
    *  every tail read after that. */
@@ -243,18 +282,30 @@ export class TranscriptReader {
 
   constructor(private readonly projectsDir: string) {}
 
-  /** The session's transcript path, located once. */
+  /**
+   * The session's transcript path, located once it exists.
+   *
+   * A miss is deliberately NOT remembered. Claude registers a session several
+   * seconds before it writes the session's first transcript record (measured at
+   * ~9s), and the registry file appearing is exactly what wakes the panel - so
+   * the first lookup for a session that starts while a window is open always
+   * comes up empty. Caching that emptiness left the session with no work
+   * summary, no skills and, once subagents came from these same files, no
+   * subagent rows either, for as long as the window stayed open. Only a hit is
+   * cached; a miss costs one readdir until the file shows up.
+   */
   private async transcript(sessionId: string): Promise<string | undefined> {
-    if (!this.located.has(sessionId)) {
-      this.located.set(sessionId, await findTranscript(this.projectsDir, sessionId));
-    }
-    return this.located.get(sessionId);
+    const hit = this.located.get(sessionId);
+    if (hit) return hit;
+    const found = await findTranscript(this.projectsDir, sessionId);
+    if (found) this.located.set(sessionId, found);
+    return found;
   }
 
   /** The tail, re-read only when the transcript has been written since. */
   private async tailFor(sessionId: string): Promise<TranscriptTail> {
     const file = await this.transcript(sessionId);
-    if (!file) return { title: "", toolResults: [], skills: [] };
+    if (!file) return { title: "", finished: [], skills: [] };
     let mtimeMs: number;
     try {
       mtimeMs = (await fs.promises.stat(file)).mtimeMs;
@@ -263,14 +314,14 @@ export class TranscriptReader {
       // id would be found again rather than serving a stale read forever.
       this.located.delete(sessionId);
       this.cache.delete(sessionId);
-      return { title: "", toolResults: [], skills: [] };
+      return { title: "", finished: [], skills: [] };
     }
     const hit = this.cache.get(sessionId);
     if (hit && hit.mtimeMs === mtimeMs) return hit.tail;
     const tail = readTail(file);
     this.cache.set(sessionId, { mtimeMs, tail });
     const seen = this.finished.get(sessionId) ?? new Set<string>();
-    for (const id of tail.toolResults) seen.add(id);
+    for (const id of tail.finished) seen.add(id);
     this.finished.set(sessionId, seen);
     // First sight of this session pays for the full scan; after that the tail
     // is enough, since anything new is by definition at the end.

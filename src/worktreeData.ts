@@ -94,6 +94,13 @@ export interface AgentVM {
 export interface SessionIndex {
   agents: Map<string, AgentVM[]>;
   subagents: Map<string, WorktreeSubagentVM[]>;
+  /** Subagent working directories that are not themselves one of the given
+   *  paths, so the row landed on a card further up the tree (usually its
+   *  parent's) or on none at all. A subagent handed a worktree of its own gets
+   *  a real one created inside the repo mid-turn, after the panel last listed
+   *  worktrees, and it looks exactly like this until the list is refreshed - so
+   *  this is the caller's cue to re-gather (see refreshAgents). */
+  unplaced: string[];
 }
 
 /** View-model for a single worktree row sent to the webview. */

@@ -237,6 +237,7 @@ export function indexRegistry(
 
   const agents = new Map<string, AgentVM[]>();
   const elsewhere = new Map<string, WorktreeSubagentVM[]>();
+  const unplaced: string[] = [];
   for (const [key, sessions] of byPath) {
     sessions.sort((a, b) => a.startedAt - b.startedAt);
     agents.set(
@@ -249,7 +250,17 @@ export function indexRegistry(
         attributePrompt(own, status);
         for (const sub of own) {
           if (!sub.worktree) continue;
+          const target = normalize(sub.worktree);
           const home = placeIn(sub.worktree, keys);
+          // The card it lands on is the longest path containing its cwd, which
+          // is the parent's own card whenever no nearer one is known - and an
+          // isolated subagent's worktree is created INSIDE the repo, after the
+          // panel last listed worktrees. So "its cwd is not itself a card" is
+          // the signal that the card list may be stale, not "no card matched":
+          // the stale case still matches, just too far up the tree. Report it
+          // either way and let one re-gather decide (see refreshAgents); a cwd
+          // that is merely a subdirectory of a card settles as itself.
+          if (home !== target) unplaced.push(sub.worktree);
           // Not, via a symlinked path, the card it is already listed under.
           // Clearing the field keeps one invariant for everything downstream:
           // `worktree` set means "rendered on another card".
@@ -283,5 +294,5 @@ export function indexRegistry(
   for (const list of elsewhere.values()) {
     list.sort((a, b) => a.startedAt - b.startedAt);
   }
-  return { agents, subagents: elsewhere };
+  return { agents, subagents: elsewhere, unplaced };
 }

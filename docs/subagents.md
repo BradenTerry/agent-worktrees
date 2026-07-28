@@ -30,6 +30,32 @@ opened only far enough to get its first line, and the parent's is never parsed
 beyond the tail already read for the work summary — a session with no subagents
 costs one failed `readdir`.
 
+## What makes a row appear
+
+Nothing the panel watches fires when a subagent starts. The session registry is
+the panel's signal that agent state changed, and Claude rewrites a session's
+file on **status transitions** only — a session goes `busy` before it spawns a
+subagent and stays `busy` until it has collected the result, writing that file
+once for the whole span. A subagent that starts and finishes inside one status
+therefore produces no event at all, and its row would show up only if some
+unrelated refresh happened to land while it ran.
+
+The other half is finding the files at all. Every read here starts by locating
+the parent's transcript, and Claude registers a session **before** it writes that
+transcript's first record (measured at ~9s). The registry file appearing is what
+wakes the panel, so the first lookup for a session started while a window is open
+always misses. `TranscriptReader` therefore caches only a hit: remembering the
+miss left that session with no work summary, no skills and no subagent rows for
+as long as the window stayed open, which is what "Claude 1" with nothing under it
+meant.
+
+So the panel polls (`AGENT_POLL_MS`, 1s) down the agent-only path, and only
+while the view is **visible** and at least one agent is on a card. With no
+pending session ids that path spawns no git: it is a `readdir` of the registry
+and of each live session's `subagents/` directory, and the posted-payload dedupe
+drops the update entirely unless something changed. An idle window, or one
+behind another view, polls nothing.
+
 ## Subagents follow the worktree they were given
 
 An agent that fans work out gives each subagent a worktree of its own, so their
@@ -44,13 +70,46 @@ session says how many it has in flight rather than looking idle. A subagent whos
 `cwd` resolves to its parent's own card, or to no card at all, keeps its row
 under the parent.
 
+### The card has to exist first
+
+A card is placed by longest containing path, and an isolated worktree is created
+**inside** the repo (`<repo>/.claude/worktrees/agent-<id>`) at the moment the
+subagent starts - long after the last `git worktree list`. Until the panel lists
+worktrees again there is no card for it, and the longest path that does contain
+it is the repo's own card, so the row lands on its parent. That is not "no match
+found", it is a match too far up the tree, and it is why fanned-out subagents all
+appeared to be working in the parent's checkout.
+
+`indexRegistry` therefore reports every subagent `cwd` that is not itself one of
+the cards as `unplaced`, and the agent-only refresh re-gathers once per such
+path. One gather settles it: a real worktree gets its card and the row moves onto
+it, while a cwd that is merely a subdirectory of a card stays where it is and is
+never gathered for again. The reverse case is handled by the same counter that
+traces the rows - when the number of running subagents drops, the isolated
+worktree that has just been removed with one of them needs a gather too, or its
+card lingers.
+
 ## What retires a row
 
-A subagent is finished when the parent's transcript carries a **tool result for
-the `Agent` call that started it** — matched by the `toolUseId` in its meta file.
-That result lands at the end of the parent's transcript as it happens, so an open
-window sees every one in the tail it already reads. Results are accumulated
-across refreshes (`TranscriptReader`), because a result scrolls out of the tail
+The parent's transcript says so, in one of two shapes depending on how the
+subagent was launched:
+
+| Launched | Says it is finished | Matched on |
+| --- | --- | --- |
+| backgrounded (the default) | `<task-notification><task-id>…` | the subagent's own id |
+| synchronous (`run_in_background: false`) | a tool result for the `Agent` call | `meta.toolUseId` |
+
+The distinction is the whole ballgame. A backgrounded `Agent` call is answered
+**at launch**, with `Async agent launched successfully … you will be notified
+when it completes`. Treating that receipt as the call's outcome retired every
+subagent a second or two after it started, so rows were computed correctly and
+then filtered out before anything could render them — the reason subagents
+appeared never to work at all. `readTail` skips that receipt by its text and
+collects the notification instead.
+
+Either signal lands at the end of the parent's transcript as it happens, so an
+open window sees every one in the tail it already reads. They are accumulated
+across refreshes (`TranscriptReader`), because a signal scrolls out of the tail
 as the session goes on and a subagent that finished must not come back to life
 when it does.
 

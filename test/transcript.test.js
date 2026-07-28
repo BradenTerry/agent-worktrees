@@ -7,6 +7,7 @@ const path = require("node:path");
 const {
   findTranscript,
   readTitle,
+  readTail,
   TranscriptReader,
 } = require("../out/transcript.js");
 
@@ -189,5 +190,100 @@ test("skillsFor is empty for a session that has invoked none", async () => {
   const root = seed("s1", [msg, msg]);
   const reader = new TranscriptReader(root);
   assert.deepStrictEqual(await reader.skillsFor("s1"), []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("TranscriptReader picks up a transcript that did not exist yet", async () => {
+  // Claude registers a session several seconds before it writes the session's
+  // first transcript record, and the registry file appearing is exactly what
+  // wakes the panel — so the first lookup for a newly started session always
+  // misses. Remembering that miss left the row labelled "Claude 1" with no
+  // skills and no subagent rows for as long as the window stayed open.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "awt-projects-"));
+  const dir = path.join(root, "-home-u-repo");
+  fs.mkdirSync(dir, { recursive: true });
+  const reader = new TranscriptReader(root);
+  assert.strictEqual(await reader.titleFor("s1"), "");
+  assert.deepStrictEqual(await reader.subagentsFor("s1"), []);
+
+  fs.writeFileSync(
+    path.join(dir, "s1.jsonl"),
+    JSON.stringify({ type: "ai-title", aiTitle: "late start" }) + "\n"
+  );
+  const subs = path.join(dir, "s1", "subagents");
+  fs.mkdirSync(subs, { recursive: true });
+  fs.writeFileSync(
+    path.join(subs, "agent-a1.meta.json"),
+    JSON.stringify({ agentType: "Explore", description: "look around" })
+  );
+  fs.writeFileSync(
+    path.join(subs, "agent-a1.jsonl"),
+    JSON.stringify({
+      type: "user",
+      cwd: "/home/u/repo",
+      timestamp: new Date().toISOString(),
+      message: { content: "go" },
+    }) + "\n"
+  );
+
+  assert.strictEqual(await reader.titleFor("s1"), "late start");
+  assert.deepStrictEqual(
+    (await reader.subagentsFor("s1")).map((s) => s.task),
+    ["look around"]
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("readTail ignores the receipt for a backgrounded subagent", async () => {
+  // A backgrounded Agent call is answered the moment it launches: the parent
+  // gets "Async agent launched successfully", not an outcome. Counting that as
+  // the call's result retired every subagent a second or two after it started,
+  // which is why no row was ever seen. Completion arrives later, as a
+  // <task-notification> naming the subagent's own id.
+  const launch = {
+    type: "user",
+    message: {
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_agent",
+          content: [
+            { type: "text", text: "Async agent launched successfully. agentId: aa11" },
+          ],
+        },
+      ],
+    },
+  };
+  const root = seed("s1", [launch]);
+  let tail = readTail(await findTranscript(root, "s1"));
+  assert.deepStrictEqual(tail.finished, [], "a launch receipt retires nothing");
+
+  const file = await findTranscript(root, "s1");
+  fs.appendFileSync(
+    file,
+    JSON.stringify({
+      type: "user",
+      message: {
+        content: "<task-notification>\n<task-id>aa11</task-id>\n</task-notification>",
+      },
+    }) + "\n"
+  );
+  tail = readTail(file);
+  assert.deepStrictEqual(tail.finished, ["aa11"], "the notification retires it");
+
+  // A synchronous subagent still reports through its tool result, so a real
+  // result is collected exactly as before.
+  fs.appendFileSync(
+    file,
+    JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_sync", content: "all done" },
+        ],
+      },
+    }) + "\n"
+  );
+  assert.ok(readTail(file).finished.includes("toolu_sync"));
   fs.rmSync(root, { recursive: true, force: true });
 });

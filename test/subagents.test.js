@@ -130,6 +130,18 @@ test("liveSubagents keeps one with no result yet", () => {
   assert.strictEqual(live.length, 1);
 });
 
+test("liveSubagents retires a backgrounded one by its own id", () => {
+  // Subagents run in the background by default, and a backgrounded Agent call
+  // is answered at launch, not at completion — so the toolUseId proves nothing.
+  // What says it is over is a <task-notification> naming the subagent itself.
+  const found = [sub({ id: "done", toolUseId: "toolu_done" }), sub({ id: "running" })];
+  const live = liveSubagents(found, new Set(["done"]), NOW);
+  assert.deepStrictEqual(
+    live.map((s) => s.id),
+    ["running"]
+  );
+});
+
 test("liveSubagents drops one that has gone silent", () => {
   // The backstop for a subagent that finished while no window was watching, so
   // its result never appeared in any tail this window read. Wrong for ten

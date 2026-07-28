@@ -8,8 +8,12 @@ more expensive than on macOS.
 
 - Extension load.
 - The manual Refresh button.
-- The session-state `FileSystemWatcher`, one event per Claude hook firing (which
-  also surfaces an agent creating a new worktree).
+- The session-state `FileSystemWatcher`, one event per status transition Claude
+  records (which also surfaces an agent creating a new worktree).
+- The agent poll (`AGENT_POLL_MS`, 1s), while the view is visible and at least
+  one agent is on a card. Subagents are not in the session registry and come and
+  go entirely inside one `busy` status, so the watcher never fires for them; see
+  [subagents](subagents.md).
 - Window focus.
 - Source-control scope changes.
 
@@ -37,14 +41,16 @@ Deliberately **not** a workspace-wide `**/*` watcher:
 ## The agent-only path
 
 The session-state watcher is by far the most frequent trigger while an agent
-works, and it does **not** run the full gather. A hook firing means agent state
+works, and it does **not** run the full gather. An event means agent state
 changed and files may have changed in *that* agent's worktree, not the others, so
 `refreshAgents`:
 
-- re-reads the session files and swaps the agent VMs into the last gathered
-  payload;
+- re-reads the session files and swaps the agent VMs — and the subagent rows the
+  cards own, which a fan-out puts on a card with no agent of its own — into the
+  last gathered payload;
 - re-runs `git status` only for the worktrees whose sessions actually fired (the
-  watcher records each changed file's session id).
+  watcher records each changed file's session id). The poll records none, so a
+  poll spawns no git at all.
 
 It falls back to a full refresh in two cases:
 

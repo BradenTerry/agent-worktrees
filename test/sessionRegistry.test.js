@@ -289,3 +289,43 @@ test("attribution clears once the session stops waiting", () => {
   );
   assert.strictEqual(subs[0].awaitingPermission, undefined, "a stale prompt cue is worse than none");
 });
+
+test("a subagent worktree with no card is reported, not silently swallowed", () => {
+  // `isolation: "worktree"` creates a real worktree mid-turn, long after the
+  // panel last ran `git worktree list`. With no card to land on the row falls
+  // back to its parent, which is what made fanned-out subagents look like they
+  // were all working in the parent's checkout. Reporting the path is how the
+  // agent-only refresh knows to re-gather and get the card.
+  const isolated = path.join(REPO, ".claude", "worktrees", "agent-a1");
+  const subs = [busy({ id: "a1", worktree: isolated })];
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "active", startedAt: 1, lastActivity: 2 }],
+    [REPO],
+    new Map(),
+    new Map([["s1", subs]])
+  );
+  assert.deepStrictEqual(idx.unplaced, [isolated]);
+  assert.strictEqual(idx.subagents.size, 0, "nowhere to put it yet");
+  assert.strictEqual(subs[0].worktree, undefined, "so it renders under its parent");
+});
+
+test("once the card exists the subagent moves onto it", () => {
+  const isolated = path.join(REPO, ".claude", "worktrees", "agent-a1");
+  const subs = [busy({ id: "a1", worktree: isolated })];
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "active", startedAt: 1, lastActivity: 2 }],
+    [REPO, isolated],
+    new Map(),
+    new Map([["s1", subs]])
+  );
+  assert.deepStrictEqual(idx.unplaced, []);
+  assert.deepStrictEqual(
+    idx.subagents.get(normalize(isolated)).map((s) => s.id),
+    ["a1"]
+  );
+  assert.strictEqual(
+    idx.agents.get(REPO)[0].subagents.length,
+    1,
+    "and still counts on the parent row"
+  );
+});

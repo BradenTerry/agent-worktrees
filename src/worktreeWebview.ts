@@ -86,6 +86,34 @@ const REFRESH_DEBOUNCE_MS = 500;
  *  activation refresh, before anything is ever rendered. */
 const LIVENESS_SWEEP_MS = 30_000;
 
+/** How often the panel re-reads agent state while agents are on screen.
+ *
+ *  Everything else the panel shows changes on a signal it can watch: the session
+ *  registry is rewritten on every status transition, so the watcher covers
+ *  agent rows. Subagents are not in the registry (see subagents.ts) and they
+ *  come and go entirely inside one of those statuses - a session stays `busy`
+ *  from before it spawns one until after it collects the result, and writes its
+ *  registry file exactly once for that whole span. With the watcher as the only
+ *  signal, a subagent's row would appear only if some unrelated event happened
+ *  to fire while it ran, which is why they looked like they never appeared at
+ *  all. A subagent's own files (`subagents/agent-*.jsonl`) are the only place it
+ *  is visible, so a poll is what makes the row show up.
+ *
+ *  It goes down the agent-only path with no pending pids: no git spawns, a
+ *  readdir of the registry and of each session's subagents dir, and postData
+ *  drops the post entirely unless something actually changed. It runs only
+ *  while the view is visible AND at least one agent is on a card - an idle
+ *  window, or one behind another view, polls nothing.
+ *
+ *  One second, because subagents are routinely short-lived: an agent handed a
+ *  backgrounded job spawns, delegates and returns inside 3-5 seconds, and a
+ *  slower cadence simply never sees it. A cycle measures ~1ms against a couple
+ *  of live sessions (a readdir plus a handful of stats), so the interval is
+ *  bounded by how often a row is worth repainting, not by what it costs. It
+ *  still goes through the same 500ms coalescer as the watcher, so a burst of
+ *  registry writes and a poll tick collapse into one refresh. */
+const AGENT_POLL_MS = 1_000;
+
 /** globalState key for the opt-in Source Control scope button. */
 const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
 /** globalState key for the worktree the user last scoped Source Control to, so
@@ -208,6 +236,16 @@ export class WorktreeWebviewProvider
   /** Coalesces session-state writes into one agent-only refresh (no full git
    *  sweep); see refreshAgents. */
   private readonly agentsDebounce: Coalescer;
+  /** Running while agents are on screen, so subagents (which the registry
+   *  watcher cannot see) appear and disappear; see AGENT_POLL_MS. */
+  private agentPoll?: ReturnType<typeof setInterval>;
+  /** Subagent worktrees a full gather has already been run for, so a cwd that
+   *  never becomes a card costs one re-gather rather than one per poll. */
+  private readonly regathered = new Set<string>();
+  /** Subagent rows in the last agent refresh. Only a change is traced: the poll
+   *  runs every second, and a row's whole life can be three of those, so a line
+   *  per tick would bury the transitions that matter. */
+  private lastSubagentCount = 0;
   /** Terminals we launched, keyed by the session id we started Claude with. */
   private terminals = new Map<string, vscode.Terminal>();
   /** Env var stamped on each agent terminal carrying its session id. VS Code
@@ -330,6 +368,8 @@ export class WorktreeWebviewProvider
     this.refreshDebounce.cancel();
     this.prNudge.cancel();
     this.agentsDebounce.cancel();
+    clearInterval(this.agentPoll);
+    this.agentPoll = undefined;
     // Only stops tracking: the sessions themselves belong to VS Code and keep
     // running, exactly as they would if they had been started from the debug view.
     this.debugSessions.dispose();
@@ -339,6 +379,28 @@ export class WorktreeWebviewProvider
    *  single refresh. */
   private scheduleRefresh(): void {
     this.refreshDebounce.trigger();
+  }
+
+  /**
+   * Start or stop the agent poll to match what is on screen (see AGENT_POLL_MS).
+   *
+   * Called whenever either input can have changed: a payload landing (agents
+   * appeared or went away) and the view being shown or hidden.
+   */
+  private syncAgentPoll(): void {
+    const wanted =
+      !!this.view?.visible &&
+      !!this.lastData?.worktrees.some(
+        (wt) => wt.agents.length > 0 || (wt.subagents?.length ?? 0) > 0
+      );
+    if (wanted === !!this.agentPoll) return;
+    diag(`agent poll ${wanted ? "started" : "stopped"}`);
+    if (!wanted) {
+      clearInterval(this.agentPoll);
+      this.agentPoll = undefined;
+      return;
+    }
+    this.agentPoll = setInterval(() => this.agentsDebounce.trigger(), AGENT_POLL_MS);
   }
 
   private get extensionUri(): vscode.Uri {
@@ -371,6 +433,7 @@ export class WorktreeWebviewProvider
     );
     webviewView.onDidChangeVisibility(() => {
       this.prService.setVisible(webviewView.visible);
+      this.syncAgentPoll();
       if (webviewView.visible) {
         this.lastPosted = ""; // a re-shown view needs a fresh push
         void this.refresh();
@@ -433,6 +496,9 @@ export class WorktreeWebviewProvider
   private postData(data: WorktreeData, seq: number): void {
     if (!this.view || seq !== this.updateSeq) return;
     this.lastData = data;
+    // Before the unchanged-payload early return below: the poll follows what is
+    // on the cards, which is now this payload whether or not it is re-posted.
+    this.syncAgentPoll();
     // Waiting agents surface as a number badge on the Activity Bar icon, so a
     // blocked agent is visible even while the panel is hidden behind another
     // view. Set before the unchanged-payload early return: a freshly resolved
@@ -492,6 +558,18 @@ export class WorktreeWebviewProvider
       registry,
       data.worktrees.map((wt) => wt.path)
     );
+    let subs = 0;
+    for (const rows of sessions.agents.values()) {
+      for (const a of rows) subs += a.subagents?.length ?? 0;
+    }
+    // A subagent finishing takes its isolated worktree with it, and only a full
+    // gather re-lists worktrees, so a card for one that has just been removed
+    // would otherwise sit there until something else forced a refresh.
+    const fewer = subs < this.lastSubagentCount;
+    if (subs !== this.lastSubagentCount) {
+      diag(`subagents: ${subs} running across ${registry.length} session(s)`);
+      this.lastSubagentCount = subs;
+    }
     this.syncTerminalNames(sessions.agents);
     const known = new Set(data.worktrees.map((wt) => normalize(wt.path)));
     // A worktree the cache has never heard of needs a full gather to get a card
@@ -499,6 +577,15 @@ export class WorktreeWebviewProvider
     for (const key of sessions.agents.keys()) {
       if (!known.has(key)) return this.refresh();
     }
+    // Same for a worktree created to isolate a subagent, which happens while the
+    // session is mid-turn and so is never covered by the last full gather. Once
+    // per path: a cwd that no gather can turn into a card (a subagent pointed at
+    // an unrelated repo) must not make every poll re-run git for every worktree.
+    if (sessions.unplaced.some((p) => !this.regathered.has(normalize(p)))) {
+      for (const p of sessions.unplaced) this.regathered.add(normalize(p));
+      return this.refresh();
+    }
+    if (fewer) return this.refresh();
     const touched = data.worktrees.filter((wt) =>
       (sessions.agents.get(normalize(wt.path)) ?? []).some((a: AgentVM) =>
         changed.has(a.sessionId)
@@ -520,7 +607,14 @@ export class WorktreeWebviewProvider
     if (switched) return this.refresh();
     touched.forEach((wt, i) => (wt.git = statuses[i]));
     for (const wt of data.worktrees) {
-      wt.agents = sessions.agents.get(normalize(wt.path)) ?? [];
+      const key = normalize(wt.path);
+      wt.agents = sessions.agents.get(key) ?? [];
+      // The subagents a session elsewhere handed this worktree. They belong to
+      // the card, not to any row on it, so patching only `agents` left a
+      // fanned-out subagent's row stuck on whatever the last full gather saw.
+      const foreign = sessions.subagents.get(key) ?? [];
+      if (foreign.length) wt.subagents = foreign;
+      else delete wt.subagents;
     }
     data.activeSessionId = this.activeSessionId();
     this.postData(data, seq);
