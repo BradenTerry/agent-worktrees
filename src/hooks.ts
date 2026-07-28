@@ -2,12 +2,6 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import {
-  hookCommandFor,
-  launcherName,
-  launcherScript,
-  nodeRuntime,
-} from "./nodeRuntime";
 
 /**
  * Hook-backed agent status detection.
@@ -26,9 +20,6 @@ import {
 const HOME = os.homedir();
 const SETTINGS_PATH = path.join(HOME, ".claude", "settings.json");
 const EMITTER = "agent-worktrees-emit.mjs";
-/** Shared by the emitter and its launcher, so a hook is recognized as ours
- *  whichever of the two the command names. */
-const EMITTER_STEM = "agent-worktrees-emit";
 /** Where session data + the emitter lived before they moved into the extension's
  *  global storage. Cleaned up on activation so nothing of ours lingers in the
  *  user's ~/.claude tree. */
@@ -137,17 +128,14 @@ export const HOOKS: HookSpec[] = [
 
 /** The command every managed hook runs: the emitter, told where to write state.
  *  The `--dir` arg is how the (separate, Claude-spawned) emitter process learns
- *  the global-storage path; it cannot read the extension's context.
- *
- *  Which interpreter runs it, and whether that needs the launcher, is
- *  nodeRuntime's call - the extension does not require `node` on PATH. */
-async function hookCommand(context: vscode.ExtensionContext): Promise<string> {
-  const dir = hooksDir(context);
-  return hookCommandFor(await nodeRuntime(), {
-    emitter: path.join(dir, EMITTER),
-    launcher: path.join(dir, launcherName(process.platform)),
-    sessions: sessionsDir(context),
-  });
+ *  the global-storage path; it cannot read the extension's context. */
+function hookCommand(context: vscode.ExtensionContext): string {
+  const emitter = path.join(hooksDir(context), EMITTER);
+  // --no-warnings: Claude Code surfaces ANY stderr output as a per-event
+  // "hook error", and node's startup warnings (deprecation/experimental,
+  // varying by node version) hit stderr before the emitter runs a single
+  // line, so they can only be silenced from the command line.
+  return `node --no-warnings "${emitter}" --dir "${sessionsDir(context)}"`;
 }
 
 /**
@@ -196,8 +184,7 @@ async function writeSettings(settings: Settings): Promise<void> {
   await fs.promises.rename(tmp, SETTINGS_PATH);
 }
 
-/** Our hook in an event is the one whose command runs our emitter script -
- *  directly, or through the launcher that shares its name. */
+/** Our hook in an event is the one whose command runs our emitter script. */
 function findHook(
   settings: Settings,
   spec: HookSpec
@@ -206,7 +193,7 @@ function findHook(
   if (!Array.isArray(entries)) return undefined;
   for (const entry of entries) {
     for (const h of entry.hooks ?? []) {
-      if (typeof h.command === "string" && h.command.includes(EMITTER_STEM))
+      if (typeof h.command === "string" && h.command.includes(EMITTER))
         return h;
     }
   }
@@ -254,39 +241,13 @@ export async function hooksInstalled(): Promise<boolean> {
   return installed;
 }
 
-/**
- * Write the launcher that runs the emitter on VS Code's own Node, next to the
- * emitter itself. Written even when the command currently points at a `node`
- * from PATH, so it is already in place if that Node disappears.
- *
- * Rewritten only when the body actually changes (a VS Code update moves the
- * executable): the steady state is a read, which keeps this off the path of a
- * hook that happens to be executing the launcher right now.
- */
-async function ensureLauncher(dir: string, emitter: string): Promise<void> {
-  const file = path.join(dir, launcherName(process.platform));
-  const body = launcherScript(process.platform, await nodeRuntime(), emitter);
-  try {
-    if ((await fs.promises.readFile(file, "utf8")) === body) return;
-  } catch {
-    /* missing or unreadable: fall through and write it */
-  }
-  await fs.promises.writeFile(file, body, { mode: 0o755 });
-  // writeFile's mode only applies when it creates the file, so an existing
-  // launcher rewritten after an update would keep whatever mode it had.
-  if (process.platform !== "win32") await fs.promises.chmod(file, 0o755);
-}
-
 /** Copy the bundled emitter into the stable hooks dir, overwriting in place so
- *  updates ship a new body to the path the command already points at, and
- *  refresh the launcher beside it. */
+ *  updates ship a new body to the path the command already points at. */
 async function ensureEmitter(context: vscode.ExtensionContext): Promise<void> {
   const dir = hooksDir(context);
   await fs.promises.mkdir(dir, { recursive: true });
   const src = path.join(context.extensionUri.fsPath, "hooks", EMITTER);
-  const emitter = path.join(dir, EMITTER);
-  await fs.promises.copyFile(src, emitter);
-  await ensureLauncher(dir, emitter);
+  await fs.promises.copyFile(src, path.join(dir, EMITTER));
 }
 
 /**
@@ -300,7 +261,7 @@ export async function installHooks(
   if (!managesUserSettings(context.extensionMode)) return;
   await ensureEmitter(context);
   const settings = await readSettings();
-  const command = await hookCommand(context);
+  const command = hookCommand(context);
   let changed = false;
   for (const spec of HOOKS) {
     const existing = findHook(settings, spec);
@@ -335,7 +296,7 @@ export function syncHooks(context: vscode.ExtensionContext): Promise<void> {
       const anyInstalled = HOOKS.some((spec) => !!findHook(settings, spec));
       if (!anyInstalled) return;
       await ensureEmitter(context);
-      const command = await hookCommand(context);
+      const command = hookCommand(context);
       let changed = false;
       for (const spec of HOOKS) {
         const existing = findHook(settings, spec);

@@ -2,40 +2,6 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## 3.9.0
-
-- **Agent status now comes from Claude Code itself** - the panel inferred what
-  each agent was doing by watching its hook events go by, which is right until
-  the event stream drifts from reality: a session resumed in another terminal, a
-  notification that arrived while no window was open, or a long shell command
-  that looks exactly like a finished turn. Claude Code keeps a registry of its
-  live sessions at `~/.claude/sessions/<pid>.json` and, since v2.1.119, records
-  what each one is doing in a `status` field it rewrites on every transition. The
-  panel now reads that on every refresh and prefers it: `busy` and `shell` show
-  as active, `waiting` as waiting, `idle` as idle, and a status it does not
-  recognize leaves the hook-derived state alone rather than guessing. Reading it
-  costs no process and no dependency. Sessions the registry knows about but the
-  hooks never saw - one started before you installed them, say - now appear as
-  rows on the card whose worktree contains their working directory, and are
-  counted among the agents a worktree removal would stop. The hooks stay exactly
-  as they were: the registry has no subagents, skills or work summary, and no
-  status at all on older versions, so everything it cannot answer is still
-  answered by them.
-- **Node is no longer required for agent status** - the hook command that
-  reports what each agent is doing ran a bare `node`, which quietly made a Node
-  install a requirement of the extension. Claude Code ships as a native binary
-  now, so having `claude` on your `PATH` no longer means having `node` on it,
-  and on a machine without one every hook event turned into a "hook error" in
-  the session rather than degrading quietly. The extension now picks the
-  interpreter itself: a `node` from your `PATH` when there is a usable one,
-  recorded by absolute path so it still resolves in whatever shell Claude Code
-  runs hooks with, and otherwise VS Code's own Node, which is always present. On
-  the desktop that means running the VS Code binary as Node, which takes an
-  environment variable and therefore a small launcher script generated beside
-  the emitter, since one hook command string has to work in both cmd.exe and
-  `sh`. Existing hook entries are repaired in place rather than duplicated, and
-  `node` is gone from the extension's requirements.
-
 ## 3.8.0
 
 - **Run and debug a worktree from its card** - VS Code's Run and Debug view

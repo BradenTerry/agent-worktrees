@@ -11,14 +11,12 @@ import {
   GitStatus,
 } from "./git";
 import { normalizePath } from "./worktreeUtils";
-import { mergeRegistry, RegistrySession } from "./sessionRegistry";
 import { DebugSessionVM } from "./debugRun";
 import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
 import { diag } from "./diagnostics";
 
 /**
- * Lifecycle status of an agent session: Claude Code's own `status` for the
- * session when it records one (see sessionRegistry), else derived from its hooks.
+ * Lifecycle status of an agent session, derived from Claude Code hooks.
  * - active:  doing work (a prompt is being processed or a tool is running)
  * - waiting: needs user interaction (a permission prompt or a question)
  * - idle:    completed its task, or freshly created
@@ -203,8 +201,7 @@ export function folderIndex(fsPath: string): number {
 export async function gatherWorktrees(
   sessions?: SessionIndex,
   hooksInstalled = false,
-  fetch = false,
-  registry: RegistrySession[] = []
+  fetch = false
 ): Promise<WorktreeData> {
   const repo = await findRepo();
   if (!repo) return { worktrees: [], hooksInstalled };
@@ -260,12 +257,6 @@ export async function gatherWorktrees(
   // anywhere). With no card to land on, its row would simply vanish, so drop the
   // relocation and let it render under its parent instead. The objects are
   // shared with the parent's own list, so clearing the field is all it takes.
-  // Claude's own view of what each session is doing, folded in now that the
-  // cards it can land on are known (see sessionRegistry).
-  if (sessions) {
-    mergeRegistry(sessions, registry, worktrees.map((wt) => wt.path));
-  }
-
   if (sessions) {
     const cards = new Set(worktrees.map((wt) => normalize(wt.path)));
     const unplaced = new Set<string>();

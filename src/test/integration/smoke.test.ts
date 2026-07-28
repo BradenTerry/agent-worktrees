@@ -3,14 +3,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { spawnSync } from "child_process";
 import { supportsAgentCliTitle } from "../../worktreeUtils";
 import { managesUserSettings } from "../../hooks";
-import {
-  electronEnableArgs,
-  launcherName,
-  launcherScript,
-} from "../../nodeRuntime";
 
 /**
  * Extension-host smoke tests. These run inside a real VS Code (via
@@ -65,56 +59,6 @@ suite("Agent Worktrees extension host", () => {
       !raw.includes(".vscode-test"),
       `${settingsPath} points a hook into the test host's user-data dir`
     );
-  });
-
-  test("the hook launcher runs a script on this host's own Node", () => {
-    // The fallback that makes `node` optional rests on two things the unit
-    // suite cannot check: that this host's executable behaves as Node under
-    // ELECTRON_RUN_AS_NODE, and that the generated launcher is runnable by the
-    // shell Claude Code spawns hooks with (cmd.exe on Windows, sh elsewhere).
-    // Here process.execPath is the real VS Code binary, on the real OS.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "awt-launcher-"));
-    try {
-      const probe = path.join(dir, "probe.mjs");
-      fs.writeFileSync(probe, "console.log(JSON.stringify(process.argv.slice(2)));\n");
-      const file = path.join(dir, launcherName(process.platform));
-      const enableArgs = electronEnableArgs(process.versions);
-      fs.writeFileSync(
-        file,
-        launcherScript(
-          process.platform,
-          { exec: process.execPath, viaElectron: true, enableArgs },
-          probe
-        ),
-        { mode: 0o755 }
-      );
-
-      const stateDir = path.join(dir, "session state");
-      // Windows needs a shell (node refuses to spawn a .cmd without one), and a
-      // shell takes the whole command as one string: passing an args array
-      // alongside `shell` is what DEP0190 warns about, since node concatenates
-      // them unescaped. Quoting here is the same thing the hook command in
-      // settings.json does, which is what this is standing in for.
-      const res =
-        process.platform === "win32"
-          ? spawnSync(`"${file}" --dir "${stateDir}"`, {
-              encoding: "utf8",
-              shell: true,
-            })
-          : spawnSync(file, ["--dir", stateDir], { encoding: "utf8" });
-
-      assert.strictEqual(res.status, 0, `launcher failed: ${res.stderr}`);
-      // Claude Code reports any hook stderr as an error in the session, so the
-      // fallback interpreter has to start silently.
-      assert.strictEqual(res.stderr, "", "the launcher wrote to stderr");
-      assert.deepStrictEqual(JSON.parse(res.stdout), [
-        ...enableArgs,
-        "--dir",
-        stateDir,
-      ]);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   test("registers its commands", async () => {
