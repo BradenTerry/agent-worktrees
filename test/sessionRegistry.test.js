@@ -232,3 +232,60 @@ test("projectsDir sits beside the registry in Claude's config tree", () => {
     path.join("/cfg", "projects")
   );
 });
+
+/**
+ * Naming the subagent behind a permission prompt. The signal is split: the
+ * subagent's files say it has a call out, the parent's status says someone is
+ * being asked.
+ */
+
+const busy = (over = {}) => ({ id: "s", startedAt: 1, outstanding: true, ...over });
+
+test("a waiting session names its one subagent mid-call as the one asking", () => {
+  const subs = [busy({ id: "blocked" })];
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "waiting", startedAt: 1, lastActivity: 2 }],
+    [REPO],
+    new Map(),
+    new Map([["s1", subs]])
+  );
+  assert.strictEqual(idx.agents.get(REPO)[0].subagents[0].awaitingPermission, true);
+});
+
+test("an active session's mid-call subagent is just running a tool", () => {
+  // Same file state; only the parent's status differs, and it is what decides.
+  const subs = [busy({ id: "working" })];
+  indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "active", startedAt: 1, lastActivity: 2 }],
+    [REPO],
+    new Map(),
+    new Map([["s1", subs]])
+  );
+  assert.strictEqual(subs[0].awaitingPermission, undefined);
+});
+
+test("several subagents mid-call stay unattributed rather than guessing", () => {
+  // The row only earns its place if it names the right one.
+  const subs = [busy({ id: "a" }), busy({ id: "b" })];
+  indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "waiting", startedAt: 1, lastActivity: 2 }],
+    [REPO],
+    new Map(),
+    new Map([["s1", subs]])
+  );
+  assert.deepStrictEqual(
+    subs.map((s) => s.awaitingPermission),
+    [undefined, undefined]
+  );
+});
+
+test("attribution clears once the session stops waiting", () => {
+  const subs = [busy({ id: "blocked", awaitingPermission: true })];
+  indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "active", startedAt: 1, lastActivity: 2 }],
+    [REPO],
+    new Map(),
+    new Map([["s1", subs]])
+  );
+  assert.strictEqual(subs[0].awaitingPermission, undefined, "a stale prompt cue is worse than none");
+});

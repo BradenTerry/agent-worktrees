@@ -62,10 +62,29 @@ since a subagent blocked on a slow build writes nothing while it waits; the cost
 of it being generous is that such a row can linger for up to that long, rather
 than forever.
 
-## What is not available
+## What a row is doing, and who is asking you
 
-Which subagent is holding a pending permission prompt. That came from the
-`PermissionRequest` hook, and nothing Claude writes to disk distinguishes "this
-subagent is blocked on a permission decision" from "this subagent is working".
-The parent agent still reads **waiting** when it needs you; the panel just cannot
-say which of its subagents is the reason.
+A subagent's transcript pairs its tool calls plainly: an assistant record carries
+the `tool_use`, and the `user` record after it carries the matching
+`tool_result`. So a call with **no result** says the subagent is blocked on it -
+either the tool is running, or a permission decision for it is outstanding. Only
+the tail is scanned, since an unanswered call is by definition the most recent
+thing in the file.
+
+That much is a row's own state:
+
+| Subagent's files | Row |
+| --- | --- |
+| a call issued, no result | mid-call: working, or blocked on a prompt |
+| every call answered, not finished | parked - it stopped its turn and will be woken |
+
+Which of the two a mid-call subagent is doing cannot be told from its own files.
+The parent can tell you: a session reads **waiting** only when Claude needs the
+user. So a waiting session with **exactly one** subagent mid-call identifies that
+subagent as the one asking, which is what the `PermissionRequest` hook used to
+say outright.
+
+With several mid-call at once it stays unattributed rather than guessing. A row
+that says "this one is asking you" is worth something only if it is right, and a
+stale or wrong cue is worse than none - which is also why attribution is cleared
+the moment the session stops waiting.

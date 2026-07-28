@@ -34,12 +34,21 @@ interface RawMeta {
 
 /** A subagent found on disk, plus what is needed to decide it is still running. */
 export interface FoundSubagent extends SubagentVM {
+  /** It has issued a tool call whose result has not landed: it is either running
+   *  that tool or blocked on a permission decision for it. Which of the two
+   *  cannot be told from here - only the parent session's status says whether
+   *  anyone is being asked (see indexRegistry). */
+  outstanding: boolean;
   /** The parent's `Agent` tool-use this subagent belongs to. Its presence in the
    *  parent's results is what says the subagent has finished. */
   toolUseId?: string;
   /** Epoch ms its transcript was last written, for the staleness backstop. */
   lastActivity: number;
 }
+
+/** Only the tail of a subagent's transcript is scanned for an unanswered call:
+ *  an outstanding one is by definition the most recent thing in it. */
+const TAIL_BYTES = 32768;
 
 const META_SUFFIX = ".meta.json";
 const AGENT_PREFIX = "agent-";
@@ -83,6 +92,62 @@ function readHead(file: string): { cwd?: string; startedAt?: number } {
 }
 
 /**
+ * Whether the subagent has a tool call out that has not come back.
+ *
+ * Its transcript pairs them plainly: an assistant record carries the `tool_use`,
+ * and the `user` record after it carries the `tool_result`. A call with no
+ * result is the signature of a subagent that is blocked - on a slow tool, or on
+ * a permission prompt nobody has answered.
+ */
+function hasOutstandingCall(file: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, "r");
+    const { size } = fs.fstatSync(fd);
+    const want = Math.min(size, TAIL_BYTES);
+    if (want <= 0) return false;
+    const buf = Buffer.alloc(want);
+    fs.readSync(fd, buf, 0, want, size - want);
+    const issued = new Set<string>();
+    const answered = new Set<string>();
+    for (const line of buf.toString("utf8").split("\n")) {
+      if (!line.trim()) continue;
+      // Cheap reject: most records are plain messages.
+      if (line.indexOf("tool_use") === -1 && line.indexOf("tool_result") === -1) {
+        continue;
+      }
+      let rec: { message?: { content?: unknown } };
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        continue; // the first line is usually a fragment
+      }
+      const content = rec.message?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        const b = block as { type?: string; id?: string; tool_use_id?: string };
+        if (b?.type === "tool_use" && b.id) issued.add(b.id);
+        if (b?.type === "tool_result" && b.tool_use_id) answered.add(b.tool_use_id);
+      }
+    }
+    for (const id of issued) {
+      if (!answered.has(id)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+    }
+  }
+}
+
+/**
  * Every subagent Claude has recorded for a session, running or finished.
  *
  * Deciding which are still running is the caller's job (see liveSubagents): it
@@ -108,8 +173,13 @@ export async function readSubagents(dir: string): Promise<FoundSubagent[]> {
       const stat = await fs.promises
         .stat(transcript)
         .catch(() => fs.promises.stat(path.join(dir, fn)));
+      const outstanding = hasOutstandingCall(transcript);
       out.push({
         id,
+        outstanding,
+        // Nothing out and not finished: it has stopped its turn but is still in
+        // flight - parked on a background command that will wake it.
+        ...(outstanding ? {} : { paused: true }),
         ...(typeof meta.agentType === "string" && meta.agentType
           ? { type: meta.agentType }
           : {}),

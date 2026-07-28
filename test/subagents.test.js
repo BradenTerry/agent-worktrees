@@ -157,3 +157,47 @@ test("liveSubagents orders by start time, oldest first", () => {
     ["a", "b"]
   );
 });
+
+/**
+ * Status. A subagent's own files say whether it has a tool call out; only the
+ * parent's status says whether that means "running a tool" or "asking you".
+ */
+
+const callRecord = (id) => ({
+  type: "assistant",
+  message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: {} }] },
+});
+const resultRecord = (id) => ({
+  type: "user",
+  message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+});
+
+test("a subagent mid-call is marked outstanding, not parked", async () => {
+  const dir = seed({
+    a1: { meta: meta(), records: [firstRecord(), callRecord("toolu_x")] },
+  });
+  const [s] = await readSubagents(dir);
+  assert.strictEqual(s.outstanding, true);
+  assert.strictEqual(s.paused, undefined);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a subagent whose call came back is parked, awaiting its next turn", async () => {
+  const dir = seed({
+    a1: {
+      meta: meta(),
+      records: [firstRecord(), callRecord("toolu_x"), resultRecord("toolu_x")],
+    },
+  });
+  const [s] = await readSubagents(dir);
+  assert.strictEqual(s.outstanding, false);
+  assert.strictEqual(s.paused, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a subagent that has issued nothing yet is not outstanding", async () => {
+  const dir = seed({ a1: { meta: meta(), records: [firstRecord()] } });
+  const [s] = await readSubagents(dir);
+  assert.strictEqual(s.outstanding, false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

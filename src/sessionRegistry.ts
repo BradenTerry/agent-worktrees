@@ -182,6 +182,25 @@ function placeIn(cwd: string, keys: string[]): string | undefined {
 }
 
 /**
+ * Name the subagent behind a permission prompt, when it can be named.
+ *
+ * A subagent with a tool call out has either got a tool running or is blocked on
+ * a permission decision for it; its own files cannot tell those apart. The
+ * parent can: the session reads `waiting` only when Claude needs the user. So a
+ * waiting session with exactly one subagent mid-call identifies that subagent as
+ * the one asking - which is what the `PermissionRequest` hook used to say.
+ *
+ * With several mid-call at once it stays unattributed rather than guessing: the
+ * row that says "this one is asking you" is only worth anything if it is right.
+ */
+function attributePrompt(subagents: SubagentVM[], status: AgentStatus): void {
+  for (const sub of subagents) delete sub.awaitingPermission;
+  if (status !== "waiting") return;
+  const blocked = subagents.filter((s) => (s as { outstanding?: boolean }).outstanding);
+  if (blocked.length === 1) blocked[0].awaitingPermission = true;
+}
+
+/**
  * Every live session, grouped by the worktree card it belongs to.
  *
  * `worktreePaths` are the cards that exist; a session working outside all of
@@ -227,6 +246,7 @@ export function indexRegistry(
         const own = subagents.get(session.sessionId) ?? [];
         const status = session.status ?? "idle";
         const label = summary ?? `Claude ${i + 1}`;
+        attributePrompt(own, status);
         for (const sub of own) {
           if (!sub.worktree) continue;
           const home = placeIn(sub.worktree, keys);
