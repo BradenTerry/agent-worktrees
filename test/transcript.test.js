@@ -166,7 +166,7 @@ test("scanSkills finds skills anywhere in the transcript, deduped in order", asy
     skillCall("code-review"), // same skill by its bare name
   ]);
   const file = await findTranscript(root, "s1");
-  assert.deepStrictEqual(scanSkills(file), ["code-review", "pdf"]);
+  assert.deepStrictEqual(await scanSkills(file), ["code-review", "pdf"]);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

@@ -110,7 +110,7 @@ export function readTail(file: string): TranscriptTail {
         !out.title &&
         (line.indexOf("ai-title") !== -1 || line.indexOf("custom-title") !== -1);
       const maybeResult = line.indexOf("tool_result") !== -1;
-      const maybeSkill = line.indexOf('"Skill"') !== -1;
+      const maybeSkill = line.indexOf(SKILL_MARK) !== -1;
       if (!maybeTitle && !maybeResult && !maybeSkill) continue;
       let rec: Record<string, unknown>;
       try {
@@ -157,6 +157,9 @@ export function readTail(file: string): TranscriptTail {
 /** Chunk size for the one-time full scan. Big enough that a long transcript is
  *  a handful of reads, small enough that none of this lands in memory twice. */
 const SCAN_CHUNK = 256 * 1024;
+/** The only thing the scan is looking for, so it can reject a whole chunk with
+ *  one search rather than splitting it into records first. */
+const SKILL_MARK = '"Skill"';
 
 /**
  * Every skill invoked anywhere in a transcript, bare names in first-use order.
@@ -167,23 +170,31 @@ const SCAN_CHUNK = 256 * 1024;
  * the tail read on every refresh after that keeps the list current - so the cost
  * is paid when a window first sees a session, not repeatedly.
  */
-export function scanSkills(file: string): string[] {
+export async function scanSkills(file: string): Promise<string[]> {
   const out: string[] = [];
   const seen = new Set<string>();
-  let fd: number | undefined;
+  let handle: fs.promises.FileHandle | undefined;
   try {
-    fd = fs.openSync(file, "r");
+    handle = await fs.promises.open(file, "r");
     const buf = Buffer.alloc(SCAN_CHUNK);
     let rest = "";
     for (;;) {
-      const read = fs.readSync(fd, buf, 0, SCAN_CHUNK, null);
-      if (!read) break;
-      const lines = (rest + buf.toString("utf8", 0, read)).split("\n");
-      // The last piece may be half a record; carry it to the next chunk.
+      const { bytesRead } = await handle.read(buf, 0, SCAN_CHUNK, null);
+      if (!bytesRead) break;
+      const text = rest + buf.toString("utf8", 0, bytesRead);
+      // Splitting megabytes into lines is the expensive part, and almost no
+      // chunk mentions the Skill tool at all. One indexOf over the chunk decides
+      // whether it is worth doing; when it is not, only the trailing partial
+      // record is carried forward.
+      if (text.indexOf(SKILL_MARK) === -1) {
+        const nl = text.lastIndexOf("\n");
+        rest = nl === -1 ? text : text.slice(nl + 1);
+        continue;
+      }
+      const lines = text.split("\n");
       rest = lines.pop() ?? "";
       for (const line of lines) {
-        // Cheap reject: almost no line mentions the Skill tool.
-        if (line.indexOf('"Skill"') === -1) continue;
+        if (line.indexOf(SKILL_MARK) === -1) continue;
         try {
           for (const skill of skillsInLine(JSON.parse(line))) {
             if (seen.has(skill)) continue;
@@ -198,13 +209,7 @@ export function scanSkills(file: string): string[] {
   } catch {
     /* no transcript, unreadable, gone mid-scan */
   } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch {
-        /* already closed */
-      }
-    }
+    await handle?.close().catch(() => {});
   }
   return out;
 }
@@ -269,7 +274,7 @@ export class TranscriptReader {
     this.finished.set(sessionId, seen);
     // First sight of this session pays for the full scan; after that the tail
     // is enough, since anything new is by definition at the end.
-    const skills = this.skills.get(sessionId) ?? scanSkills(file);
+    const skills = this.skills.get(sessionId) ?? (await scanSkills(file));
     for (const skill of tail.skills) {
       if (!skills.includes(skill)) skills.push(skill);
     }
