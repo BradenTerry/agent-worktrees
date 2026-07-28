@@ -9,6 +9,7 @@ import {
   normalize,
   AgentVM,
   SessionIndex,
+  SubagentVM,
   WorktreeData,
   BranchData,
 } from "./worktreeData";
@@ -51,7 +52,7 @@ import {
   registryDir,
   RegistrySession,
 } from "./sessionRegistry";
-import { TitleReader } from "./transcript";
+import { TranscriptReader } from "./transcript";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import {
   DebugSessionTracker,
@@ -224,7 +225,7 @@ export class WorktreeWebviewProvider
    *  session in, and the source of every agent row. */
   private readonly registryDir: string;
   /** Work summaries, read from each session's transcript and cached. */
-  private readonly titles: TitleReader;
+  private readonly reader: TranscriptReader;
   /** Background PR-status fetcher; only does work when a token is stored. */
   private readonly prService: PrService;
   /** Resolved GitHub origin per worktree path (null = no github remote). */
@@ -254,7 +255,7 @@ export class WorktreeWebviewProvider
       REFRESH_DEBOUNCE_MS
     );
     this.registryDir = registryDir();
-    this.titles = new TitleReader(projectsDir());
+    this.reader = new TranscriptReader(projectsDir());
     // Ensure the directory exists so the watcher attaches even before Claude
     // has registered its first session.
     try {
@@ -391,7 +392,7 @@ export class WorktreeWebviewProvider
     // Every agent on a card comes from Claude's own session registry; a session
     // that is gone has no file, so there is nothing to sweep or expire.
     const registry = await this.readAgents();
-    const data = await gatherWorktrees(force, registry, this.titles);
+    const data = await gatherWorktrees(force, registry, this.reader);
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
     await this.annotateDebug(data);
@@ -528,7 +529,7 @@ export class WorktreeWebviewProvider
   /** Claude's live sessions, and the titles for them dropped from the cache. */
   private async readAgents(): Promise<RegistrySession[]> {
     const registry = await readRegistry(this.registryDir);
-    this.titles.retain(new Set(registry.map((s) => s.sessionId)));
+    this.reader.retain(new Set(registry.map((s) => s.sessionId)));
     return registry;
   }
 
@@ -539,13 +540,18 @@ export class WorktreeWebviewProvider
     worktreePaths: string[]
   ): Promise<SessionIndex> {
     const titles = new Map<string, string>();
+    const subagents = new Map<string, SubagentVM[]>();
     await Promise.all(
       registry.map(async (session) => {
-        const title = await this.titles.titleFor(session.sessionId);
+        const [title, subs] = await Promise.all([
+          this.reader.titleFor(session.sessionId),
+          this.reader.subagentsFor(session.sessionId),
+        ]);
         if (title) titles.set(session.sessionId, title);
+        if (subs.length) subagents.set(session.sessionId, subs);
       })
     );
-    return indexRegistry(registry, worktreePaths, titles);
+    return indexRegistry(registry, worktreePaths, titles, subagents);
   }
 
   /**

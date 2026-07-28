@@ -12,7 +12,7 @@ import {
 } from "./git";
 import { normalizePath } from "./worktreeUtils";
 import { indexRegistry, RegistrySession } from "./sessionRegistry";
-import { TitleReader } from "./transcript";
+import { TranscriptReader } from "./transcript";
 import { DebugSessionVM } from "./debugRun";
 import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
 import { diag } from "./diagnostics";
@@ -87,8 +87,9 @@ export interface AgentVM {
 
 /**
  * The live agents, indexed by the worktree path each one is running in (keyed by
- * `normalize(path)`). `subagents` is always empty: subagents run inside their
- * parent's process, so Claude's registry has nothing to say about them.
+ * `normalize(path)`), plus the subagents that were handed a worktree of their
+ * own, indexed under THAT worktree so they show on the card for the code they
+ * are touching.
  */
 export interface SessionIndex {
   agents: Map<string, AgentVM[]>;
@@ -189,7 +190,7 @@ export function folderIndex(fsPath: string): number {
 export async function gatherWorktrees(
   fetch = false,
   registry: RegistrySession[] = [],
-  titles?: TitleReader
+  reader?: TranscriptReader
 ): Promise<WorktreeData> {
   const repo = await findRepo();
   if (!repo) return { worktrees: [] };
@@ -248,18 +249,24 @@ export async function gatherWorktrees(
   // land on are known (see sessionRegistry). Each row's work summary is read
   // from that session's transcript.
   const summaries = new Map<string, string>();
-  if (titles) {
+  const subagents = new Map<string, SubagentVM[]>();
+  if (reader) {
     await Promise.all(
       registry.map(async (session) => {
-        const title = await titles.titleFor(session.sessionId);
+        const [title, subs] = await Promise.all([
+          reader.titleFor(session.sessionId),
+          reader.subagentsFor(session.sessionId),
+        ]);
         if (title) summaries.set(session.sessionId, title);
+        if (subs.length) subagents.set(session.sessionId, subs);
       })
     );
   }
   const sessions = indexRegistry(
     registry,
     worktrees.map((wt) => wt.path),
-    summaries
+    summaries,
+    subagents
   );
 
   const vms: WorktreeVM[] = worktrees.map((wt, i) => {

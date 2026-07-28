@@ -35,6 +35,16 @@ single view.
 - Terminal tabs are titled by Claude Code itself, so each tab tracks that
   session's current topic, background tabs included, and the terminal you are
   reading is never pulled away when another agent answers.
+- Subagents an agent is running right now are listed under it, with what each
+  one is doing and how long it has been at it. They clear themselves when they
+  finish, so the panel shows live work, not a running total.
+- When an agent fans work out across worktrees - one subagent per ticket, each
+  in a worktree of its own so their edits cannot collide - each subagent is
+  listed on the card for the worktree it is actually working in, naming the
+  agent that sent it there. The card for a worktree with no agent of its own
+  still shows what is happening inside it, and the agent driving the fan-out
+  carries a count of everything it has in flight instead of looking idle.
+  Clicking a subagent opens the terminal of the agent running it.
 - Agents that are no longer running are retired on their own. An agent that dies
   with its terminal (you closed the window, killed the terminal, restarted the
   machine) never gets to report that it exited, so the panel checks whether each
@@ -46,9 +56,10 @@ single view.
 
 Status comes from Claude Code itself: it records what each session is doing and
 the panel reads that, so there is nothing to set up and nothing to approve. Each
-row is labelled with that session's own work summary. **Nothing is sent over the
-network** and nothing is written to your Claude settings - state is read from
-files Claude Code already keeps.
+row is labelled with that session's own work summary, and its subagents are read
+from the files Claude keeps for them. **Nothing is sent over the network** and
+nothing is written to your Claude settings - everything comes from files Claude
+Code already keeps.
 
 If you used an earlier version, the hooks it asked you to install are removed
 automatically. Hooks you added yourself are left exactly as they are.

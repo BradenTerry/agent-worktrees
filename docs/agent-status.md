@@ -62,6 +62,10 @@ session's transcript:
 { "type": "custom-title", "customTitle": "renamed by hand" }
 ```
 
+The same tail read also collects the ids of tool calls whose results have landed,
+which is what retires a finished subagent (see [Subagents](subagents.md)) — one
+pass over the bytes, not two.
+
 `src/transcript.ts` reads the newest of those from the tail of
 `~/.claude/projects/<project>/<sessionId>.jsonl`, whichever kind wrote it. Only
 the tail is read, so the cost does not grow with the transcript; the result is
@@ -89,11 +93,12 @@ grace period and a process-table scan to make up the difference.
 
 ## What this does not cover
 
-- **Subagents.** They run inside their parent's process, so the registry has
-  nothing to say about them. The indented subagent rows the panel used to draw
-  came from `SubagentStart`/`SubagentStop` hooks and went with them.
-- **Skills.** Same: the list came from watching `PreToolUse` fire for a Skill
-  tool.
+- **Skills.** The per-agent list came from watching `PreToolUse` fire for a Skill
+  tool, and nothing Claude writes to disk records it.
+- **Which subagent holds a permission prompt.** Subagent rows themselves are read
+  from Claude's own files (see [Subagents](subagents.md)); only the attribution
+  that named *which* one was blocking you came from the `PermissionRequest` hook
+  and has no equivalent.
 - **A session that was resumed.** The row is keyed by Claude's live `sessionId`.
   The extension starts agents with `claude --session-id <uuid>` and stamps that
   uuid into the terminal's environment, which is how a row finds its terminal.

@@ -1,7 +1,13 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { AgentStatus, AgentVM, SessionIndex } from "./worktreeData";
+import {
+  AgentStatus,
+  AgentVM,
+  SessionIndex,
+  SubagentVM,
+  WorktreeSubagentVM,
+} from "./worktreeData";
 import { systemProbes } from "./liveness";
 // The VS Code-free path key, so this module stays requirable (and unit-testable)
 // outside the extension host.
@@ -183,17 +189,20 @@ function placeIn(cwd: string, keys: string[]): string | undefined {
  * by start time and labelled with Claude's work summary, falling back to an
  * ordinal until it has generated one.
  *
- * `titles` maps session id to that summary; the caller reads them (see
- * TitleReader) because doing so touches the filesystem and this stays pure.
+ * `titles` and `subagents` are keyed by session id; the caller reads both (see
+ * TranscriptReader) because doing so touches the filesystem and this stays pure.
  *
- * The subagent map is always empty. Subagents run inside their parent's process
- * and so have no registry file; the rows the panel used to draw for them came
- * from the SubagentStart/SubagentStop hooks, which no longer exist.
+ * A subagent given a worktree of its own is indexed under THAT worktree rather
+ * than its parent session's, so the panel can show it on the card for the code
+ * it is actually touching. It stays in the parent agent's own list too - that is
+ * what the count on the parent row is drawn from, so a fanned-out session still
+ * says how many it has in flight.
  */
 export function indexRegistry(
   registry: RegistrySession[],
   worktreePaths: string[],
-  titles: Map<string, string> = new Map()
+  titles: Map<string, string> = new Map(),
+  subagents: Map<string, SubagentVM[]> = new Map()
 ): SessionIndex {
   const keys = worktreePaths.map(normalize);
   const byPath = new Map<string, RegistrySession[]>();
@@ -206,24 +215,51 @@ export function indexRegistry(
   }
 
   const agents = new Map<string, AgentVM[]>();
+  const elsewhere = new Map<string, WorktreeSubagentVM[]>();
   for (const [key, sessions] of byPath) {
     sessions.sort((a, b) => a.startedAt - b.startedAt);
     agents.set(
       key,
       sessions.map((session, i) => {
         const summary = titles.get(session.sessionId)?.trim() || undefined;
+        const own = subagents.get(session.sessionId) ?? [];
+        const status = session.status ?? "idle";
+        const label = summary ?? `Claude ${i + 1}`;
+        for (const sub of own) {
+          if (!sub.worktree) continue;
+          const home = placeIn(sub.worktree, keys);
+          // Not, via a symlinked path, the card it is already listed under.
+          // Clearing the field keeps one invariant for everything downstream:
+          // `worktree` set means "rendered on another card".
+          if (!home || home === key) {
+            delete sub.worktree;
+            continue;
+          }
+          // The SAME object, not a copy, so a later edit reaches both lists.
+          const placed = sub as WorktreeSubagentVM;
+          placed.parentSessionId = session.sessionId;
+          placed.parentLabel = label;
+          placed.parentStatus = status;
+          const list = elsewhere.get(home) ?? [];
+          list.push(placed);
+          elsewhere.set(home, list);
+        }
         return {
           sessionId: session.sessionId,
-          label: summary ?? `Claude ${i + 1}`,
+          label,
           ...(summary ? { summary } : {}),
           skills: [],
-          subagents: [],
-          status: session.status ?? "idle",
+          subagents: own,
+          status,
           startedAt: session.startedAt,
           lastActivity: session.lastActivity,
         };
       })
     );
   }
-  return { agents, subagents: new Map() };
+  // Oldest first, matching how subagents are ordered under their parent.
+  for (const list of elsewhere.values()) {
+    list.sort((a, b) => a.startedAt - b.startedAt);
+  }
+  return { agents, subagents: elsewhere };
 }

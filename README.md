@@ -61,6 +61,9 @@ its running agents in one view.
   [Agent status](docs/agent-status.md)). Collapsible lists with per-status counts,
   and a number badge on the Activity Bar icon counting **waiting** agents, so a
   blocked agent surfaces while the panel is hidden.
+- **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
+  type, description and elapsed time, read from the files Claude writes for them,
+  and land on the card for the worktree they were actually given.
 
 **GitHub and branches**
 
@@ -94,8 +97,9 @@ is Claude's own work summary, read from the tail of that session's transcript.
 your `~/.claude` tree.
 
 Details, including the status mapping, which card a session lands on, what the
-registry cannot answer (subagents, skills, a resumed session's terminal), and
-what removal takes out: [docs/agent-status.md](docs/agent-status.md).
+registry cannot answer (skills, a resumed session's terminal), and what removal
+takes out: [docs/agent-status.md](docs/agent-status.md). Subagent rows come from
+Claude's per-subagent files: [docs/subagents.md](docs/subagents.md).
 
 ## Architecture
 
@@ -110,6 +114,8 @@ flowchart LR
     TW --> C
     C["claude"] -->|"status per session"| S["~/.claude/sessions/&lt;pid&gt;.json"]
     C -->|"ai-title"| J["~/.claude/projects/.../&lt;id&gt;.jsonl"]
+    C -->|"subagent meta + transcript"| SA["&lt;id&gt;/subagents/agent-*.json"]
+    SA -->|subagent rows| P
     S -->|FileSystemWatcher| P
     S -->|"kill(pid, 0)"| L["retire sessions whose<br/>Claude process is gone"]
     L --> P
@@ -130,6 +136,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | Doc | Covers |
 | --- | --- |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
+| [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the agent-only path, why there is no `**/*` watcher |
 | [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |
 | [Run and Debug in a worktree](docs/debug-sessions.md) | Why the debug view can't be retargeted, launch.json parsing, session tracking |

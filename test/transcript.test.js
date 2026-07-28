@@ -7,7 +7,7 @@ const path = require("node:path");
 const {
   findTranscript,
   readTitle,
-  TitleReader,
+  TranscriptReader,
 } = require("../out/transcript.js");
 
 /**
@@ -92,9 +92,9 @@ test("findTranscript locates the session across project directories", async () =
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("TitleReader re-reads only after the transcript is written again", async () => {
+test("TranscriptReader re-reads only after the transcript is written again", async () => {
   const root = seed("s1", [{ type: "ai-title", aiTitle: "first" }]);
-  const reader = new TitleReader(root);
+  const reader = new TranscriptReader(root);
   assert.strictEqual(await reader.titleFor("s1"), "first");
 
   const file = await findTranscript(root, "s1");
@@ -111,19 +111,19 @@ test("TitleReader re-reads only after the transcript is written again", async ()
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("TitleReader forgets a session whose transcript is gone", async () => {
+test("TranscriptReader forgets a session whose transcript is gone", async () => {
   const root = seed("s1", [{ type: "ai-title", aiTitle: "first" }]);
-  const reader = new TitleReader(root);
+  const reader = new TranscriptReader(root);
   assert.strictEqual(await reader.titleFor("s1"), "first");
   fs.rmSync(path.join(root, "-home-u-repo", "s1.jsonl"));
   assert.strictEqual(await reader.titleFor("s1"), "");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("TitleReader drops sessions that are no longer live", async () => {
+test("TranscriptReader drops sessions that are no longer live", async () => {
   // Otherwise both caches grow for the life of the window.
   const root = seed("s1", [{ type: "ai-title", aiTitle: "first" }]);
-  const reader = new TitleReader(root);
+  const reader = new TranscriptReader(root);
   await reader.titleFor("s1");
   reader.retain(new Set(["s2"]));
   fs.rmSync(path.join(root, "-home-u-repo", "s1.jsonl"));
