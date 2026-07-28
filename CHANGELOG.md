@@ -2,6 +2,27 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.0.0
+
+- **The hooks are gone** - agent status came from an emitter script the
+  extension asked to install on ten Claude Code hooks, and everything about that
+  was a cost you paid: it edited your global `settings.json`, which is why the
+  panel opened on a consent page; it spawned a process per event, on the path
+  Claude blocks while a tool runs; and it needed an interpreter to spawn. Claude
+  Code records what each session is doing in its own registry, so none of it is
+  needed. The panel reads that instead, and activation takes the old machinery
+  back out: our hook entries (leaving any you added yourself alone, including
+  where they share an event or a matcher entry with ours), the emitter and its
+  launcher, and the state files they wrote. Nothing is installed, nothing is
+  asked for, and nothing of the extension's lives in your `~/.claude` tree.
+  Each row's label is Claude's own work summary, now read from the tail of that
+  session's transcript. **Removed with the hooks**: the subagent rows under an
+  agent, and the per-agent skills list. Both were built from events the registry
+  has no equivalent for. One other consequence worth knowing: a row is keyed by
+  Claude's live session id, so an agent you `/resume` keeps its row and status
+  but is no longer linked to its terminal, and revealing or stopping it from the
+  panel will not find it.
+
 ## 3.9.0
 
 - **Agent status now comes from Claude Code itself** - the panel inferred what

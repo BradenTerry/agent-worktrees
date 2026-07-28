@@ -100,19 +100,6 @@ function overviewData() {
             sessionId: "s-main-1",
             label: "Work the release backlog",
             summary: "Work the release backlog, one worktree per ticket",
-            skills: ["code-review"],
-            // Fanned out: this session gave each subagent a worktree of its own,
-            // so their rows are on those cards and the count is what says the
-            // session is busy.
-            subagents: [
-              {
-                id: "sub-main-1a",
-                type: "nocturne",
-                task: "Cache the settings read",
-                startedAt: ago(9 * MIN),
-                worktree: REPO + "-perf-cache",
-              },
-            ],
             status: "active",
             startedAt: ago(2 * HOUR),
             lastActivity: ago(20 * 1000),
@@ -147,27 +134,6 @@ function overviewData() {
             sessionId: "s-co-1",
             label: "Rework cart summary component",
             summary: "Rework the cart summary component and wire the new totals API",
-            skills: ["task-spec", "source-generator"],
-            subagents: [
-              {
-                id: "sub-co-1a",
-                type: "Explore",
-                task: "Map the totals API callers",
-                // This agent's card is in the waiting state, and this is the
-                // subagent holding the permission prompt behind it.
-                awaitingPermission: true,
-                startedAt: ago(4 * MIN),
-              },
-              {
-                id: "sub-co-1b",
-                type: "general-purpose",
-                task: "Port the summary tests",
-                // Stopped its turn, parked on a background command: still in
-                // flight, so it stays listed without the working pulse.
-                paused: true,
-                startedAt: ago(50 * 1000),
-              },
-            ],
             status: "waiting",
             startedAt: ago(18 * MIN),
             lastActivity: ago(20 * 1000),
@@ -176,15 +142,6 @@ function overviewData() {
             sessionId: "s-co-2",
             label: "Add Playwright coverage",
             summary: "Add Playwright coverage for the checkout flow",
-            skills: ["verify"],
-            subagents: [
-              {
-                id: "sub-co-2a",
-                type: "Explore",
-                task: "Find existing checkout fixtures",
-                startedAt: ago(2 * MIN),
-              },
-            ],
             status: "active",
             startedAt: ago(6 * MIN),
             lastActivity: ago(5 * 1000),
@@ -230,7 +187,6 @@ function overviewData() {
             sessionId: "s-lf-1",
             label: "Fix session token race",
             summary: "Fix the session token refresh race on concurrent requests",
-            skills: [],
             status: "active",
             startedAt: ago(31 * MIN),
             lastActivity: ago(15 * 1000),
@@ -252,9 +208,8 @@ function overviewData() {
           mergeState: "behind",
         },
       },
-      // A worktree with no agent of its own: the session on main handed it to a
-      // subagent, so the card shows that subagent's row (attributed back to the
-      // agent running it) rather than an empty agent list.
+      // A worktree with no agent running in it at all: the card is still worth
+      // showing, with its git state and PR.
       {
         path: REPO + "-perf-cache",
         name: "perf/settings-cache",
@@ -265,18 +220,6 @@ function overviewData() {
         inWorkspace: false,
         git: { dirty: 2, insertions: 34, deletions: 6, ahead: 0, behind: 0 },
         agents: [],
-        subagents: [
-          {
-            id: "sub-main-1a",
-            type: "nocturne",
-            task: "Cache the settings read",
-            startedAt: ago(9 * MIN),
-            worktree: REPO + "-perf-cache",
-            parentSessionId: "s-main-1",
-            parentLabel: "Work the release backlog",
-            parentStatus: "active",
-          },
-        ],
         pr: null,
       },
     ],

@@ -15,9 +15,9 @@ its running agents in one view.
 
 <sub>Click any thumbnail to view it full size.</sub>
 
-| Worktrees, git status & agents | PR checks, review & comments | Settings & integrations | Linked files | Skills used per agent |
-| :---: | :---: | :---: | :---: | :---: |
-| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png" alt="The Linked Files settings tab listing gitignored paths symlinked into every worktree" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills an agent has used" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png) |
+| Worktrees, git status & agents | PR checks, review & comments | Settings & integrations | Linked files |
+| :---: | :---: | :---: | :---: |
+| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png" alt="The Linked Files settings tab listing gitignored paths symlinked into every worktree" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png) |
 
 ## Features
 
@@ -57,15 +57,10 @@ its running agents in one view.
   Claude Code on purpose (see [Terminal tab titles](docs/terminal-titles.md)).
 - **Agent & Worktree** creates a worktree with `claude -w` and starts an agent in
   it in one step.
-- Status per agent, taken from Claude Code's own session registry where it
-  records one and derived from its hooks otherwise (see
+- Status per agent, read from Claude Code's own session registry (see
   [Agent status](docs/agent-status.md)). Collapsible lists with per-status counts,
   and a number badge on the Activity Bar icon counting **waiting** agents, so a
   blocked agent surfaces while the panel is hidden.
-- **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
-  type, description and elapsed time, land on the card for the worktree they were
-  actually given, and mark which one is waiting on you.
-- A chip per agent counting the Claude skills it has invoked; click for the list.
 
 **GitHub and branches**
 
@@ -79,37 +74,28 @@ its running agents in one view.
 
 ## Agent status
 
-The panel cannot tell on its own whether a session is working, waiting on you, or
-idle, so the extension installs one small emitter script
-(`hooks/agent-worktrees-emit.mjs`) on Claude Code's
-[hooks](https://docs.claude.com/en/docs/claude-code/hooks):
+Claude Code keeps a registry of its live sessions at
+`~/.claude/sessions/<pid>.json` and records what each one is doing in a `status`
+field it rewrites on every transition. The panel reads that: `busy` and `shell`
+show as active, `waiting` as waiting, `idle` as idle, and a status it does not
+recognize leaves the row reading idle rather than guessing.
 
-| Hook                                                                              | Status             |
-| --------------------------------------------------------------------------------- | ------------------ |
-| `SessionStart`, `Stop`                                                            | idle               |
-| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`  | active             |
-| `Notification` (permission / question)                                            | waiting            |
-| `PermissionRequest`                                                               | unchanged          |
-| `SessionEnd`                                                                      | removed from panel |
+Nothing is installed and nothing is asked for. Earlier versions wired an emitter
+script onto ten Claude Code hooks to infer the same thing from events, which
+meant editing your global `settings.json` (hence a consent page), a process
+spawned per event on the tool-call hot path, and an interpreter to run it with.
+Activation now removes all of that, leaving any hooks you added yourself alone.
 
-Each event writes one small state file per session into the extension's global
-storage, atomically, which a `FileSystemWatcher` picks up. **Nothing is sent over
-the network**, and nothing of the extension's lives in your `~/.claude` tree apart
-from the hook entries in `settings.json`. Installing the hooks edits your global
-`~/.claude/settings.json`, so it is always gated behind explicit consent in the
-panel. Sessions whose Claude process is gone are retired by a liveness sweep that
-requires positive evidence of death, never merely the absence of evidence of life.
+The registry directory is also the refresh signal - a file appearing, changing or
+vanishing is a session starting, transitioning or ending - and the pid it records
+is what retires a row whose terminal was closed without `/exit`. Each row's label
+is Claude's own work summary, read from the tail of that session's transcript.
+**Nothing is sent over the network**, and nothing of the extension's lives in
+your `~/.claude` tree.
 
-Claude Code also keeps its own registry of live sessions
-(`~/.claude/sessions/<pid>.json`) and records a `status` in it, which the panel
-reads on every refresh and prefers over the hook-derived state: it comes from the
-process itself, so it stays right where the event stream can drift. The hooks
-remain what everything else on a row is built from.
-
-Details, including the status mapping and what the registry cannot answer, the
-`Notification` type handling, the worktree/branch caching that keeps `PreToolUse`
-cheap, and the sweep's decision tree:
-[docs/agent-status.md](docs/agent-status.md).
+Details, including the status mapping, which card a session lands on, what the
+registry cannot answer (subagents, skills, a resumed session's terminal), and
+what removal takes out: [docs/agent-status.md](docs/agent-status.md).
 
 ## Architecture
 
@@ -120,20 +106,22 @@ flowchart LR
     V -->|Agent| T["createTerminal({ cwd })<br/>claude --session-id"]
     V -->|Agent & Worktree| TW["createTerminal<br/>claude --session-id -w"]
     V -->|New / Delete| WT["git worktree add / remove"]
-    H["Claude Code hooks<br/>(~/.claude/settings.json)"] --> E["agent-worktrees-emit.mjs<br/>--dir &lt;globalStorage&gt;/sessions"]
-    E -->|per-session state file| S["extension global storage<br/>&lt;globalStorage&gt;/sessions"]
+    T --> C
+    TW --> C
+    C["claude"] -->|"status per session"| S["~/.claude/sessions/&lt;pid&gt;.json"]
+    C -->|"ai-title"| J["~/.claude/projects/.../&lt;id&gt;.jsonl"]
     S -->|FileSystemWatcher| P
-    S -->|"liveness sweep:<br/>kill(pid, 0) + argv scan"| L["retire sessions whose<br/>Claude process is gone"]
+    S -->|"kill(pid, 0)"| L["retire sessions whose<br/>Claude process is gone"]
     L --> P
-    T --> H
-    TW --> H
+    J -->|work summary| P
 ```
 
 The panel UI is a webview with no framework: `media/panel.js` renders all markup,
 `media/panel.css` styles it from `--vscode-*` theme tokens. `src/` is the
 extension host: git (`git.ts`), GitHub polling (`github.ts`, `prs.ts`), the
 webview provider (`worktreeWebview.ts`), coalescing (`scheduler.ts`), symlinks
-(`links.ts`), liveness (`liveness.ts`).
+(`links.ts`), agent status (`sessionRegistry.ts`, `transcript.ts`,
+`liveness.ts`).
 
 ## Design notes
 
@@ -141,8 +129,7 @@ The rationale behind the parts that are easy to get wrong twice:
 
 | Doc | Covers |
 | --- | --- |
-| [Agent status from hooks](docs/agent-status.md) | The hook wiring, the emitter, and retiring dead sessions |
-| [Subagents](docs/subagents.md) | What registers and retires a subagent row, and which card it lands on |
+| [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the agent-only path, why there is no `**/*` watcher |
 | [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |
 | [Run and Debug in a worktree](docs/debug-sessions.md) | Why the debug view can't be retargeted, launch.json parsing, session tracking |
@@ -153,9 +140,7 @@ The rationale behind the parts that are easy to get wrong twice:
 
 - The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`)
   on your `PATH`.
-- `git` on your `PATH`. Node is not required: the status hooks use a `node` from
-  your `PATH` when there is one and VS Code's own otherwise
-  ([details](docs/agent-status.md#which-node-runs-the-emitter)).
+- `git` on your `PATH`.
 - A workspace whose first folder is inside a git repository.
 
 ## Develop
