@@ -7,8 +7,9 @@ const path = require("node:path");
 const {
   mapStatus,
   registryDir,
+  projectsDir,
   readRegistry,
-  mergeRegistry,
+  indexRegistry,
 } = require("../out/sessionRegistry.js");
 const { normalizePath: normalize } = require("../out/worktreeUtils.js");
 
@@ -49,23 +50,6 @@ function entry(over = {}) {
   };
 }
 
-function agent(over = {}) {
-  return {
-    sessionId: "s1",
-    label: "Claude 1",
-    skills: [],
-    subagents: [],
-    status: "idle",
-    startedAt: 1000,
-    lastActivity: 1000,
-    ...over,
-  };
-}
-
-function index(agents = new Map(), subagents = new Map()) {
-  return { agents, subagents };
-}
-
 test("mapStatus turns Claude's statuses into the panel's three", () => {
   assert.strictEqual(mapStatus("busy"), "active");
   // A local bash command is not an LLM turn, but it is work in progress.
@@ -75,8 +59,8 @@ test("mapStatus turns Claude's statuses into the panel's three", () => {
 });
 
 test("mapStatus refuses to guess at anything it does not know", () => {
-  // A status Claude adds later must leave the hook-derived state alone rather
-  // than collapsing to a default.
+  // A status Claude adds later must read as "nothing recorded" rather than
+  // collapsing to a default that asserts something untrue.
   for (const raw of ["compacting", "", null, undefined, 3, {}]) {
     assert.strictEqual(mapStatus(raw), undefined, JSON.stringify(raw));
   }
@@ -163,129 +147,88 @@ test("readRegistry recovers the pid from the file name", async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("a session in both sources takes its status from Claude", () => {
-  // The event stream said idle; the process says it is working. Claude wins.
-  const a = agent({ status: "idle", summary: "refactor git.ts" });
-  const idx = index(new Map([[REPO, [a]]]));
-  mergeRegistry(idx, [{ sessionId: "s1", pid: 1, cwd: REPO, status: "active", startedAt: 1, lastActivity: 2 }], [REPO]);
-  assert.strictEqual(a.status, "active");
-  // Everything the registry knows nothing about is left alone.
-  assert.strictEqual(a.summary, "refactor git.ts");
-  assert.strictEqual(idx.agents.get(REPO).length, 1, "no duplicate row");
-});
-
-test("a corrected status reaches the subagents rendered on other cards", () => {
-  // A subagent given its own worktree renders on that card with a cue for
-  // "the agent that owns me is blocked on you", from the copy it carries. A
-  // status the registry corrects has to reach that copy or the cue lies.
-  const parent = agent({ sessionId: "s1", status: "active", summary: "port tests" });
-  const sub = {
-    id: "sub1",
-    startedAt: 10,
-    parentSessionId: "s1",
-    parentLabel: "port tests",
-    parentStatus: "active",
-  };
-  const idx = index(new Map([[REPO, [parent]]]), new Map([[FEATURE, [sub]]]));
-  mergeRegistry(
-    idx,
-    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "waiting", startedAt: 1, lastActivity: 2 }],
-    [REPO]
-  );
-  assert.strictEqual(parent.status, "waiting");
-  assert.strictEqual(sub.parentStatus, "waiting");
-});
-
-test("a status Claude did not record leaves the hook state alone", () => {
-  const a = agent({ status: "waiting" });
-  const idx = index(new Map([[REPO, [a]]]));
-  mergeRegistry(idx, [{ sessionId: "s1", pid: 1, cwd: REPO, startedAt: 1, lastActivity: 2 }], [REPO]);
-  assert.strictEqual(a.status, "waiting");
-});
-
-test("a session only Claude knows about becomes a row", () => {
-  // Started before the hooks were installed, or resumed where the emitter never
-  // saw it: the card should still show the agent that is really running there.
-  const idx = index();
-  mergeRegistry(
-    idx,
-    [{ sessionId: "s2", pid: 2, cwd: REPO, status: "active", name: "ship it", startedAt: 5, lastActivity: 6 }],
-    [REPO]
-  );
-  const [row] = idx.agents.get(REPO);
-  assert.strictEqual(row.sessionId, "s2");
-  assert.strictEqual(row.status, "active");
-  assert.strictEqual(row.label, "ship it");
-  assert.strictEqual(row.summary, "ship it");
-  assert.deepStrictEqual(row.subagents, [], "the registry knows of no subagents");
-});
-
-test("an unnamed registry session gets an ordinal, in start order", () => {
-  const first = agent({ sessionId: "s1", startedAt: 100 });
-  const idx = index(new Map([[REPO, [first]]]));
-  mergeRegistry(
-    idx,
-    [{ sessionId: "s2", pid: 2, cwd: REPO, startedAt: 50, lastActivity: 60 }],
-    [REPO]
-  );
-  const list = idx.agents.get(REPO);
-  assert.deepStrictEqual(
-    list.map((a) => [a.sessionId, a.label]),
+test("indexRegistry groups live sessions onto their worktree cards", () => {
+  const idx = indexRegistry(
     [
-      ["s2", "Claude 1"],
-      ["s1", "Claude 2"],
+      { sessionId: "s1", pid: 1, cwd: REPO, status: "active", startedAt: 10, lastActivity: 11 },
+      { sessionId: "s2", pid: 2, cwd: path.join(FEATURE, "src"), status: "waiting", startedAt: 20, lastActivity: 21 },
+    ],
+    [REPO, FEATURE]
+  );
+  assert.deepStrictEqual(
+    idx.agents.get(REPO).map((a) => [a.sessionId, a.status]),
+    [["s1", "active"]]
+  );
+  // Longest match wins, or every nested worktree's agents would pile onto the
+  // repo root's card.
+  assert.deepStrictEqual(
+    idx.agents.get(normalize(FEATURE)).map((a) => [a.sessionId, a.status]),
+    [["s2", "waiting"]]
+  );
+});
+
+test("a session Claude recorded no status for reads idle", () => {
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, startedAt: 1, lastActivity: 2 }],
+    [REPO]
+  );
+  assert.strictEqual(idx.agents.get(REPO)[0].status, "idle");
+});
+
+test("rows are labelled with the work summary, in start order", () => {
+  const idx = indexRegistry(
+    [
+      { sessionId: "s1", pid: 1, cwd: REPO, startedAt: 200, lastActivity: 1 },
+      { sessionId: "s2", pid: 2, cwd: REPO, startedAt: 100, lastActivity: 1 },
+    ],
+    [REPO],
+    new Map([["s1", "  port the git tests  "]])
+  );
+  // Oldest first; the titled session keeps its summary, the other falls back to
+  // an ordinal that counts rows on the card, not sessions overall.
+  assert.deepStrictEqual(
+    idx.agents.get(REPO).map((a) => [a.sessionId, a.label, a.summary]),
+    [
+      ["s2", "Claude 1", undefined],
+      ["s1", "port the git tests", "port the git tests"],
     ]
   );
 });
 
-test("relabelling follows through to subagents on other cards", () => {
-  // A subagent rendered on another worktree's card names its parent; an ordinal
-  // that shifts must not leave it pointing at a label nobody has.
-  const parent = agent({ sessionId: "s1", startedAt: 100 });
-  const sub = {
-    id: "sub1",
-    startedAt: 10,
-    parentSessionId: "s1",
-    parentLabel: "Claude 1",
-    parentStatus: "active",
-  };
-  const idx = index(new Map([[REPO, [parent]]]), new Map([[FEATURE, [sub]]]));
-  mergeRegistry(
-    idx,
-    [{ sessionId: "s2", pid: 2, cwd: REPO, startedAt: 50, lastActivity: 60 }],
-    [REPO]
-  );
-  assert.strictEqual(parent.label, "Claude 2");
-  assert.strictEqual(sub.parentLabel, "Claude 2");
-});
-
-test("a session working under a nested worktree lands on that card", () => {
-  // Longest match wins, or every nested worktree's agents would pile onto the
-  // repo root's card.
-  const idx = index();
-  mergeRegistry(
-    idx,
-    [{ sessionId: "s3", pid: 3, cwd: path.join(FEATURE, "src"), status: "active", startedAt: 1, lastActivity: 1 }],
-    [REPO, FEATURE]
-  );
-  assert.strictEqual(idx.agents.has(REPO), false);
-  assert.strictEqual(idx.agents.get(normalize(FEATURE))[0].sessionId, "s3");
-});
-
 test("a session outside every worktree has no card and is skipped", () => {
-  const idx = index();
-  mergeRegistry(
-    idx,
-    [{ sessionId: "s4", pid: 4, cwd: path.join(os.tmpdir(), "elsewhere"), status: "active", startedAt: 1, lastActivity: 1 }],
+  const idx = indexRegistry(
+    [
+      {
+        sessionId: "s4",
+        pid: 4,
+        cwd: path.join(os.tmpdir(), "elsewhere"),
+        status: "active",
+        startedAt: 1,
+        lastActivity: 1,
+      },
+    ],
     [REPO]
   );
   assert.strictEqual(idx.agents.size, 0);
 });
 
-test("an empty registry changes nothing", () => {
-  const a = agent({ status: "waiting" });
-  const idx = index(new Map([[REPO, [a]]]));
-  mergeRegistry(idx, [], [REPO]);
-  assert.strictEqual(a.status, "waiting");
-  assert.strictEqual(idx.agents.get(REPO).length, 1);
+test("indexRegistry reports no subagents, since the registry has none", () => {
+  // They run inside the parent's process, so they have no file of their own.
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, startedAt: 1, lastActivity: 1 }],
+    [REPO]
+  );
+  assert.strictEqual(idx.subagents.size, 0);
+  assert.deepStrictEqual(idx.agents.get(REPO)[0].subagents, []);
+});
+
+test("an empty registry produces no cards' worth of agents", () => {
+  assert.strictEqual(indexRegistry([], [REPO]).agents.size, 0);
+});
+
+test("projectsDir sits beside the registry in Claude's config tree", () => {
+  assert.strictEqual(
+    projectsDir({ CLAUDE_CONFIG_DIR: "/cfg" }, "/home/u"),
+    path.join("/cfg", "projects")
+  );
 });

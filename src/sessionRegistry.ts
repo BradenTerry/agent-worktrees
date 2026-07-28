@@ -1,19 +1,14 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import {
-  AgentStatus,
-  AgentVM,
-  SessionIndex,
-  WorktreeSubagentVM,
-} from "./worktreeData";
+import { AgentStatus, AgentVM, SessionIndex } from "./worktreeData";
 import { systemProbes } from "./liveness";
 // The VS Code-free path key, so this module stays requirable (and unit-testable)
-// outside the extension host, exactly like sessionStore.
+// outside the extension host.
 import { normalizePath as normalize } from "./worktreeUtils";
 
 /**
- * Claude Code's own session registry, as a source of agent status.
+ * Claude Code's own session registry: where every agent on a card comes from.
  *
  * Since v2.1.119 Claude writes one file per session at
  * `~/.claude/sessions/<pid>.json` and records what that session is doing in a
@@ -23,16 +18,17 @@ import { normalizePath as normalize } from "./worktreeUtils";
  *     "startedAt": 1785193745550, "version": "2.1.220", "kind": "interactive",
  *     "name": "agent-worktrees-9f" }
  *
- * That is the same question the hook emitter answers by watching events go by,
- * except it comes from the process itself and costs nothing to read. Where the
- * two disagree the registry wins: a session resumed in another terminal, one
- * whose Notification we never saw, or one running a long shell command all look
- * wrong from the event stream and right here.
+ * This is the same question the extension used to answer by installing ten hooks
+ * and watching their events go by, except it comes from the process itself: no
+ * consent to edit the user's settings.json, no process spawned per event, no
+ * interpreter to find. It is also more truthful, since an event stream can drift
+ * from reality - a session resumed in another terminal, a notification that
+ * fired while no window was open, a long shell command that looks exactly like a
+ * finished turn - and a status the process wrote about itself cannot.
  *
- * The registry does not replace the hooks. It has no subagents, no skills and no
- * work summary, and `status` is absent on older versions (and, observed on
- * 2.1.220, on sessions whose `entrypoint` is not a local one). Everything it does
- * not know is left exactly as the hook state files described it.
+ * What the registry does not have: subagents (they run inside the parent
+ * process, so they have no file of their own), skills, and the work summary,
+ * which is read from the transcript instead (see transcript.ts).
  */
 
 /** One live session as the registry describes it. */
@@ -58,8 +54,9 @@ export interface RegistrySession {
  * Claude's raw statuses, mapped onto the three the panel shows. `shell` is a
  * local bash command rather than an LLM turn, but it is work in progress as far
  * as the user is concerned, so it reads as active. An unrecognized status maps
- * to nothing at all rather than a guess: a new one Claude adds should leave the
- * hook-derived state alone until it is mapped here.
+ * to nothing at all rather than a guess: a session whose status Claude does not
+ * describe, or describes in a way this does not know, is shown idle rather than
+ * asserted to be something it is not.
  */
 export function mapStatus(raw: unknown): AgentStatus | undefined {
   switch (raw) {
@@ -75,15 +72,29 @@ export function mapStatus(raw: unknown): AgentStatus | undefined {
   }
 }
 
-/** Where Claude keeps the registry. `CLAUDE_CONFIG_DIR` moves the whole config
- *  tree, the registry with it. */
-export function registryDir(
+/** Claude's config tree. `CLAUDE_CONFIG_DIR` moves all of it. */
+export function claudeDir(
   env: NodeJS.ProcessEnv = process.env,
   home: string = os.homedir()
 ): string {
   const configured = env.CLAUDE_CONFIG_DIR;
-  const base = configured && configured.trim() ? configured : path.join(home, ".claude");
-  return path.join(base, "sessions");
+  return configured && configured.trim() ? configured : path.join(home, ".claude");
+}
+
+/** Where Claude keeps the session registry. */
+export function registryDir(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = os.homedir()
+): string {
+  return path.join(claudeDir(env, home), "sessions");
+}
+
+/** Where Claude keeps transcripts, one directory per project. */
+export function projectsDir(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = os.homedir()
+): string {
+  return path.join(claudeDir(env, home), "projects");
 }
 
 /** Shape of the registry file, before anything is trusted. */
@@ -102,10 +113,9 @@ interface RawEntry {
  * Every live session in the registry.
  *
  * Claude removes a session's file when it exits, but a killed process leaves one
- * behind, so each is confirmed against its own pid. Unlike the hook state files
- * — whose pid is the hook's parent, which is why the sweep in liveness.ts will
- * not trust a missing one on Windows — this pid is the Claude process itself, so
- * its absence is proof on every platform.
+ * behind, so each is confirmed against its own pid. This pid is the Claude
+ * process itself, so its absence is proof on every platform - which is what
+ * retires a row whose terminal was closed without /exit.
  */
 export async function readRegistry(
   dir: string,
@@ -166,96 +176,54 @@ function placeIn(cwd: string, keys: string[]): string | undefined {
 }
 
 /**
- * A subagent given a worktree of its own is rendered on THAT card, and carries a
- * copy of its parent's label and status so the row can say who it belongs to and
- * whether that agent is blocked. Both copies are taken when the state files are
- * read, so anything changed afterwards has to be pushed through to them.
- */
-function eachSubagentOf(
-  index: SessionIndex,
-  sessionId: string,
-  fn: (sub: WorktreeSubagentVM) => void
-): void {
-  for (const subs of index.subagents.values()) {
-    for (const sub of subs) {
-      if (sub.parentSessionId === sessionId) fn(sub);
-    }
-  }
-}
-
-/** Default labels are positional, so they have to be reassigned whenever the
- *  membership of a worktree's list changes. An agent with a summary keeps it. */
-function relabel(list: AgentVM[], index: SessionIndex): void {
-  list.sort((a, b) => a.startedAt - b.startedAt);
-  list.forEach((agent, i) => {
-    if (agent.summary) return;
-    const label = `Claude ${i + 1}`;
-    if (agent.label === label) return;
-    agent.label = label;
-    eachSubagentOf(index, agent.sessionId, (sub) => (sub.parentLabel = label));
-  });
-}
-
-/**
- * Fold the registry into the index the hook state files produced.
- *
- * A session in both is the common case: it keeps everything the emitter knows
- * (summary, skills, subagents) and takes its status from Claude, which is the
- * authority on what it is doing right now. A session only Claude knows about —
- * started before the hooks were installed, or resumed somewhere the emitter
- * never saw — becomes a row of its own, so the card shows the agent that is
- * really running there.
+ * Every live session, grouped by the worktree card it belongs to.
  *
  * `worktreePaths` are the cards that exist; a session working outside all of
- * them has nowhere to appear and is skipped.
+ * them has nowhere to appear and is skipped. Within a card, agents are ordered
+ * by start time and labelled with Claude's work summary, falling back to an
+ * ordinal until it has generated one.
+ *
+ * `titles` maps session id to that summary; the caller reads them (see
+ * TitleReader) because doing so touches the filesystem and this stays pure.
+ *
+ * The subagent map is always empty. Subagents run inside their parent's process
+ * and so have no registry file; the rows the panel used to draw for them came
+ * from the SubagentStart/SubagentStop hooks, which no longer exist.
  */
-export function mergeRegistry(
-  index: SessionIndex,
+export function indexRegistry(
   registry: RegistrySession[],
-  worktreePaths: string[]
-): void {
-  if (!registry.length) return;
+  worktreePaths: string[],
+  titles: Map<string, string> = new Map()
+): SessionIndex {
   const keys = worktreePaths.map(normalize);
-  const known = new Map<string, AgentVM>();
-  for (const list of index.agents.values()) {
-    for (const agent of list) known.set(agent.sessionId, agent);
-  }
-
-  const touched = new Set<string>();
+  const byPath = new Map<string, RegistrySession[]>();
   for (const session of registry) {
-    const agent = known.get(session.sessionId);
-    if (agent) {
-      if (session.status && session.status !== agent.status) {
-        agent.status = session.status;
-        // The panel flags a relocated subagent whose parent is waiting on you,
-        // from the copy it carries; a status corrected here has to reach it.
-        eachSubagentOf(
-          index,
-          agent.sessionId,
-          (sub) => (sub.parentStatus = agent.status)
-        );
-      }
-      continue;
-    }
     const key = placeIn(session.cwd, keys);
     if (!key) continue;
-    const list = index.agents.get(key) ?? [];
-    list.push({
-      sessionId: session.sessionId,
-      // Claude's own session name is the closest thing the registry has to the
-      // work summary the emitter records; relabel() fills in an ordinal when
-      // there is none.
-      label: session.name ?? "",
-      ...(session.name ? { summary: session.name } : {}),
-      skills: [],
-      subagents: [],
-      status: session.status ?? "idle",
-      startedAt: session.startedAt,
-      lastActivity: session.lastActivity,
-    });
-    index.agents.set(key, list);
-    touched.add(key);
+    const list = byPath.get(key) ?? [];
+    list.push(session);
+    byPath.set(key, list);
   }
 
-  for (const key of touched) relabel(index.agents.get(key) ?? [], index);
+  const agents = new Map<string, AgentVM[]>();
+  for (const [key, sessions] of byPath) {
+    sessions.sort((a, b) => a.startedAt - b.startedAt);
+    agents.set(
+      key,
+      sessions.map((session, i) => {
+        const summary = titles.get(session.sessionId)?.trim() || undefined;
+        return {
+          sessionId: session.sessionId,
+          label: summary ?? `Claude ${i + 1}`,
+          ...(summary ? { summary } : {}),
+          skills: [],
+          subagents: [],
+          status: session.status ?? "idle",
+          startedAt: session.startedAt,
+          lastActivity: session.lastActivity,
+        };
+      })
+    );
+  }
+  return { agents, subagents: new Map() };
 }

@@ -3,14 +3,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
-import { spawnSync } from "child_process";
 import { supportsAgentCliTitle } from "../../worktreeUtils";
 import { managesUserSettings } from "../../hooks";
-import {
-  electronEnableArgs,
-  launcherName,
-  launcherScript,
-} from "../../nodeRuntime";
 
 /**
  * Extension-host smoke tests. These run inside a real VS Code (via
@@ -32,12 +26,12 @@ suite("Agent Worktrees extension host", () => {
   });
 
   test("activating in a test host leaves global settings.json alone", async () => {
-    // The test host runs with a throwaway --user-data-dir, so its globalStorage
-    // (and the emitter's --dir) live under it. ~/.claude/settings.json is NOT
-    // sandboxed with it: it is the real user's file, shared by every Claude
-    // session on the machine. If activation repaired the hook command from
-    // here, every session would write its state into this run's scratch dir and
-    // the installed extension's panel would stop seeing agents entirely.
+    // ~/.claude/settings.json is not sandboxed by the test host's throwaway
+    // --user-data-dir: it is the real user's file, shared by every Claude
+    // session on the machine. Activation removes the hooks this extension used
+    // to install, and doing that to a developer's real settings as a side
+    // effect of `npm run test:integration` would be exactly as unwelcome as
+    // adding them once was.
     assert.strictEqual(
       managesUserSettings(vscode.ExtensionMode.Test),
       false,
@@ -46,12 +40,12 @@ suite("Agent Worktrees extension host", () => {
     assert.strictEqual(
       managesUserSettings(vscode.ExtensionMode.Production),
       true,
-      "a real install still installs and repairs its hooks"
+      "a real install still removes the hooks it used to add"
     );
 
     // And prove it end to end: this suite activated the extension above, so if
-    // the guard were missing settings.json would already name this host's
-    // scratch storage.
+    // the guard were missing, any hook entry naming this host's scratch storage
+    // would already have been rewritten out of the real file.
     const ext = vscode.extensions.getExtension("bradenterry.agent-worktrees");
     await ext?.activate();
     const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
@@ -65,56 +59,6 @@ suite("Agent Worktrees extension host", () => {
       !raw.includes(".vscode-test"),
       `${settingsPath} points a hook into the test host's user-data dir`
     );
-  });
-
-  test("the hook launcher runs a script on this host's own Node", () => {
-    // The fallback that makes `node` optional rests on two things the unit
-    // suite cannot check: that this host's executable behaves as Node under
-    // ELECTRON_RUN_AS_NODE, and that the generated launcher is runnable by the
-    // shell Claude Code spawns hooks with (cmd.exe on Windows, sh elsewhere).
-    // Here process.execPath is the real VS Code binary, on the real OS.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "awt-launcher-"));
-    try {
-      const probe = path.join(dir, "probe.mjs");
-      fs.writeFileSync(probe, "console.log(JSON.stringify(process.argv.slice(2)));\n");
-      const file = path.join(dir, launcherName(process.platform));
-      const enableArgs = electronEnableArgs(process.versions);
-      fs.writeFileSync(
-        file,
-        launcherScript(
-          process.platform,
-          { exec: process.execPath, viaElectron: true, enableArgs },
-          probe
-        ),
-        { mode: 0o755 }
-      );
-
-      const stateDir = path.join(dir, "session state");
-      // Windows needs a shell (node refuses to spawn a .cmd without one), and a
-      // shell takes the whole command as one string: passing an args array
-      // alongside `shell` is what DEP0190 warns about, since node concatenates
-      // them unescaped. Quoting here is the same thing the hook command in
-      // settings.json does, which is what this is standing in for.
-      const res =
-        process.platform === "win32"
-          ? spawnSync(`"${file}" --dir "${stateDir}"`, {
-              encoding: "utf8",
-              shell: true,
-            })
-          : spawnSync(file, ["--dir", stateDir], { encoding: "utf8" });
-
-      assert.strictEqual(res.status, 0, `launcher failed: ${res.stderr}`);
-      // Claude Code reports any hook stderr as an error in the session, so the
-      // fallback interpreter has to start silently.
-      assert.strictEqual(res.stderr, "", "the launcher wrote to stderr");
-      assert.deepStrictEqual(JSON.parse(res.stdout), [
-        ...enableArgs,
-        "--dir",
-        stateDir,
-      ]);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   test("registers its commands", async () => {

@@ -8,6 +8,7 @@ import {
   gatherBranches,
   normalize,
   AgentVM,
+  SessionIndex,
   WorktreeData,
   BranchData,
 } from "./worktreeData";
@@ -43,10 +44,14 @@ import {
   RemoteInfo,
   listIgnoredPaths,
 } from "./git";
-import { hooksInstalled, installHooks, sessionsDir, HOOKS } from "./hooks";
-import { readSessionsByWorktree } from "./sessionStore";
-import { mergeRegistry, readRegistry, registryDir } from "./sessionRegistry";
-import { pruneDeadSessions } from "./liveness";
+import {
+  indexRegistry,
+  projectsDir,
+  readRegistry,
+  registryDir,
+  RegistrySession,
+} from "./sessionRegistry";
+import { TitleReader } from "./transcript";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import {
   DebugSessionTracker,
@@ -110,7 +115,6 @@ interface ActionMessage {
     | "removeWorktree"
     | "changeBranch"
     | "openWindow"
-    | "acceptHooks"
     | "openSettings"
     | "setGithubToken"
     | "clearGithubToken"
@@ -177,13 +181,8 @@ export class WorktreeWebviewProvider
   private lastData?: WorktreeData;
   /** Session ids whose state files changed since the last agent refresh, so
    *  that refresh re-reads git only for the worktrees those sessions live in. */
-  private readonly pendingSessionIds = new Set<string>();
-  /** Subagent worktrees the last full gather found no card for (a path outside
-   *  this repo). Without this, the agent-only refresh would read one as a
-   *  worktree that had just appeared and force a full gather on every hook
-   *  event the subagent fires. */
-  private unplacedSubagents = new Set<string>();
-  /** Monotonic token claimed by every refresh before it reads the session
+  private readonly pendingPids = new Set<number>();
+    /** Monotonic token claimed by every refresh before it reads the session
    *  files; postData only accepts the newest claim. Full and agent-only
    *  refreshes overlap (separate coalescers), and a slow full refresh that
    *  read its session snapshot before a faster agent refresh must not land
@@ -221,17 +220,11 @@ export class WorktreeWebviewProvider
   /** Names waiting to be applied, for sessions whose terminal is not the one
    *  the user is currently looking at; see flushTerminalNames. */
   private desiredTerminalNames = new Map<string, string>();
-  /** When the last liveness sweep ran; 0 so the first refresh always sweeps. */
-  private lastLivenessSweep = 0;
-  /** A sweep is in flight; refreshes overlap (they are debounced separately),
-   *  and two concurrent sweeps would scan the process table twice. */
-  private sweeping = false;
-  /** Pending self-triggered re-sweep for sessions the last one found too recent
-   *  to judge; see sweepDeadAgents. */
-  private livenessRecheck?: ReturnType<typeof setTimeout>;
-  /** Where the emitter writes per-session state, under the extension's global
-   *  storage (so nothing of ours lives in ~/.claude). Derived from the context. */
-  private readonly sessionsDir: string;
+  /** Claude's session registry: the directory it keeps one file per live
+   *  session in, and the source of every agent row. */
+  private readonly registryDir: string;
+  /** Work summaries, read from each session's transcript and cached. */
+  private readonly titles: TitleReader;
   /** Background PR-status fetcher; only does work when a token is stored. */
   private readonly prService: PrService;
   /** Resolved GitHub origin per worktree path (null = no github remote). */
@@ -260,27 +253,32 @@ export class WorktreeWebviewProvider
       () => this.refreshAgents(),
       REFRESH_DEBOUNCE_MS
     );
-    this.sessionsDir = sessionsDir(context);
-    // Ensure the sessions dir exists so the watcher attaches even before the
-    // first hook fires.
+    this.registryDir = registryDir();
+    this.titles = new TitleReader(projectsDir());
+    // Ensure the directory exists so the watcher attaches even before Claude
+    // has registered its first session.
     try {
-      fs.mkdirSync(this.sessionsDir, { recursive: true });
+      fs.mkdirSync(this.registryDir, { recursive: true });
     } catch {
       /* best effort */
     }
     this.watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(this.sessionsDir), "*.json")
+      new vscode.RelativePattern(vscode.Uri.file(this.registryDir), "*.json")
     );
-    // A session-state file changing is a Claude hook firing (a prompt, a tool
-    // run, a stop). It goes down the agent-only refresh path: agent VMs are
-    // re-read and git is re-run only for the worktrees whose sessions fired,
-    // not every worktree (see refreshAgents). It also nudges the PR service:
-    // this is the signal that an agent may have just run `gh pr create`/merge,
-    // so PR status is worth a (throttled) refresh without waiting for the poll
-    // timer. An active agent fires many hooks in quick succession, so both are
+    // Claude rewrites a session's registry file on every status transition, and
+    // adds or removes one as a session starts or exits, so this directory is the
+    // signal that an agent did something. It goes down the agent-only refresh
+    // path: agent VMs are re-read and git is re-run only for the worktrees whose
+    // sessions changed, not every worktree (see refreshAgents). It also nudges
+    // the PR service, since this is the signal that an agent may have just run
+    // `gh pr create`/merge, so PR status is worth a (throttled) refresh without
+    // waiting for the poll timer. A working agent transitions often, so both are
     // coalesced rather than run per event.
     const onChange = (uri: vscode.Uri) => {
-      this.pendingSessionIds.add(path.basename(uri.fsPath, ".json"));
+      // The file is named for the session's pid, which is how the agent-only
+      // path knows which cards to re-stat.
+      const pid = Number.parseInt(path.basename(uri.fsPath, ".json"), 10);
+      if (Number.isInteger(pid)) this.pendingPids.add(pid);
       this.agentsDebounce.trigger();
       this.prNudge.trigger();
     };
@@ -328,7 +326,6 @@ export class WorktreeWebviewProvider
   dispose(): void {
     this.watcher?.dispose();
     this.branchesPanel?.dispose();
-    if (this.livenessRecheck) clearTimeout(this.livenessRecheck);
     this.refreshDebounce.cancel();
     this.prNudge.cancel();
     this.agentsDebounce.cancel();
@@ -391,20 +388,10 @@ export class WorktreeWebviewProvider
   async refresh(force = false): Promise<void> {
     if (!this.view) return;
     const seq = ++this.updateSeq;
-    const installed = await hooksInstalled();
-    if (installed) await this.sweepDeadAgents();
-    const sessions = installed
-      ? await readSessionsByWorktree(this.sessionsDir)
-      : undefined;
-    if (sessions) {
-      this.syncTerminalNames(sessions.agents);
-    }
-    // Claude's own status for each live session. gatherWorktrees folds it in
-    // once it knows which cards exist; it is only useful alongside the state
-    // files, which carry everything else a row shows.
-    const registry = sessions ? await readRegistry(registryDir()) : [];
-    const data = await gatherWorktrees(sessions, installed, force, registry);
-    this.unplacedSubagents = sessions?.unplaced ?? new Set();
+    // Every agent on a card comes from Claude's own session registry; a session
+    // that is gone has no file, so there is nothing to sweep or expire.
+    const registry = await this.readAgents();
+    const data = await gatherWorktrees(force, registry, this.titles);
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
     await this.annotateDebug(data);
@@ -413,12 +400,6 @@ export class WorktreeWebviewProvider
       .get<boolean>(TRACE_SETTING, false);
     if (data.repoRoot) data.linkedPaths = this.getLinkedPaths(data.repoRoot);
     data.activeSessionId = this.activeSessionId();
-    if (!installed) {
-      data.hooks = HOOKS.map((h) => ({
-        label: h.label,
-        description: h.description,
-      }));
-    }
     if (this.view.visible) {
       await this.attachPrStatus(data, force);
     } else {
@@ -490,57 +471,38 @@ export class WorktreeWebviewProvider
    */
   private async refreshAgents(): Promise<void> {
     const data = this.lastData;
-    if (!this.view || !data || !data.hooksInstalled) {
-      this.pendingSessionIds.clear();
+    if (!this.view || !data) {
+      this.pendingPids.clear();
       return this.refresh();
     }
     const seq = ++this.updateSeq;
-    const changed = new Set(this.pendingSessionIds);
-    this.pendingSessionIds.clear();
-    // Throttled, so a busy agent's hook stream doesn't sweep on every event. It
-    // still belongs on this path: an agent dying in another window is not a
-    // signal this window gets, so without it a stale row could sit there until
-    // the next full refresh.
-    await this.sweepDeadAgents();
-    const sessions = await readSessionsByWorktree(this.sessionsDir);
-    mergeRegistry(
-      sessions,
-      await readRegistry(registryDir()),
+    const pids = new Set(this.pendingPids);
+    this.pendingPids.clear();
+    const registry = await this.readAgents();
+    // A pid with no file left is a session that just ended, which changes what
+    // a card lists rather than what one of its rows says. Nothing to patch.
+    if ([...pids].some((pid) => !registry.some((s) => s.pid === pid))) {
+      return this.refresh();
+    }
+    const changed = new Set(
+      registry.filter((s) => pids.has(s.pid)).map((s) => s.sessionId)
+    );
+    const sessions = await this.indexAgents(
+      registry,
       data.worktrees.map((wt) => wt.path)
     );
     this.syncTerminalNames(sessions.agents);
     const known = new Set(data.worktrees.map((wt) => normalize(wt.path)));
     // A worktree the cache has never heard of needs a full gather to get a card
-    // at all — whether an agent's session lives there or a subagent was handed
-    // it (an isolated worktree is created the moment the subagent starts).
+    // at all (an agent just created one with `claude -w`).
     for (const key of sessions.agents.keys()) {
       if (!known.has(key)) return this.refresh();
     }
-    for (const [key, list] of sessions.subagents) {
-      if (known.has(key)) continue;
-      // Already judged card-less by a full gather: leave the rows with their
-      // parent, exactly as that gather did, instead of gathering again.
-      if (this.unplacedSubagents.has(key)) {
-        for (const sub of list) delete sub.worktree;
-        sessions.subagents.delete(key);
-        continue;
-      }
-      return this.refresh();
-    }
-    // A worktree is touched when a session that fired runs there, or when one
-    // of its subagents is working there: the second is how an isolated
-    // worktree's card sees the changes its subagent is making.
-    const touched = data.worktrees.filter((wt) => {
-      const key = normalize(wt.path);
-      return (
-        (sessions.agents.get(key) ?? []).some((a) =>
-          changed.has(a.sessionId)
-        ) ||
-        (sessions.subagents.get(key) ?? []).some((s) =>
-          changed.has(s.parentSessionId)
-        )
-      );
-    });
+    const touched = data.worktrees.filter((wt) =>
+      (sessions.agents.get(normalize(wt.path)) ?? []).some((a: AgentVM) =>
+        changed.has(a.sessionId)
+      )
+    );
     const statuses = await mapLimit(touched, 4, (wt) => getStatus(wt.path));
     // An agent that ran `git checkout` (typically back to main once its PR
     // merged) changed more than this cached payload can patch: the card's
@@ -550,21 +512,40 @@ export class WorktreeWebviewProvider
     // service, which otherwise keeps polling (and showing) the old branch's PR.
     // Only a positively reported, different branch counts: a status that failed
     // (or a detached HEAD) reports none, and treating that as a switch would
-    // fall back to a full refresh on every hook event.
+    // fall back to a full refresh on every transition.
     const switched = touched.some(
       (wt, i) => !!statuses[i].branch && statuses[i].branch !== wt.branch
     );
     if (switched) return this.refresh();
     touched.forEach((wt, i) => (wt.git = statuses[i]));
     for (const wt of data.worktrees) {
-      const key = normalize(wt.path);
-      wt.agents = sessions.agents.get(key) ?? [];
-      const subs = sessions.subagents.get(key);
-      if (subs && subs.length) wt.subagents = subs;
-      else delete wt.subagents;
+      wt.agents = sessions.agents.get(normalize(wt.path)) ?? [];
     }
     data.activeSessionId = this.activeSessionId();
     this.postData(data, seq);
+  }
+
+  /** Claude's live sessions, and the titles for them dropped from the cache. */
+  private async readAgents(): Promise<RegistrySession[]> {
+    const registry = await readRegistry(this.registryDir);
+    this.titles.retain(new Set(registry.map((s) => s.sessionId)));
+    return registry;
+  }
+
+  /** The registry as agent rows, with each session's work summary read from its
+   *  transcript (cached, so a settled title costs a stat). */
+  private async indexAgents(
+    registry: RegistrySession[],
+    worktreePaths: string[]
+  ): Promise<SessionIndex> {
+    const titles = new Map<string, string>();
+    await Promise.all(
+      registry.map(async (session) => {
+        const title = await this.titles.titleFor(session.sessionId);
+        if (title) titles.set(session.sessionId, title);
+      })
+    );
+    return indexRegistry(registry, worktreePaths, titles);
   }
 
   /**
@@ -673,8 +654,6 @@ export class WorktreeWebviewProvider
         return this.changeBranchAction(msg.path);
       case "openWindow":
         return this.openWindow(msg.path);
-      case "acceptHooks":
-        return this.acceptHooks();
       case "setGithubToken":
         return this.setGithubToken(msg.token);
       case "clearGithubToken":
@@ -1346,62 +1325,6 @@ export class WorktreeWebviewProvider
     await this.refresh();
   }
 
-  /**
-   * Retire agents whose Claude process is gone (see pruneDeadSessions). The
-   * session list lives in global storage shared by every window and nothing
-   * cleans it up when a session dies with its terminal, so a window that opens
-   * later would otherwise show those agents as live rows it has no terminal for.
-   *
-   * Throttled and single-flight; failures are swallowed, since a sweep that
-   * cannot run just leaves the rows as they are today.
-   */
-  private async sweepDeadAgents(force = false): Promise<void> {
-    const now = Date.now();
-    if (this.sweeping) return;
-    if (!force && now - this.lastLivenessSweep < LIVENESS_SWEEP_MS) return;
-    this.sweeping = true;
-    this.lastLivenessSweep = now;
-    try {
-      const { dead, recheckIn } = await pruneDeadSessions(this.sessionsDir);
-      // A session that died seconds ago is held back by the sweep's grace
-      // period, and its file will never be written again — so nothing would
-      // bring us back to it. Come back once the grace has passed (a window
-      // reopened right after the one running those agents was closed).
-      this.armLivenessRecheck(recheckIn);
-      for (const id of dead) {
-        // Drop any terminal handle for it. On a reopened window this is the
-        // revived (process-less) terminal VS Code restored for the dead agent,
-        // which reclaimTerminal linked purely by its env marker.
-        this.terminals.delete(id);
-        this.appliedTerminalNames.delete(id);
-        this.desiredTerminalNames.delete(id);
-      }
-      if (dead.length) {
-        diag(`retired ${dead.length} dead session(s): ${dead.join(", ")}`);
-        // Rows to remove: push the new state now rather than waiting for the
-        // caller's next refresh cycle (the timer path has none).
-        this.scheduleRefresh();
-      }
-    } catch {
-      /* best effort: a failed sweep leaves the rows alone */
-    } finally {
-      this.sweeping = false;
-    }
-  }
-
-  /** Schedule the one follow-up sweep a grace-deferred session needs, replacing
-   *  any pending one (the earliest deadline is always the useful one). */
-  private armLivenessRecheck(delay: number): void {
-    if (this.livenessRecheck) clearTimeout(this.livenessRecheck);
-    this.livenessRecheck = undefined;
-    if (delay <= 0) return;
-    this.livenessRecheck = setTimeout(() => {
-      this.livenessRecheck = undefined;
-      // Forced: the deadline is shorter than the sweep throttle.
-      void this.sweepDeadAgents(true);
-    }, delay + 1_000);
-  }
-
   /** Reveal the terminal backing an agent (if this window launched it). */
   private focusAgent(sessionId?: string): void {
     if (!sessionId) return;
@@ -1456,13 +1379,6 @@ export class WorktreeWebviewProvider
       cp.execFile("pkill", ["-f", sessionId], () => {
         /* no match / pkill missing -> nothing to kill */
       });
-    }
-    try {
-      fs.rmSync(path.join(this.sessionsDir, sessionId + ".json"), {
-        force: true,
-      });
-    } catch {
-      /* best effort */
     }
   }
 
@@ -1740,22 +1656,6 @@ export class WorktreeWebviewProvider
     }
   }
 
-  /** Install the agent-status hooks after the user accepts them in the panel. */
-  private async acceptHooks(): Promise<void> {
-    try {
-      await installHooks(this.context);
-      vscode.window.showInformationMessage(
-        "Agent Worktrees hooks installed in ~/.claude/settings.json."
-      );
-    } catch (e) {
-      vscode.window.showErrorMessage(
-        `Could not install hooks: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-    this.lastPosted = "";
-    await this.refresh();
-  }
-
   // --- Worktree git operations -----------------------------------------------
 
   /**
@@ -1937,16 +1837,10 @@ export class WorktreeWebviewProvider
       ? await unpushedCommitCount(primary, deletableBranch)
       : 0;
 
-    // Every agent whose worktree is this path (or nested under it), and every
-    // subagent that was handed it to work in. The subagents belong to a session
-    // running elsewhere, so removing this worktree does not stop them — it pulls
-    // the directory out from under them, which is worth saying separately.
+    // Every agent whose worktree is this path, or nested under it.
     const inScope = (key: string) =>
       key === target || key.startsWith(target + path.sep);
-    const sessions = await readSessionsByWorktree(this.sessionsDir);
-    // Including the sessions only Claude's registry knows about: they are agents
-    // this removal would stop just the same, so they belong in the count.
-    mergeRegistry(sessions, await readRegistry(registryDir()), [target]);
+    const sessions = await this.indexAgents(await this.readAgents(), [target]);
     const agents: AgentVM[] = [];
     for (const [key, list] of sessions.agents) {
       if (inScope(key)) agents.push(...list);
