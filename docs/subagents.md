@@ -1,149 +1,77 @@
 # Subagents
 
-What puts a subagent row under an agent, which card it lands on, and what
-retires it.
+The subagents an agent has in flight *right now* appear as indented rows under
+it, labelled with the agent type and the `Agent` tool's `description`, plus how
+long each has been going.
 
-A subagent has no process and no session registry entry of its own — it runs
-inside its parent's session — so unlike an agent it cannot be discovered by
-looking for a live pid. It does not need to be. Claude Code gives every subagent
-a directory beside its parent's transcript:
+## What registers and retires a row
 
-```
-~/.claude/projects/<project>/<parentSessionId>/subagents/
-    agent-<agentId>.jsonl       the subagent's transcript (isSidechain: true)
-    agent-<agentId>.meta.json   { agentType, description, toolUseId,
-                                  spawnDepth, model }
-```
+- `SubagentStart` registers one.
+- `SubagentStop` does **not** retire it. A stop is not an end: an async subagent
+  that hands work to a background command stops its turn, stays resumable, and is
+  woken when the command lands. Claude Code's own notification says as much, that
+  it "fires each time this agent stops with no live background children of its
+  own … the same task-id may notify more than once". Retiring on the stop made a
+  subagent vanish the moment it backgrounded anything.
+- The authority is instead Claude Code's in-flight registry, stamped on every
+  `Stop` / `SubagentStop` payload as `background_tasks` ("running/pending +
+  backgrounded"). A stop only marks the subagent **paused**: still listed, with
+  the working pulse off. The next registry snapshot, from that same payload or the
+  parent's next turn end, decides whether it is gone.
+- Once a subagent has appeared in the registry, **the registry alone retires it**.
+  Stopping an agent from Claude Code's own agent manager fires no hook (its turn
+  never ends), so a killed one would otherwise sit in the panel forever.
+- The registry also adopts subagents this extension never saw start, e.g. hooks
+  installed while one was already running.
+- Only `Stop` and `SubagentStop` carry it, so a kill shows up at the next turn end
+  rather than instantly.
 
-`src/subagents.ts` reads those. Verified against Claude Code 2.1.220.
+## Labels
 
-| Row shows | Comes from |
-| --- | --- |
-| id | the file name |
-| type (`Explore`, `general-purpose`, ...) | `meta.agentType` |
-| what it is doing | `meta.description` — the `description` passed to the Agent tool |
-| how long it has been at it | the first record's `timestamp` |
-| which worktree it is working in | that record's `cwd` |
+- `SubagentStart` only knows the agent *type*, so the description is parked by the
+  `Agent` tool's `PreToolUse` and claimed by the next start of that type. (The
+  tool was named `Task` before Claude Code 2.1.63; both names count.)
+- An unclaimed description expires rather than mislabelling a later subagent.
+- Registry entries carry both fields and need no pairing.
 
-Discovery is a `readdir` plus a few small reads. The subagent's transcript is
-opened only far enough to get its first line, and the parent's is never parsed
-beyond the tail already read for the work summary — a session with no subagents
-costs one failed `readdir`.
+## Which one is waiting on you
 
-## What makes a row appear
+Neither available signal is enough alone:
 
-Nothing the panel watches fires when a subagent starts. The session registry is
-the panel's signal that agent state changed, and Claude rewrites a session's
-file on **status transitions** only — a session goes `busy` before it spawns a
-subagent and stays `busy` until it has collected the result, writing that file
-once for the whole span. A subagent that starts and finishes inside one status
-therefore produces no event at all, and its row would show up only if some
-unrelated refresh happened to land while it ran.
+- `Notification` is the only trustworthy "needs you" signal, but it is built
+  without the agent context, so it never says which subagent raised it.
+- `PermissionRequest` names the asker, but fires for silently-allowed calls too.
 
-The other half is finding the files at all. Every read here starts by locating
-the parent's transcript, and Claude registers a session **before** it writes that
-transcript's first record (measured at ~9s). The registry file appearing is what
-wakes the panel, so the first lookup for a session started while a window is open
-always misses. `TranscriptReader` therefore caches only a hit: remembering the
-miss left that session with no work summary, no skills and no subagent rows for
-as long as the window stayed open, which is what "Claude 1" with nothing under it
-meant.
+So the panel pairs them: the subagent with an outstanding permission decision is
+drawn in the waiting yellow only while the session itself is in the waiting state.
 
-So the panel polls (`AGENT_POLL_MS`, 1s) down the agent-only path, and only
-while the view is **visible** and at least one agent is on a card. With no
-pending session ids that path spawns no git: it is a `readdir` of the registry
-and of each live session's `subagents/` directory, and the posted-payload dedupe
-drops the update entirely unless something changed. An idle window, or one
-behind another view, polls nothing.
+## Rendering
+
+- Elapsed times tick in the webview itself. The extension only re-posts when the
+  payload changes, and a subagent quietly working changes nothing else, so a
+  rendered age would otherwise freeze.
+- The Agents bar carries the worktree-wide count, so subagents stay visible when
+  the list is collapsed.
+- Clicking a subagent row reveals its **parent's** terminal. A subagent has no
+  terminal of its own, so its session is the thing to talk to.
 
 ## Subagents follow the worktree they were given
 
-An agent that fans work out gives each subagent a worktree of its own, so their
-edits cannot collide. Those subagents are indexed under **that** worktree rather
-than their parent's, so the row appears on the card for the code it is actually
-touching, naming the agent that sent it there. A worktree with no agent of its
-own still shows what is happening inside it.
+A fan-out (one subagent per ticket, each in its own worktree so concurrent edits
+cannot collide) puts each subagent's row on the card for the worktree it is
+actually touching, not under the session that spawned them.
 
-The row object is shared, not copied: it stays in the parent agent's own list
-too, which is what the count on the parent row is drawn from, so a fanned-out
-session says how many it has in flight rather than looking idle. A subagent whose
-`cwd` resolves to its parent's own card, or to no card at all, keeps its row
-under the parent.
-
-### The card has to exist first
-
-A card is placed by longest containing path, and an isolated worktree is created
-**inside** the repo (`<repo>/.claude/worktrees/agent-<id>`) at the moment the
-subagent starts - long after the last `git worktree list`. Until the panel lists
-worktrees again there is no card for it, and the longest path that does contain
-it is the repo's own card, so the row lands on its parent. That is not "no match
-found", it is a match too far up the tree, and it is why fanned-out subagents all
-appeared to be working in the parent's checkout.
-
-`indexRegistry` therefore reports every subagent `cwd` that is not itself one of
-the cards as `unplaced`, and the agent-only refresh re-gathers once per such
-path. One gather settles it: a real worktree gets its card and the row moves onto
-it, while a cwd that is merely a subdirectory of a card stays where it is and is
-never gathered for again. The reverse case is handled by the same counter that
-traces the rows - when the number of running subagents drops, the isolated
-worktree that has just been removed with one of them needs a gather too, or its
-card lingers.
-
-## What retires a row
-
-The parent's transcript says so, in one of two shapes depending on how the
-subagent was launched:
-
-| Launched | Says it is finished | Matched on |
-| --- | --- | --- |
-| backgrounded (the default) | `<task-notification><task-id>…` | the subagent's own id |
-| synchronous (`run_in_background: false`) | a tool result for the `Agent` call | `meta.toolUseId` |
-
-The distinction is the whole ballgame. A backgrounded `Agent` call is answered
-**at launch**, with `Async agent launched successfully … you will be notified
-when it completes`. Treating that receipt as the call's outcome retired every
-subagent a second or two after it started, so rows were computed correctly and
-then filtered out before anything could render them — the reason subagents
-appeared never to work at all. `readTail` skips that receipt by its text and
-collects the notification instead.
-
-Either signal lands at the end of the parent's transcript as it happens, so an
-open window sees every one in the tail it already reads. They are accumulated
-across refreshes (`TranscriptReader`), because a signal scrolls out of the tail
-as the session goes on and a subagent that finished must not come back to life
-when it does.
-
-That leaves one case: a window opened long after a subagent finished, whose
-result was never in any tail this window read. The backstop is silence — a
-subagent whose transcript has not been written to for **10 minutes** is treated
-as finished. The threshold has to clear the longest plausible single tool call,
-since a subagent blocked on a slow build writes nothing while it waits; the cost
-of it being generous is that such a row can linger for up to that long, rather
-than forever.
-
-## What a row is doing, and who is asking you
-
-A subagent's transcript pairs its tool calls plainly: an assistant record carries
-the `tool_use`, and the `user` record after it carries the matching
-`tool_result`. So a call with **no result** says the subagent is blocked on it -
-either the tool is running, or a permission decision for it is outstanding. Only
-the tail is scanned, since an unanswered call is by definition the most recent
-thing in the file.
-
-That much is a row's own state:
-
-| Subagent's files | Row |
-| --- | --- |
-| a call issued, no result | mid-call: working, or blocked on a prompt |
-| every call answered, not finished | parked - it stopped its turn and will be woken |
-
-Which of the two a mid-call subagent is doing cannot be told from its own files.
-The parent can tell you: a session reads **waiting** only when Claude needs the
-user. So a waiting session with **exactly one** subagent mid-call identifies that
-subagent as the one asking, which is what the `PermissionRequest` hook used to
-say outright.
-
-With several mid-call at once it stays unattributed rather than guessing. A row
-that says "this one is asking you" is worth something only if it is right, and a
-stale or wrong cue is worse than none - which is also why attribution is cleared
-the moment the session stops waiting.
+- Only the events a subagent fires itself carry its `cwd`, so the emitter resolves
+  it there and records it on the subagent when it differs from the session's own
+  worktree. The resolution is cached against that cwd, so `PreToolUse` does not
+  pay for a `git` spawn on every tool call.
+- The parent's row keeps a count chip of everything it has in flight. Without it,
+  the session driving a fan-out would look idle.
+- The emitter records the worktree on the *subagent*, never on the session. The
+  parent's row must not move to another card, which is what re-keying on a
+  subagent's cwd used to do.
+- Subagents adopted from the `background_tasks` registry fire no events of their
+  own and so carry no cwd. They stay on the parent's card.
+- So does one whose worktree belongs to no card in this repo: `gatherWorktrees`
+  drops the relocation rather than let the row vanish, and remembers the path so
+  the agent-only refresh does not mistake it for a worktree that just appeared.

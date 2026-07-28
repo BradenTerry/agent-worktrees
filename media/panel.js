@@ -925,6 +925,35 @@
     );
   }
 
+  function renderConsent(data) {
+    const hooks = data.hooks || [];
+    const rows = hooks
+      .map(
+        (h) =>
+          '<li class="hook"><code class="hook-name">' +
+          esc(h.label) +
+          "</code><span class='hook-why'>" +
+          esc(h.description) +
+          "</span></li>"
+      )
+      .join("");
+
+    root.innerHTML =
+      '<div class="consent">' +
+      '<h2 class="consent-title">Enable agent status tracking</h2>' +
+      '<p class="consent-lead">Agent Worktrees reads Claude Code hook events to show whether each ' +
+      "agent is <b>active</b>, <b>waiting</b> on you, or <b>idle</b>. To do that it must add the " +
+      "hooks below to your global Claude settings file:</p>" +
+      '<p class="consent-path"><code>~/.claude/settings.json</code></p>' +
+      '<ul class="hooks">' +
+      rows +
+      "</ul>" +
+      '<p class="consent-note">Each hook runs a small bundled Node script that writes a status ' +
+      "file per session. Nothing is sent anywhere. You can remove the hooks anytime by editing that file.</p>" +
+      '<button class="accept primary" data-action="acceptHooks">Accept &amp; add hooks</button>' +
+      "</div>";
+  }
+
   function render(data) {
     lastData = data;
     hideTip(); // a re-render replaces the hovered node; drop any open tooltip
@@ -932,6 +961,10 @@
       // Settings owns the whole window; routine data pushes must not wipe the
       // token field mid-type, so only re-render when GitHub state changed.
       maybeRefreshSettings(data);
+      return;
+    }
+    if (data && data.hooksInstalled === false) {
+      renderConsent(data);
       return;
     }
     if (!data || !data.repoRoot) {

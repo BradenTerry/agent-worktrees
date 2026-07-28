@@ -11,15 +11,12 @@ import {
   GitStatus,
 } from "./git";
 import { normalizePath } from "./worktreeUtils";
-import { indexRegistry, RegistrySession } from "./sessionRegistry";
-import { TranscriptReader } from "./transcript";
 import { DebugSessionVM } from "./debugRun";
 import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
 import { diag } from "./diagnostics";
 
 /**
- * Lifecycle status of an agent session, as Claude Code records it for that
- * session (see sessionRegistry). A session it says nothing about reads idle.
+ * Lifecycle status of an agent session, derived from Claude Code hooks.
  * - active:  doing work (a prompt is being processed or a tool is running)
  * - waiting: needs user interaction (a permission prompt or a question)
  * - idle:    completed its task, or freshly created
@@ -67,7 +64,7 @@ export interface WorktreeSubagentVM extends SubagentVM {
 
 /** A single agent session created within a worktree. */
 export interface AgentVM {
-  /** Claude session id; ties the panel row to its terminal. */
+  /** Claude session id; ties the panel row to its terminal and state file. */
   sessionId: string;
   /** Display name: work summary, else a default. */
   label: string;
@@ -79,28 +76,31 @@ export interface AgentVM {
    *  ones are dropped, so this is "what is running now", not a tally. */
   subagents?: SubagentVM[];
   status: AgentStatus;
-  /** Epoch ms when the session started. */
+  /** Epoch ms when the session was first seen. */
   startedAt: number;
-  /** Epoch ms of the session's last recorded transition. */
+  /** Epoch ms of the most recent hook event. */
   lastActivity: number;
 }
 
 /**
- * The live agents, indexed by the worktree path each one is running in (keyed by
- * `normalize(path)`), plus the subagents that were handed a worktree of their
- * own, indexed under THAT worktree so they show on the card for the code they
- * are touching.
+ * Everything the session state files say, indexed by worktree path: the agents
+ * whose session runs there, plus the subagents that were handed that worktree by
+ * a session running somewhere else. Both maps are keyed by `normalize(path)`.
  */
 export interface SessionIndex {
   agents: Map<string, AgentVM[]>;
   subagents: Map<string, WorktreeSubagentVM[]>;
-  /** Subagent working directories that are not themselves one of the given
-   *  paths, so the row landed on a card further up the tree (usually its
-   *  parent's) or on none at all. A subagent handed a worktree of its own gets
-   *  a real one created inside the repo mid-turn, after the panel last listed
-   *  worktrees, and it looks exactly like this until the list is refreshed - so
-   *  this is the caller's cue to re-gather (see refreshAgents). */
-  unplaced: string[];
+  /** Filled by gatherWorktrees with the subagent worktrees it found no card
+   *  for (a path outside this repo). Those rows fall back to their parent, and
+   *  the caller keeps the set so an incremental refresh does not mistake them
+   *  for a worktree that has just been created. */
+  unplaced?: Set<string>;
+}
+
+/** A hook shown on the consent page (name + why it is needed). */
+export interface HookInfoVM {
+  label: string;
+  description: string;
 }
 
 /** View-model for a single worktree row sent to the webview. */
@@ -137,6 +137,10 @@ export interface WorktreeData {
   repoRoot?: string;
   repoName?: string;
   worktrees: WorktreeVM[];
+  /** False until the user has accepted the agent-status hooks. */
+  hooksInstalled: boolean;
+  /** The hooks the consent page lists when they are not yet installed. */
+  hooks?: HookInfoVM[];
   /** GitHub connection summary for the settings modal. */
   github?: GithubConnection;
   /** Whether the PR integration is toggled on. */
@@ -195,12 +199,12 @@ export function folderIndex(fsPath: string): number {
 
 /** Gather worktrees of the repo containing the first workspace folder. */
 export async function gatherWorktrees(
-  fetch = false,
-  registry: RegistrySession[] = [],
-  reader?: TranscriptReader
+  sessions?: SessionIndex,
+  hooksInstalled = false,
+  fetch = false
 ): Promise<WorktreeData> {
   const repo = await findRepo();
-  if (!repo) return { worktrees: [] };
+  if (!repo) return { worktrees: [], hooksInstalled };
   const { repoRoot } = repo;
 
   // One fetch updates remote-tracking refs for every linked worktree, so the
@@ -215,6 +219,7 @@ export async function gatherWorktrees(
       repoRoot,
       repoName: path.basename(repoRoot),
       worktrees: [],
+      hooksInstalled,
     };
   }
 
@@ -252,37 +257,21 @@ export async function gatherWorktrees(
   // anywhere). With no card to land on, its row would simply vanish, so drop the
   // relocation and let it render under its parent instead. The objects are
   // shared with the parent's own list, so clearing the field is all it takes.
-  // Claude's live sessions become the agent rows, now that the cards they can
-  // land on are known (see sessionRegistry). Each row's work summary is read
-  // from that session's transcript.
-  const summaries = new Map<string, string>();
-  const subagents = new Map<string, SubagentVM[]>();
-  const skills = new Map<string, string[]>();
-  if (reader) {
-    await Promise.all(
-      registry.map(async (session) => {
-        const [title, subs, used] = await Promise.all([
-          reader.titleFor(session.sessionId),
-          reader.subagentsFor(session.sessionId),
-          reader.skillsFor(session.sessionId),
-        ]);
-        if (title) summaries.set(session.sessionId, title);
-        if (subs.length) subagents.set(session.sessionId, subs);
-        if (used.length) skills.set(session.sessionId, used);
-      })
-    );
+  if (sessions) {
+    const cards = new Set(worktrees.map((wt) => normalize(wt.path)));
+    const unplaced = new Set<string>();
+    for (const [key, list] of sessions.subagents) {
+      if (cards.has(key)) continue;
+      for (const sub of list) delete sub.worktree;
+      sessions.subagents.delete(key);
+      unplaced.add(key);
+    }
+    sessions.unplaced = unplaced;
   }
-  const sessions = indexRegistry(
-    registry,
-    worktrees.map((wt) => wt.path),
-    summaries,
-    subagents,
-    skills
-  );
 
   const vms: WorktreeVM[] = worktrees.map((wt, i) => {
     const key = normalize(wt.path);
-    const subagents = sessions.subagents.get(key) ?? [];
+    const subagents = sessions?.subagents.get(key) ?? [];
     return {
       path: wt.path,
       name: wt.branch ?? path.basename(wt.path),
@@ -292,7 +281,7 @@ export async function gatherWorktrees(
       locked: wt.locked,
       inWorkspace: openPaths.has(key),
       git: statuses[i],
-      agents: sessions.agents.get(key) ?? [],
+      agents: sessions?.agents.get(key) ?? [],
       ...(subagents.length ? { subagents } : {}),
     };
   });
@@ -314,6 +303,7 @@ export async function gatherWorktrees(
     repoRoot,
     repoName: path.basename(primary?.path ?? repoRoot),
     worktrees: vms,
+    hooksInstalled,
   };
 }
 

@@ -1,0 +1,166 @@
+import * as fs from "fs";
+import * as path from "path";
+import {
+  AgentVM,
+  AgentStatus,
+  SessionIndex,
+  SubagentVM,
+  WorktreeSubagentVM,
+} from "./worktreeData";
+// The same path key gatherWorktrees uses, taken from the VS Code-free module so
+// this file stays requirable (and unit-testable) outside the extension host.
+import { normalizePath as normalize } from "./worktreeUtils";
+
+/** Raw per-session state written by the emitter hook. The liveness markers it
+ *  also writes (`pid`, `launched`) are read by pruneDeadSessions in liveness.ts,
+ *  which retires the files this reader would otherwise keep showing. */
+interface SessionState {
+  sessionId: string;
+  worktree: string;
+  branch?: string;
+  state: AgentStatus;
+  task?: string;
+  /** Bare names of skills this session has invoked (deduped, in first-use order). */
+  skills?: string[];
+  /** Subagents the emitter currently believes are running. */
+  subagents?: unknown;
+  /** Epoch ms when the session was first seen. */
+  startedAt?: number;
+  /** Epoch ms of the most recent hook event. */
+  ts: number;
+}
+
+// A session whose state file is older than this is treated as gone: a terminal
+// closed without /exit never fires SessionEnd, so its last (usually idle) file
+// would otherwise linger forever. Only the backstop for files the liveness sweep
+// (pruneDeadSessions) cannot judge — written by an emitter too old to record
+// either marker; a session whose process can be probed is retired as soon as it
+// dies.
+const SESSION_MAX_AGE = 24 * 3_600_000;
+
+const VALID: AgentStatus[] = ["active", "waiting", "idle"];
+
+/**
+ * The live subagents of one session, sanitized for the webview. State files are
+ * written by a separate process and may be from an older extension version, so
+ * anything malformed (including the numeric tally this field used to hold) is
+ * dropped rather than trusted.
+ */
+function readSubagents(raw: unknown, fallbackTs: number): SubagentVM[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SubagentVM[] = [];
+  for (const s of raw) {
+    if (!s || typeof s !== "object") continue;
+    const { id, type, task, paused, awaitingPermission, startedAt, worktree } =
+      s as Record<string, unknown>;
+    if (typeof id !== "string" || !id) continue;
+    out.push({
+      id,
+      ...(typeof type === "string" && type ? { type } : {}),
+      ...(typeof task === "string" && task ? { task } : {}),
+      ...(paused === true ? { paused: true } : {}),
+      ...(awaitingPermission === true ? { awaitingPermission: true } : {}),
+      startedAt: typeof startedAt === "number" ? startedAt : fallbackTs,
+      ...(typeof worktree === "string" && worktree ? { worktree } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * Read every session state file and group the agents by worktree path.
+ * Within a worktree, agents are ordered by first-seen (ts ascending) and given
+ * stable sequential labels. Stale files are pruned as they are encountered.
+ *
+ * A subagent that was handed a worktree of its own is indexed separately, under
+ * THAT worktree rather than its parent session's, so the panel can show it on
+ * the card for the code it is actually touching. It stays in the parent agent's
+ * own `subagents` list too — that is what the count on the parent row is drawn
+ * from, so a fanned-out session still says how many it has in flight.
+ */
+export async function readSessionsByWorktree(
+  dir: string
+): Promise<SessionIndex> {
+  const files = await fs.promises.readdir(dir).catch(() => [] as string[]);
+  const now = Date.now();
+  const byPath = new Map<string, SessionState[]>();
+
+  for (const fn of files) {
+    if (!fn.endsWith(".json")) continue;
+    const full = path.join(dir, fn);
+    try {
+      const raw = await fs.promises.readFile(full, "utf8");
+      const m = JSON.parse(raw) as SessionState;
+      if (
+        typeof m?.ts !== "number" ||
+        now - m.ts > SESSION_MAX_AGE ||
+        !m.worktree
+      ) {
+        await fs.promises.unlink(full).catch(() => {});
+        continue;
+      }
+      const status = VALID.includes(m.state) ? m.state : "idle";
+      const key = normalize(m.worktree);
+      const list = byPath.get(key) ?? [];
+      list.push({ ...m, state: status });
+      byPath.set(key, list);
+    } catch {
+      /* partial write or garbage — ignore this poll */
+    }
+  }
+
+  const agents = new Map<string, AgentVM[]>();
+  const elsewhere = new Map<string, WorktreeSubagentVM[]>();
+  for (const [key, sessions] of byPath) {
+    sessions.sort((a, b) => (a.startedAt ?? a.ts) - (b.startedAt ?? b.ts));
+    agents.set(
+      key,
+      sessions.map((s, i) => {
+        const summary = s.task && s.task.trim() ? s.task.trim() : undefined;
+        const skills = Array.isArray(s.skills)
+          ? s.skills.filter((x) => typeof x === "string")
+          : [];
+        const subagents = readSubagents(s.subagents, s.ts);
+        const label = summary || `Claude ${i + 1}`;
+        for (const sub of subagents) {
+          if (!sub.worktree) continue;
+          const home = normalize(sub.worktree);
+          // Not, via a stale file or a symlinked path, the worktree it is
+          // already listed under. Clearing the field keeps one invariant for
+          // everything downstream: `worktree` set means "rendered on another
+          // card", so the parent's own rows are exactly the ones without it.
+          if (home === key) {
+            delete sub.worktree;
+            continue;
+          }
+          // The SAME object, not a copy: gatherWorktrees clears `worktree` on
+          // subagents whose path has no card, and that has to put the row back
+          // under its parent, where this object is also listed.
+          const placed = sub as WorktreeSubagentVM;
+          placed.parentSessionId = s.sessionId;
+          placed.parentLabel = label;
+          placed.parentStatus = s.state;
+          const list = elsewhere.get(home) ?? [];
+          list.push(placed);
+          elsewhere.set(home, list);
+        }
+        return {
+          sessionId: s.sessionId,
+          // The work summary, then an ordinal until Claude generates a title.
+          label,
+          summary,
+          skills,
+          subagents,
+          status: s.state,
+          startedAt: s.startedAt ?? s.ts,
+          lastActivity: s.ts,
+        };
+      })
+    );
+  }
+  // Oldest first, matching how subagents are ordered under their parent.
+  for (const list of elsewhere.values()) {
+    list.sort((a, b) => a.startedAt - b.startedAt);
+  }
+  return { agents, subagents: elsewhere };
+}

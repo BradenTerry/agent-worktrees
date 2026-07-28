@@ -37,9 +37,11 @@ single view.
   reading is never pulled away when another agent answers.
 - Subagents an agent is running right now are listed under it, with what each
   one is doing and how long it has been at it. They clear themselves when they
-  finish, so the panel shows live work, not a running total.
-- When an agent fans work out across worktrees - one subagent per ticket, each
-  in a worktree of its own so their edits cannot collide - each subagent is
+  finish, so the panel shows live work, not a running total. A subagent parked
+  on a background command is dimmed rather than dropped, and when an agent needs
+  you the row tells you which of its subagents is asking.
+- When an agent fans work out across worktrees — one subagent per ticket, each
+  in a worktree of its own so their edits cannot collide — each subagent is
   listed on the card for the worktree it is actually working in, naming the
   agent that sent it there. The card for a worktree with no agent of its own
   still shows what is happening inside it, and the agent driving the fan-out
@@ -53,28 +55,23 @@ single view.
   reopen shows the agents that are actually running, not yesterday's rows with no
   terminal behind them.
 
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills one agent has invoked" width="380">
+
 ### Status
 
-Status comes from Claude Code itself: it records what each session is doing and
-the panel reads that, so there is nothing to set up and nothing to approve. Each
-row is labelled with that session's own work summary, and its subagents and the
-skills it has used are read from the files Claude keeps for them. **Nothing is sent over the network** and
-nothing is written to your Claude settings - everything comes from files Claude
-Code already keeps.
-
-If you used an earlier version, the hooks it asked you to install are removed
-automatically. Hooks you added yourself are left exactly as they are.
+Status comes from Claude Code's hooks, which the extension installs only with
+your explicit consent. **Nothing is sent over the network.** State flows through
+local files, and you can remove the hooks anytime by editing
+`~/.claude/settings.json`.
 
 | Status      | When                                                                       |
 | ----------- | -------------------------------------------------------------------------- |
 | **idle**    | started, or finished responding and awaiting you                           |
-| **active**  | processing a prompt, or running a tool or a shell command                  |
+| **active**  | processing a prompt, running tools, or waiting on its own subagents         |
 | **waiting** | needs you: a permission prompt or a question                               |
 
-The Activity Bar badge counts only **waiting** agents, so it always means an
-agent needs you specifically.
-
-<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills one agent has invoked" width="380">
+The Activity Bar badge counts only **waiting** agents, so it always means you
+specifically, never an agent waiting on its own subagents.
 
 ## Pull requests
 
@@ -173,14 +170,15 @@ with no debug setup gets no extra clutter.
 
 - The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on
   your `PATH`.
-- `git` on your `PATH`.
+- `git` and `node` on your `PATH`.
 - A workspace whose first folder is inside a git repository.
 
 ## Getting started
 
 1. Install the extension and open a folder that is a git repository.
 2. Open **Agent Worktrees** from the Activity Bar.
-3. Click **Agent** on any worktree, or **Agent & Worktree** to create both at once.
+3. Accept the hook prompt for live agent status (optional, recommended).
+4. Click **Agent** on any worktree, or **Agent & Worktree** to create both at once.
 
 ## Troubleshooting
 
@@ -193,7 +191,7 @@ are never logged.
 ## Privacy
 
 Agent Worktrees runs on your machine and collects no telemetry. It reads local
-git state, and the session files Claude Code keeps for itself, to tell you what
-each agent is doing. It writes nothing to your `~/.claude` tree. The only network
-requests it makes are to the GitHub API, and only once you connect a token. With
-no token, it makes none.
+git state and Claude Code hook output from files in its own private storage.
+Nothing of the extension's lives in your `~/.claude` tree apart from the hook
+entries you consent to. The only network requests it makes are to the GitHub API,
+and only once you connect a token. With no token, it makes none.

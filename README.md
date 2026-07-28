@@ -57,15 +57,14 @@ its running agents in one view.
   Claude Code on purpose (see [Terminal tab titles](docs/terminal-titles.md)).
 - **Agent & Worktree** creates a worktree with `claude -w` and starts an agent in
   it in one step.
-- Status per agent, read from Claude Code's own session registry (see
+- Status per agent, derived from Claude Code hooks (see
   [Agent status](docs/agent-status.md)). Collapsible lists with per-status counts,
   and a number badge on the Activity Bar icon counting **waiting** agents, so a
   blocked agent surfaces while the panel is hidden.
 - **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
-  type, description and elapsed time, read from the files Claude writes for them,
-  and land on the card for the worktree they were actually given.
+  type, description and elapsed time, land on the card for the worktree they were
+  actually given, and mark which one is waiting on you.
 - A chip per agent counting the Claude skills it has invoked; click for the list.
-  Read from the session's transcript, scanned once and topped up from its tail.
 
 **GitHub and branches**
 
@@ -79,29 +78,30 @@ its running agents in one view.
 
 ## Agent status
 
-Claude Code keeps a registry of its live sessions at
-`~/.claude/sessions/<pid>.json` and records what each one is doing in a `status`
-field it rewrites on every transition. The panel reads that: `busy` and `shell`
-show as active, `waiting` as waiting, `idle` as idle, and a status it does not
-recognize leaves the row reading idle rather than guessing.
+The panel cannot tell on its own whether a session is working, waiting on you, or
+idle, so the extension installs one small emitter script
+(`hooks/agent-worktrees-emit.mjs`) on Claude Code's
+[hooks](https://docs.claude.com/en/docs/claude-code/hooks):
 
-Nothing is installed and nothing is asked for. Earlier versions wired an emitter
-script onto ten Claude Code hooks to infer the same thing from events, which
-meant editing your global `settings.json` (hence a consent page), a process
-spawned per event on the tool-call hot path, and an interpreter to run it with.
-Activation now removes all of that, leaving any hooks you added yourself alone.
+| Hook                                                                              | Status             |
+| --------------------------------------------------------------------------------- | ------------------ |
+| `SessionStart`, `Stop`                                                            | idle               |
+| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`  | active             |
+| `Notification` (permission / question)                                            | waiting            |
+| `PermissionRequest`                                                               | unchanged          |
+| `SessionEnd`                                                                      | removed from panel |
 
-The registry directory is also the refresh signal - a file appearing, changing or
-vanishing is a session starting, transitioning or ending - and the pid it records
-is what retires a row whose terminal was closed without `/exit`. Each row's label
-is Claude's own work summary, read from the tail of that session's transcript.
-**Nothing is sent over the network**, and nothing of the extension's lives in
-your `~/.claude` tree.
+Each event writes one small state file per session into the extension's global
+storage, atomically, which a `FileSystemWatcher` picks up. **Nothing is sent over
+the network**, and nothing of the extension's lives in your `~/.claude` tree apart
+from the hook entries in `settings.json`. Installing the hooks edits your global
+`~/.claude/settings.json`, so it is always gated behind explicit consent in the
+panel. Sessions whose Claude process is gone are retired by a liveness sweep that
+requires positive evidence of death, never merely the absence of evidence of life.
 
-Details, including the status mapping, which card a session lands on, what the
-registry cannot answer (a resumed session's terminal), and what removal
-takes out: [docs/agent-status.md](docs/agent-status.md). Subagent rows come from
-Claude's per-subagent files: [docs/subagents.md](docs/subagents.md).
+Details, including the `Notification` type handling, the worktree/branch caching
+that keeps `PreToolUse` cheap, and the sweep's decision tree:
+[docs/agent-status.md](docs/agent-status.md).
 
 ## Architecture
 
@@ -112,24 +112,20 @@ flowchart LR
     V -->|Agent| T["createTerminal({ cwd })<br/>claude --session-id"]
     V -->|Agent & Worktree| TW["createTerminal<br/>claude --session-id -w"]
     V -->|New / Delete| WT["git worktree add / remove"]
-    T --> C
-    TW --> C
-    C["claude"] -->|"status per session"| S["~/.claude/sessions/&lt;pid&gt;.json"]
-    C -->|"ai-title"| J["~/.claude/projects/.../&lt;id&gt;.jsonl"]
-    C -->|"subagent meta + transcript"| SA["&lt;id&gt;/subagents/agent-*.json"]
-    SA -->|subagent rows| P
+    H["Claude Code hooks<br/>(~/.claude/settings.json)"] --> E["agent-worktrees-emit.mjs<br/>--dir &lt;globalStorage&gt;/sessions"]
+    E -->|per-session state file| S["extension global storage<br/>&lt;globalStorage&gt;/sessions"]
     S -->|FileSystemWatcher| P
-    S -->|"kill(pid, 0)"| L["retire sessions whose<br/>Claude process is gone"]
+    S -->|"liveness sweep:<br/>kill(pid, 0) + argv scan"| L["retire sessions whose<br/>Claude process is gone"]
     L --> P
-    J -->|work summary| P
+    T --> H
+    TW --> H
 ```
 
 The panel UI is a webview with no framework: `media/panel.js` renders all markup,
 `media/panel.css` styles it from `--vscode-*` theme tokens. `src/` is the
 extension host: git (`git.ts`), GitHub polling (`github.ts`, `prs.ts`), the
 webview provider (`worktreeWebview.ts`), coalescing (`scheduler.ts`), symlinks
-(`links.ts`), agent status (`sessionRegistry.ts`, `transcript.ts`,
-`liveness.ts`).
+(`links.ts`), liveness (`liveness.ts`).
 
 ## Design notes
 
@@ -137,8 +133,8 @@ The rationale behind the parts that are easy to get wrong twice:
 
 | Doc | Covers |
 | --- | --- |
-| [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
-| [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
+| [Agent status from hooks](docs/agent-status.md) | The hook wiring, the emitter, and retiring dead sessions |
+| [Subagents](docs/subagents.md) | What registers and retires a subagent row, and which card it lands on |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the agent-only path, why there is no `**/*` watcher |
 | [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |
 | [Run and Debug in a worktree](docs/debug-sessions.md) | Why the debug view can't be retargeted, launch.json parsing, session tracking |
@@ -149,7 +145,7 @@ The rationale behind the parts that are easy to get wrong twice:
 
 - The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`)
   on your `PATH`.
-- `git` on your `PATH`.
+- `git` and `node` on your `PATH`.
 - A workspace whose first folder is inside a git repository.
 
 ## Develop

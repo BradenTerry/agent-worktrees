@@ -26,12 +26,12 @@ suite("Agent Worktrees extension host", () => {
   });
 
   test("activating in a test host leaves global settings.json alone", async () => {
-    // ~/.claude/settings.json is not sandboxed by the test host's throwaway
-    // --user-data-dir: it is the real user's file, shared by every Claude
-    // session on the machine. Activation removes the hooks this extension used
-    // to install, and doing that to a developer's real settings as a side
-    // effect of `npm run test:integration` would be exactly as unwelcome as
-    // adding them once was.
+    // The test host runs with a throwaway --user-data-dir, so its globalStorage
+    // (and the emitter's --dir) live under it. ~/.claude/settings.json is NOT
+    // sandboxed with it: it is the real user's file, shared by every Claude
+    // session on the machine. If activation repaired the hook command from
+    // here, every session would write its state into this run's scratch dir and
+    // the installed extension's panel would stop seeing agents entirely.
     assert.strictEqual(
       managesUserSettings(vscode.ExtensionMode.Test),
       false,
@@ -40,12 +40,12 @@ suite("Agent Worktrees extension host", () => {
     assert.strictEqual(
       managesUserSettings(vscode.ExtensionMode.Production),
       true,
-      "a real install still removes the hooks it used to add"
+      "a real install still installs and repairs its hooks"
     );
 
     // And prove it end to end: this suite activated the extension above, so if
-    // the guard were missing, any hook entry naming this host's scratch storage
-    // would already have been rewritten out of the real file.
+    // the guard were missing settings.json would already name this host's
+    // scratch storage.
     const ext = vscode.extensions.getExtension("bradenterry.agent-worktrees");
     await ext?.activate();
     const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
