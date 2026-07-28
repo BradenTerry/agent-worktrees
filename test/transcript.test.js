@@ -131,3 +131,63 @@ test("TranscriptReader drops sessions that are no longer live", async () => {
   assert.strictEqual(await reader.titleFor("s1"), "");
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+/**
+ * Skills. A Skill tool call is an ordinary `tool_use` block, so the list is
+ * recoverable from the transcript - but it accumulates over a whole session, so
+ * unlike the title it cannot come from the tail alone.
+ */
+
+const skillCall = (skill) => ({
+  type: "assistant",
+  message: { role: "assistant", content: [{ type: "tool_use", name: "Skill", input: { skill } }] },
+});
+
+test("normalizeSkill reduces every form to a bare name", () => {
+  const { normalizeSkill } = require("../out/transcript.js");
+  assert.strictEqual(normalizeSkill("pdf"), "pdf");
+  assert.strictEqual(normalizeSkill("plugin:code-review"), "code-review");
+  assert.strictEqual(normalizeSkill("path/to/tdd-workflow"), "tdd-workflow");
+  // Every path segment is stripped, so even a traversal-shaped value reduces to
+  // its last segment - which is only ever rendered as a chip label.
+  assert.strictEqual(normalizeSkill("../etc"), "etc");
+  // Anything that is not a plausible name is dropped rather than shown.
+  for (const raw of ["", "  ", "/", "-x", "!!", 3, null, undefined]) {
+    assert.strictEqual(normalizeSkill(raw), undefined, JSON.stringify(raw));
+  }
+});
+
+test("scanSkills finds skills anywhere in the transcript, deduped in order", async () => {
+  const { scanSkills } = require("../out/transcript.js");
+  const root = seed("s1", [
+    skillCall("plugin:code-review"),
+    ...Array.from({ length: 400 }, () => msg), // push the early call out of any tail
+    skillCall("pdf"),
+    skillCall("code-review"), // same skill by its bare name
+  ]);
+  const file = await findTranscript(root, "s1");
+  assert.deepStrictEqual(scanSkills(file), ["code-review", "pdf"]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("skillsFor keeps a skill used before the tail, and adds new ones", async () => {
+  const root = seed("s1", [
+    skillCall("code-review"),
+    ...Array.from({ length: 400 }, () => msg),
+  ]);
+  const reader = new TranscriptReader(root);
+  assert.deepStrictEqual(await reader.skillsFor("s1"), ["code-review"]);
+
+  // A skill invoked while the window is open arrives in the tail.
+  const file = await findTranscript(root, "s1");
+  fs.appendFileSync(file, JSON.stringify(skillCall("pdf")) + "\n");
+  assert.deepStrictEqual(await reader.skillsFor("s1"), ["code-review", "pdf"]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("skillsFor is empty for a session that has invoked none", async () => {
+  const root = seed("s1", [msg, msg]);
+  const reader = new TranscriptReader(root);
+  assert.deepStrictEqual(await reader.skillsFor("s1"), []);
+  fs.rmSync(root, { recursive: true, force: true });
+});

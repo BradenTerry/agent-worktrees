@@ -63,8 +63,21 @@ session's transcript:
 ```
 
 The same tail read also collects the ids of tool calls whose results have landed,
-which is what retires a finished subagent (see [Subagents](subagents.md)) — one
-pass over the bytes, not two.
+which is what retires a finished subagent (see [Subagents](subagents.md)), and
+any skills invoked in it — one pass over the bytes rather than three.
+
+### Skills
+
+A Skill tool call is an ordinary `tool_use` block, so the chip on an agent row is
+recoverable too: `input.skill`, reduced to its bare name so `plugin:foo` and
+`path/to/foo` dedupe to `foo` (the same normalization the emitter did on the
+`PreToolUse` payload).
+
+Skills are the one thing that cannot come from the tail alone: they accumulate
+over a whole session, so one used an hour ago is far behind the end of the file.
+`scanSkills` walks the transcript once, the first time a window sees that
+session, and every tail read after that tops the list up — anything new is by
+definition at the end.
 
 `src/transcript.ts` reads the newest of those from the tail of
 `~/.claude/projects/<project>/<sessionId>.jsonl`, whichever kind wrote it. Only
@@ -93,8 +106,6 @@ grace period and a process-table scan to make up the difference.
 
 ## What this does not cover
 
-- **Skills.** The per-agent list came from watching `PreToolUse` fire for a Skill
-  tool, and nothing Claude writes to disk records it.
 - **Which subagent holds a permission prompt.** Subagent rows themselves are read
   from Claude's own files (see [Subagents](subagents.md)); only the attribution
   that named *which* one was blocking you came from the `PermissionRequest` hook

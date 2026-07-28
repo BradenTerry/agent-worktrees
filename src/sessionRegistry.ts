@@ -189,8 +189,9 @@ function placeIn(cwd: string, keys: string[]): string | undefined {
  * by start time and labelled with Claude's work summary, falling back to an
  * ordinal until it has generated one.
  *
- * `titles` and `subagents` are keyed by session id; the caller reads both (see
- * TranscriptReader) because doing so touches the filesystem and this stays pure.
+ * `titles`, `subagents` and `skills` are keyed by session id; the caller reads
+ * them (see TranscriptReader) because doing so touches the filesystem and this
+ * stays pure.
  *
  * A subagent given a worktree of its own is indexed under THAT worktree rather
  * than its parent session's, so the panel can show it on the card for the code
@@ -202,7 +203,8 @@ export function indexRegistry(
   registry: RegistrySession[],
   worktreePaths: string[],
   titles: Map<string, string> = new Map(),
-  subagents: Map<string, SubagentVM[]> = new Map()
+  subagents: Map<string, SubagentVM[]> = new Map(),
+  skills: Map<string, string[]> = new Map()
 ): SessionIndex {
   const keys = worktreePaths.map(normalize);
   const byPath = new Map<string, RegistrySession[]>();
@@ -248,7 +250,7 @@ export function indexRegistry(
           sessionId: session.sessionId,
           label,
           ...(summary ? { summary } : {}),
-          skills: [],
+          skills: skills.get(session.sessionId) ?? [],
           subagents: own,
           status,
           startedAt: session.startedAt,

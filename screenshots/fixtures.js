@@ -100,6 +100,7 @@ function overviewData() {
             sessionId: "s-main-1",
             label: "Work the release backlog",
             summary: "Work the release backlog, one worktree per ticket",
+            skills: ["code-review"],
             // Fanned out: this session gave each subagent a worktree of its own,
             // so their rows are on those cards and the count is what says the
             // session is busy.
@@ -146,6 +147,7 @@ function overviewData() {
             sessionId: "s-co-1",
             label: "Rework cart summary component",
             summary: "Rework the cart summary component and wire the new totals API",
+            skills: ["task-spec", "source-generator"],
             subagents: [
               {
                 id: "sub-co-1a",
@@ -174,6 +176,7 @@ function overviewData() {
             sessionId: "s-co-2",
             label: "Add Playwright coverage",
             summary: "Add Playwright coverage for the checkout flow",
+            skills: ["verify"],
             subagents: [
               {
                 id: "sub-co-2a",
@@ -227,6 +230,7 @@ function overviewData() {
             sessionId: "s-lf-1",
             label: "Fix session token race",
             summary: "Fix the session token refresh race on concurrent requests",
+            skills: [],
             status: "active",
             startedAt: ago(31 * MIN),
             lastActivity: ago(15 * 1000),

@@ -15,9 +15,9 @@ its running agents in one view.
 
 <sub>Click any thumbnail to view it full size.</sub>
 
-| Worktrees, git status & agents | PR checks, review & comments | Settings & integrations | Linked files |
-| :---: | :---: | :---: | :---: |
-| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png" alt="The Linked Files settings tab listing gitignored paths symlinked into every worktree" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png) |
+| Worktrees, git status & agents | PR checks, review & comments | Settings & integrations | Linked files | Skills used per agent |
+| :---: | :---: | :---: | :---: | :---: |
+| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png" alt="The Linked Files settings tab listing gitignored paths symlinked into every worktree" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills an agent has used" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png) |
 
 ## Features
 
@@ -64,6 +64,8 @@ its running agents in one view.
 - **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
   type, description and elapsed time, read from the files Claude writes for them,
   and land on the card for the worktree they were actually given.
+- A chip per agent counting the Claude skills it has invoked; click for the list.
+  Read from the session's transcript, scanned once and topped up from its tail.
 
 **GitHub and branches**
 
@@ -97,7 +99,7 @@ is Claude's own work summary, read from the tail of that session's transcript.
 your `~/.claude` tree.
 
 Details, including the status mapping, which card a session lands on, what the
-registry cannot answer (skills, a resumed session's terminal), and what removal
+registry cannot answer (a resumed session's terminal), and what removal
 takes out: [docs/agent-status.md](docs/agent-status.md). Subagent rows come from
 Claude's per-subagent files: [docs/subagents.md](docs/subagents.md).
 

@@ -45,6 +45,7 @@ single view.
   still shows what is happening inside it, and the agent driving the fan-out
   carries a count of everything it has in flight instead of looking idle.
   Clicking a subagent opens the terminal of the agent running it.
+- Click an agent's skill chip to see which Claude skills it has used.
 - Agents that are no longer running are retired on their own. An agent that dies
   with its terminal (you closed the window, killed the terminal, restarted the
   machine) never gets to report that it exited, so the panel checks whether each
@@ -56,8 +57,8 @@ single view.
 
 Status comes from Claude Code itself: it records what each session is doing and
 the panel reads that, so there is nothing to set up and nothing to approve. Each
-row is labelled with that session's own work summary, and its subagents are read
-from the files Claude keeps for them. **Nothing is sent over the network** and
+row is labelled with that session's own work summary, and its subagents and the
+skills it has used are read from the files Claude keeps for them. **Nothing is sent over the network** and
 nothing is written to your Claude settings - everything comes from files Claude
 Code already keeps.
 
@@ -72,6 +73,8 @@ automatically. Hooks you added yourself are left exactly as they are.
 
 The Activity Bar badge counts only **waiting** agents, so it always means an
 agent needs you specifically.
+
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills one agent has invoked" width="380">
 
 ## Pull requests
 
