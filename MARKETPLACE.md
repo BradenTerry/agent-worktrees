@@ -190,6 +190,18 @@ duration and result to the "Agent Worktrees" output channel (**Open log** reveal
 it). It is off by default, and request headers, which carry your GitHub token,
 are never logged.
 
+Slow on a big repository, especially on Windows? The panel's per-worktree
+`git status` is usually the cost, and git's own caches fix it at the source.
+Run these once in the repository:
+
+```
+git config core.untrackedCache true
+git config core.fsmonitor true
+```
+
+The panel logs this same hint to the output channel the first time a status
+call takes over two seconds. It never changes your git configuration itself.
+
 ## Privacy
 
 Agent Worktrees runs on your machine and collects no telemetry. It reads local

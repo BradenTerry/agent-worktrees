@@ -1,7 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import { SubagentVM } from "./worktreeData";
-import { liveSubagents, readSubagents } from "./subagents";
+import {
+  liveSubagents,
+  newSubagentDirCache,
+  readSubagents,
+  SubagentDirCache,
+} from "./subagents";
 
 /**
  * The work summary shown on an agent row, read from Claude's transcript.
@@ -279,6 +284,10 @@ export class TranscriptReader {
    *  because a result scrolls out of the tail as the session goes on, and a
    *  subagent that finished must not come back to life when it does. */
   private readonly finished = new Map<string, Set<string>>();
+  /** Per-session cache of what the subagents dir already said (immutable metas,
+   *  mtime-keyed transcript state), so the 1s agent poll re-reads a subagent's
+   *  files only when they have actually been written. */
+  private readonly subagentDirs = new Map<string, SubagentDirCache>();
 
   constructor(private readonly projectsDir: string) {}
 
@@ -355,9 +364,15 @@ export class TranscriptReader {
     if (!file) return [];
     await this.tailFor(sessionId);
     const dir = path.join(path.dirname(file), sessionId, "subagents");
-    const found = await readSubagents(dir);
+    let cache = this.subagentDirs.get(sessionId);
+    if (!cache) {
+      cache = newSubagentDirCache();
+      this.subagentDirs.set(sessionId, cache);
+    }
+    const finished = this.finished.get(sessionId) ?? new Set<string>();
+    const found = await readSubagents(dir, { cache, finished });
     if (!found.length) return [];
-    const live = liveSubagents(found, this.finished.get(sessionId) ?? new Set());
+    const live = liveSubagents(found, finished);
     // `toolUseId` and `lastActivity` are how a row is judged, not part of it.
     return live.map(({ toolUseId, lastActivity, ...row }) => row);
   }
@@ -365,7 +380,14 @@ export class TranscriptReader {
   /** Drop sessions that are no longer live, so nothing grows without bound in a
    *  long-lived window. */
   retain(sessionIds: Set<string>): void {
-    for (const map of [this.located, this.cache, this.finished, this.skills]) {
+    const maps: Map<string, unknown>[] = [
+      this.located,
+      this.cache,
+      this.finished,
+      this.skills,
+      this.subagentDirs,
+    ];
+    for (const map of maps) {
       for (const id of [...map.keys()]) {
         if (!sessionIds.has(id)) map.delete(id);
       }

@@ -49,9 +49,11 @@ import {
   indexRegistry,
   projectsDir,
   readRegistry,
+  RegistryCache,
   registryDir,
   RegistrySession,
 } from "./sessionRegistry";
+import { systemProbes } from "./liveness";
 import { TranscriptReader } from "./transcript";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import {
@@ -620,9 +622,17 @@ export class WorktreeWebviewProvider
     this.postData(data, seq);
   }
 
+  /** Registry files already parsed, keyed by path+mtime, so the 1s agent poll
+   *  re-reads a session's file only when Claude has rewritten it. */
+  private readonly registryCache: RegistryCache = new Map();
+
   /** Claude's live sessions, and the titles for them dropped from the cache. */
   private async readAgents(): Promise<RegistrySession[]> {
-    const registry = await readRegistry(this.registryDir);
+    const registry = await readRegistry(
+      this.registryDir,
+      systemProbes.isAlive,
+      this.registryCache
+    );
     this.reader.retain(new Set(registry.map((s) => s.sessionId)));
     return registry;
   }

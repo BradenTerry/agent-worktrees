@@ -56,6 +56,16 @@ and of each live session's `subagents/` directory, and the posted-payload dedupe
 drops the update entirely unless something changed. An idle window, or one
 behind another view, polls nothing.
 
+What keeps that tick cheap is a per-session cache (`SubagentDirCache`): a
+subagent's files persist for the whole session, so without one a session that
+had run dozens of subagents would re-open all of them every second to render
+zero rows — a real cost on Windows, where each file open pays for filter
+drivers. Finished subagents are skipped before any of their files are opened
+(the meta stays cached so the finished-by-`toolUseId` skip is free), the meta —
+written once at spawn, immutable after — is parsed once, and a transcript is
+re-read only when its mtime has moved, which for a working subagent it does on
+every append. A steady-state tick is a readdir plus a stat per running row.
+
 ## Subagents follow the worktree they were given
 
 An agent that fans work out gives each subagent a worktree of its own, so their

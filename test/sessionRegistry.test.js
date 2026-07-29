@@ -329,3 +329,62 @@ test("once the card exists the subagent moves onto it", () => {
     "and still counts on the parent row"
   );
 });
+
+// --- the read cache ----------------------------------------------------------
+//
+// The agent poll calls readRegistry on every tick, and Claude rewrites a
+// session's file on status transitions only — so between transitions a poll
+// with the cache costs one stat per session instead of an open+read.
+
+test("readRegistry re-parses a file only when its mtime moves", async () => {
+  const dir = seed({ "567.json": entry() });
+  const file = path.join(dir, "567.json");
+  // Pin an explicit mtime (a bare Date has ms precision; the filesystem's own
+  // stamps carry sub-ms digits utimes cannot reproduce, so pin both writes).
+  const T = new Date(1785193745000);
+  fs.utimesSync(file, T, T);
+  const cache = new Map();
+  let [s] = await readRegistry(dir, ALIVE, cache);
+  assert.strictEqual(s.cwd, REPO);
+  // Rewrite in place but pin the same mtime: the cached parse is served — an
+  // unchanged mtime means the file was not opened at all.
+  fs.writeFileSync(file, JSON.stringify(entry({ cwd: "/elsewhere" })));
+  fs.utimesSync(file, T, T);
+  [s] = await readRegistry(dir, ALIVE, cache);
+  assert.strictEqual(s.cwd, REPO, "unchanged mtime serves the cached parse");
+  // Move the mtime: the rewrite is picked up.
+  fs.utimesSync(file, T, new Date(T.getTime() + 5_000));
+  [s] = await readRegistry(dir, ALIVE, cache);
+  assert.strictEqual(s.cwd, "/elsewhere");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readRegistry re-probes liveness even for cached entries", async () => {
+  const dir = seed({ "567.json": entry() });
+  const cache = new Map();
+  let alive = true;
+  const probe = () => alive;
+  assert.strictEqual((await readRegistry(dir, probe, cache)).length, 1);
+  // The process dies without its file changing (a kill leaves it behind): the
+  // cached parse must not carry the session past its own pid.
+  alive = false;
+  assert.strictEqual((await readRegistry(dir, probe, cache)).length, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readRegistry retries a partial write once its mtime moves, and prunes gone files", async () => {
+  const dir = seed({ "567.json": '{"pid": 567, "sess' });
+  const file = path.join(dir, "567.json");
+  const cache = new Map();
+  assert.strictEqual((await readRegistry(dir, ALIVE, cache)).length, 0);
+  assert.strictEqual(cache.size, 1, "the failed parse is remembered by mtime");
+  // The write completes: a completed write moves the mtime, which retries it.
+  fs.writeFileSync(file, JSON.stringify(entry()));
+  fs.utimesSync(file, new Date(), new Date(Date.now() + 5_000));
+  assert.strictEqual((await readRegistry(dir, ALIVE, cache)).length, 1);
+  // The session exits and Claude removes its file: the slot goes with it.
+  fs.rmSync(file);
+  assert.strictEqual((await readRegistry(dir, ALIVE, cache)).length, 0);
+  assert.strictEqual(cache.size, 0, "gone files take their cache slots with them");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
