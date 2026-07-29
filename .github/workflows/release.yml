@@ -1,22 +1,27 @@
 name: Release
 
-# Two ways to publish; both compile, package the .vsix, create a GitHub release, and
-# publish to the VS Code Marketplace when VSCE_PAT is set. The version is the single
-# source of truth and is injected into package.json at build time (the committed
-# "version" is just a placeholder and is never edited by hand).
+# Push a version tag to publish; the run compiles, packages the .vsix, creates a
+# GitHub release, and publishes to the VS Code Marketplace when VSCE_PAT is set. The
+# version is the single source of truth and is injected into package.json at build
+# time (the committed "version" is just a placeholder and is never edited by hand).
 #
-#   1. Push a plain version tag (regular release):
-#        git tag v0.1.0 && git push origin v0.1.0     -> publishes 0.1.0 (regular)
+# The release channel is encoded in the version's MINOR number, the convention the
+# VS Code publishing docs recommend (the Marketplace rejects semver suffixes like
+# -pre.1, so the parity of the minor is the only standard way to keep the two
+# channels' version lines apart):
 #
-#   2. Run this workflow manually (Actions tab -> Release -> Run workflow), enter a
-#      version and tick "prerelease" to choose the channel at run time. Plain version
-#      numbers only - no "-pre" suffix. The run tags the commit and publishes:
-#        version 0.1.1, prerelease checked   -> publishes 0.1.1 (pre-release channel)
-#        version 0.1.1, prerelease unchecked -> publishes 0.1.1 (regular channel)
+#   odd minor   -> pre-release channel:  git tag v3.9.0 && git push origin v3.9.0
+#   even minor  -> regular channel:      git tag v4.0.0 && git push origin v4.0.0
+#
+# So pre-release builds of an upcoming vX.EVEN.0 stack up on the odd line below it
+# (3.9.0, 3.9.1, ... previewing 4.0.0), never consuming a stable version. A
+# pre-release tag may point at a PR branch head - previewing unmerged work is the
+# point of the channel - while regular releases are only ever tagged on main. The
+# convention starts at 3.9/4.0; older tags predate it. The manual workflow_dispatch
+# run publishes the same way from a typed version instead of a pushed tag.
 #
 # Publishing any pre-release build is what makes the "Switch to Pre-Release Version"
-# button appear on the listing; users opt in per-install. Versions are one continuous
-# line that always increments - the channel is an independent per-run choice.
+# button appear on the listing; users opt in per-install.
 #
 # Both triggers already require push/write access, so a random fork or contributor
 # cannot start a release. Two further gates narrow that to the owner:
@@ -35,13 +40,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish, e.g. 1.2.3 (plain number, no v, no -suffix)'
+        description: 'Version to publish, e.g. 1.2.3 (plain number, no v, no -suffix; an odd minor publishes to the pre-release channel, an even minor to the regular one)'
         required: true
         type: string
-      prerelease:
-        description: 'Publish to the pre-release channel'
-        type: boolean
-        default: true
 
 permissions:
   contents: write
@@ -82,16 +83,25 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             version="${{ inputs.version }}"
             version="${version#v}"          # tolerate a leading v in the input
-            if [ "${{ inputs.prerelease }}" = "true" ]; then
-              echo "Manual run -> pre-release channel (publishing $version)"
-              echo "pre_release_flag=--pre-release" >> "$GITHUB_OUTPUT"
-            else
-              echo "Manual run -> regular channel (publishing $version)"
-              echo "pre_release_flag=" >> "$GITHUB_OUTPUT"
-            fi
+            source="Manual run"
           else
-            version="${GITHUB_REF_NAME#v}"   # tag push is always a regular release
-            echo "Tag push $GITHUB_REF_NAME -> regular channel (publishing $version)"
+            version="${GITHUB_REF_NAME#v}"
+            source="Tag push $GITHUB_REF_NAME"
+          fi
+          # Plain X.Y.Z only. The Marketplace rejects semver suffixes (-pre.1,
+          # -rc.2), so a suffixed tag can never publish; fail it here with the
+          # reason instead of deep inside vsce.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$version' is not a plain X.Y.Z version. The Marketplace does not accept semver suffixes; use an odd minor (e.g. 3.9.1) for a pre-release."
+            exit 1
+          fi
+          # The channel is the minor's parity: odd = pre-release, even = regular.
+          minor="$(printf '%s' "$version" | cut -d. -f2)"
+          if [ "$((minor % 2))" -eq 1 ]; then
+            echo "$source -> pre-release channel (publishing $version)"
+            echo "pre_release_flag=--pre-release" >> "$GITHUB_OUTPUT"
+          else
+            echo "$source -> regular channel (publishing $version)"
             echo "pre_release_flag=" >> "$GITHUB_OUTPUT"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
