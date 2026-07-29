@@ -15,7 +15,14 @@ more expensive than on macOS.
   go entirely inside one `busy` status, so the watcher never fires for them; see
   [subagents](subagents.md).
 - Window focus.
-- Source-control scope changes.
+
+Source-control repo open/close events are deliberately **not** full-refresh
+triggers: they can only move the scope pill, so they patch `scmActive` on the
+cached payload and repost — no git spawns. That patch path is also what
+confirms the webview's optimistic pill after a scope click: the Git extension
+regularly registers the swapped repo seconds later on Windows with many
+worktrees, and routing that through the debounced full gather left the pill
+trailing the Source Control view by the length of a full refresh.
 
 Deliberately **not** a workspace-wide `**/*` watcher:
 
