@@ -181,11 +181,23 @@ export async function fetchRemotes(
   }
 }
 
+/** A status slower than this (per worktree, after process spawn) is git doing
+ *  real work — on Windows almost always the untracked-file traversal. Enabling
+ *  git's own caches fixes that at the source, but they live in the user's repo
+ *  config, which this extension does not edit without being asked; a one-time
+ *  hint in the output channel points the user at them instead. */
+const SLOW_STATUS_MS = 2_000;
+let hintedSlowStatus = false;
+
 /**
  * Summarize the working-tree state of a worktree using
  * `git status --porcelain=v2 --branch`: a count of changed entries plus the
  * ahead/behind distance from the upstream branch. Note ahead/behind is read
  * from local refs; call `fetchRemotes` first for an up-to-date behind count.
+ *
+ * `--no-renames` skips rename detection, which is similarity matching the
+ * panel's counts never use — a renamed file counts as its add+delete pair,
+ * which is close enough for a dirty count and saves the CPU on large diffs.
  */
 export async function getStatus(cwd: string): Promise<GitStatus> {
   let dirty = 0;
@@ -194,10 +206,22 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
   let behind = 0;
   let branch: string | undefined;
   try {
+    const startedAt = Date.now();
     const { stdout } = await git(
-      ["status", "--porcelain=v2", "--branch"],
+      ["status", "--porcelain=v2", "--branch", "--no-renames"],
       { cwd }
     );
+    const took = Date.now() - startedAt;
+    if (took >= SLOW_STATUS_MS && !hintedSlowStatus) {
+      hintedSlowStatus = true;
+      log(
+        `getStatus: ${took}ms in ${cwd}. If the panel feels slow, git's own ` +
+          `caches usually fix it: run "git config core.untrackedCache true" ` +
+          `and "git config core.fsmonitor true" in the repository (see ` +
+          `https://git-scm.com/docs/git-update-index#_untracked_cache and ` +
+          `git-fsmonitor--daemon).`
+      );
+    }
     for (const raw of stdout.split("\n")) {
       const line = raw.trimEnd();
       if (line === "") continue;

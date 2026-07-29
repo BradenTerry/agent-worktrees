@@ -4,6 +4,30 @@ All notable changes to the Agent Worktrees extension are documented here.
 
 ## 4.0.0
 
+- **The agent poll no longer re-reads what it already knows** - while agents
+  are on screen the panel re-checks their files every second, and it used to
+  re-open and re-parse all of them on every tick: every session's registry
+  file, and every subagent's meta and transcript - including subagents that
+  finished long ago, whose files persist for the session's life. Now finished
+  subagents are skipped before any of their files are opened, the meta (written
+  once at spawn) is parsed once, and registry files and subagent transcripts
+  are re-read only when their mtime has moved. A steady-state tick costs a
+  couple of readdirs plus a stat per live row - the difference that matters on
+  Windows, where every file open pays for filter drivers.
+- **Cheaper `git status`, and a pointer when it is still slow** - the
+  per-worktree status call now passes `--no-renames` (rename detection is
+  similarity matching the panel's counts never use), and the first time a
+  status takes over two seconds the output channel logs a one-time hint at
+  git's own fix: `core.untrackedCache` and `core.fsmonitor`, which make status
+  near-instant on big repositories. The extension never changes your git
+  configuration itself.
+- **Stopping an agent on Windows is instant** - the stop button used to find
+  the agent's process by sweeping every process on the machine through a
+  PowerShell CIM query, which paid PowerShell's multi-second cold start on each
+  stop. Claude's session registry already names the exact pid of each session's
+  process (including the `claude -w` child whose command line no longer carries
+  the session id), so the panel now tree-kills that pid directly with
+  `taskkill /T` - no PowerShell, no process-table scan.
 - **The hooks are gone** - agent status came from an emitter script the
   extension asked to install on ten Claude Code hooks, and everything about that
   was a cost you paid: it edited your global `settings.json`, which is why the

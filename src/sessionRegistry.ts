@@ -115,6 +115,17 @@ interface RawEntry {
   kind?: unknown;
 }
 
+/** A registry file's parsed contents, valid while its mtime is unchanged.
+ *  `null` records a file that parsed to nothing usable (garbage, a partial
+ *  write, a non-interactive kind) so it is not re-parsed every poll; a
+ *  completed write moves the mtime and retries it. Liveness is deliberately
+ *  NOT part of the cached value: a process can die without its file changing,
+ *  so the pid is re-probed on every read. */
+export type RegistryCache = Map<
+  string,
+  { mtimeMs: number; entry: Omit<RegistrySession, "lastActivity"> | null }
+>;
+
 /**
  * Every live session in the registry.
  *
@@ -122,50 +133,89 @@ interface RawEntry {
  * behind, so each is confirmed against its own pid. This pid is the Claude
  * process itself, so its absence is proof on every platform - which is what
  * retires a row whose terminal was closed without /exit.
+ *
+ * With a `cache` (owned by the caller, one per registry dir), a file is opened
+ * and parsed only when its mtime has moved since the last read. Claude rewrites
+ * a session's file on status transitions only, so between transitions a poll
+ * costs one stat per session instead of an open+read — the difference that
+ * matters on Windows, where every file open pays for filter drivers.
  */
 export async function readRegistry(
   dir: string,
-  isAlive: (pid: number) => boolean = systemProbes.isAlive
+  isAlive: (pid: number) => boolean = systemProbes.isAlive,
+  cache?: RegistryCache
 ): Promise<RegistrySession[]> {
   const files = await fs.promises.readdir(dir).catch(() => [] as string[]);
   const out: RegistrySession[] = [];
+  const seen = new Set<string>();
   for (const fn of files) {
     if (!fn.endsWith(".json")) continue;
     const full = path.join(dir, fn);
+    seen.add(full);
     try {
-      const [raw, stat] = await Promise.all([
-        fs.promises.readFile(full, "utf8"),
-        fs.promises.stat(full),
-      ]);
-      const m = JSON.parse(raw) as RawEntry;
-      const sessionId = typeof m?.sessionId === "string" ? m.sessionId : "";
-      const cwd = typeof m?.cwd === "string" ? m.cwd : "";
-      // The file is named for the pid, so a missing field is recoverable.
-      const pid =
-        typeof m?.pid === "number" ? m.pid : Number.parseInt(path.basename(fn, ".json"), 10);
-      if (!sessionId || !cwd || !Number.isInteger(pid)) continue;
-      // Headless (`-p`) runs and other non-interactive kinds are not agents
-      // anyone is watching a card for. An older file with no `kind` predates the
-      // field and is kept.
-      if (typeof m.kind === "string" && m.kind !== "interactive") continue;
-      if (!isAlive(pid)) continue;
-      out.push({
-        sessionId,
-        pid,
-        cwd,
-        ...(mapStatus(m.status) ? { status: mapStatus(m.status) } : {}),
-        ...(typeof m.waitingFor === "string" && m.waitingFor
-          ? { waitingFor: m.waitingFor }
-          : {}),
-        ...(typeof m.name === "string" && m.name ? { name: m.name } : {}),
-        startedAt: typeof m.startedAt === "number" ? m.startedAt : stat.mtimeMs,
-        lastActivity: stat.mtimeMs,
-      });
+      const stat = await fs.promises.stat(full);
+      const hit = cache?.get(full);
+      let entry: Omit<RegistrySession, "lastActivity"> | null;
+      if (hit && hit.mtimeMs === stat.mtimeMs) {
+        entry = hit.entry;
+      } else {
+        entry = parseRegistryFile(
+          await fs.promises.readFile(full, "utf8"),
+          fn,
+          stat.mtimeMs
+        );
+        cache?.set(full, { mtimeMs: stat.mtimeMs, entry });
+      }
+      if (!entry) continue;
+      if (!isAlive(entry.pid)) continue;
+      out.push({ ...entry, lastActivity: stat.mtimeMs });
     } catch {
-      /* partial write or garbage — ignore this poll */
+      /* partial write or gone mid-read — ignore this poll */
+    }
+  }
+  // Files that are gone took their sessions with them; drop their cache slots.
+  if (cache) {
+    for (const key of [...cache.keys()]) {
+      if (!seen.has(key)) cache.delete(key);
     }
   }
   return out;
+}
+
+/** Parse one registry file into a session (minus the mtime-derived
+ *  lastActivity), or null when it holds nothing the panel shows. */
+function parseRegistryFile(
+  raw: string,
+  fn: string,
+  mtimeMs: number
+): Omit<RegistrySession, "lastActivity"> | null {
+  let m: RawEntry;
+  try {
+    m = JSON.parse(raw) as RawEntry;
+  } catch {
+    return null; // garbage or a partial write; a finished write moves the mtime
+  }
+  const sessionId = typeof m?.sessionId === "string" ? m.sessionId : "";
+  const cwd = typeof m?.cwd === "string" ? m.cwd : "";
+  // The file is named for the pid, so a missing field is recoverable.
+  const pid =
+    typeof m?.pid === "number" ? m.pid : Number.parseInt(path.basename(fn, ".json"), 10);
+  if (!sessionId || !cwd || !Number.isInteger(pid)) return null;
+  // Headless (`-p`) runs and other non-interactive kinds are not agents
+  // anyone is watching a card for. An older file with no `kind` predates the
+  // field and is kept.
+  if (typeof m.kind === "string" && m.kind !== "interactive") return null;
+  return {
+    sessionId,
+    pid,
+    cwd,
+    ...(mapStatus(m.status) ? { status: mapStatus(m.status) } : {}),
+    ...(typeof m.waitingFor === "string" && m.waitingFor
+      ? { waitingFor: m.waitingFor }
+      : {}),
+    ...(typeof m.name === "string" && m.name ? { name: m.name } : {}),
+    startedAt: typeof m.startedAt === "number" ? m.startedAt : mtimeMs,
+  };
 }
 
 /** The worktree card a session belongs to: the longest known path that contains

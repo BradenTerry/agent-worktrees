@@ -53,6 +53,44 @@ const TAIL_BYTES = 32768;
 const META_SUFFIX = ".meta.json";
 const AGENT_PREFIX = "agent-";
 
+/** The meta file's usable fields, parsed once. */
+interface ParsedMeta {
+  type?: string;
+  task?: string;
+  toolUseId?: string;
+}
+
+/**
+ * What readSubagents has already learned from one session's subagents dir, so
+ * the 1s agent poll costs a readdir plus a stat per row instead of re-opening
+ * every file — the difference that matters on Windows, where each file open
+ * pays for filter drivers (Defender scans `~/.claude`). Owned by the caller
+ * (one per session, see TranscriptReader), which also decides its lifetime.
+ */
+export interface SubagentDirCache {
+  /** Parsed meta per subagent id. The meta file is written once when the
+   *  subagent spawns and never changes, so a successful parse is kept for the
+   *  session's life — it is also what makes the finished-by-toolUseId skip
+   *  free once the subagent is done. */
+  metas: Map<string, ParsedMeta>;
+  /** What was last derived from each transcript, valid while its mtime is
+   *  unchanged. A working subagent appends constantly (every entry moves the
+   *  mtime), so an unchanged file genuinely has nothing new to say. */
+  transcripts: Map<
+    string,
+    {
+      mtimeMs: number;
+      head: { cwd?: string; startedAt?: number };
+      outstanding: boolean;
+    }
+  >;
+}
+
+/** A fresh, empty cache for one subagents dir. */
+export function newSubagentDirCache(): SubagentDirCache {
+  return { metas: new Map(), transcripts: new Map() };
+}
+
 /** Where a session's subagents live. */
 export function subagentsDir(projectsDir: string, project: string, sessionId: string): string {
   return path.join(projectsDir, project, sessionId, "subagents");
@@ -153,42 +191,84 @@ function hasOutstandingCall(file: string): boolean {
  * Deciding which are still running is the caller's job (see liveSubagents): it
  * needs the parent's tool results, which come from the same transcript tail the
  * work summary is read from.
+ *
+ * `finished` (the same set liveSubagents filters on) skips a done subagent's
+ * files before any of them are opened: its meta and transcript persist for the
+ * session's life, and without the skip a session that has run dozens of
+ * subagents would re-read all of them on every poll tick to render zero rows.
+ * `cache` does the same for the still-running ones — the immutable meta is
+ * parsed once, and the transcript re-read only when its mtime has moved.
  */
-export async function readSubagents(dir: string): Promise<FoundSubagent[]> {
+export async function readSubagents(
+  dir: string,
+  opts: {
+    cache?: SubagentDirCache;
+    finished?: ReadonlySet<string>;
+  } = {}
+): Promise<FoundSubagent[]> {
+  const { cache, finished } = opts;
   const files = await fs.promises.readdir(dir).catch(() => [] as string[]);
   const out: FoundSubagent[] = [];
   for (const fn of files) {
     if (!fn.startsWith(AGENT_PREFIX) || !fn.endsWith(META_SUFFIX)) continue;
     const id = fn.slice(AGENT_PREFIX.length, -META_SUFFIX.length);
     if (!id) continue;
+    if (finished?.has(id)) {
+      // Done for good; its transcript-derived state will never be asked for
+      // again. The meta stays cached: it is what keeps this skip free when the
+      // finish signal was the toolUseId rather than the id.
+      cache?.transcripts.delete(id);
+      continue;
+    }
     try {
-      const meta = JSON.parse(
-        await fs.promises.readFile(path.join(dir, fn), "utf8")
-      ) as RawMeta;
+      let parsed = cache?.metas.get(id);
+      if (!parsed) {
+        const meta = JSON.parse(
+          await fs.promises.readFile(path.join(dir, fn), "utf8")
+        ) as RawMeta;
+        parsed = {
+          ...(typeof meta.agentType === "string" && meta.agentType
+            ? { type: meta.agentType }
+            : {}),
+          ...(typeof meta.description === "string" && meta.description
+            ? { task: meta.description }
+            : {}),
+          ...(typeof meta.toolUseId === "string" && meta.toolUseId
+            ? { toolUseId: meta.toolUseId }
+            : {}),
+        };
+        cache?.metas.set(id, parsed);
+      }
+      if (parsed.toolUseId && finished?.has(parsed.toolUseId)) {
+        cache?.transcripts.delete(id);
+        continue;
+      }
       const transcript = path.join(dir, `${AGENT_PREFIX}${id}.jsonl`);
-      const head = readHead(transcript);
       // The transcript is written to as the subagent works, so its mtime is the
       // last sign of life. Fall back to the meta file for a subagent that has
       // not managed a first record yet.
       const stat = await fs.promises
         .stat(transcript)
         .catch(() => fs.promises.stat(path.join(dir, fn)));
-      const outstanding = hasOutstandingCall(transcript);
+      const hit = cache?.transcripts.get(id);
+      let head: { cwd?: string; startedAt?: number };
+      let outstanding: boolean;
+      if (hit && hit.mtimeMs === stat.mtimeMs) {
+        ({ head, outstanding } = hit);
+      } else {
+        head = readHead(transcript);
+        outstanding = hasOutstandingCall(transcript);
+        cache?.transcripts.set(id, { mtimeMs: stat.mtimeMs, head, outstanding });
+      }
       out.push({
         id,
         outstanding,
         // Nothing out and not finished: it has stopped its turn but is still in
         // flight - parked on a background command that will wake it.
         ...(outstanding ? {} : { paused: true }),
-        ...(typeof meta.agentType === "string" && meta.agentType
-          ? { type: meta.agentType }
-          : {}),
-        ...(typeof meta.description === "string" && meta.description
-          ? { task: meta.description }
-          : {}),
-        ...(typeof meta.toolUseId === "string" && meta.toolUseId
-          ? { toolUseId: meta.toolUseId }
-          : {}),
+        ...(parsed.type ? { type: parsed.type } : {}),
+        ...(parsed.task ? { task: parsed.task } : {}),
+        ...(parsed.toolUseId ? { toolUseId: parsed.toolUseId } : {}),
         ...(head.cwd ? { worktree: head.cwd } : {}),
         startedAt: head.startedAt ?? stat.mtimeMs,
         lastActivity: stat.mtimeMs,

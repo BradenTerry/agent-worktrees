@@ -4,7 +4,11 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { readSubagents, liveSubagents } = require("../out/subagents.js");
+const {
+  readSubagents,
+  liveSubagents,
+  newSubagentDirCache,
+} = require("../out/subagents.js");
 
 /**
  * Subagent rows, read from the files Claude writes for them.
@@ -211,5 +215,63 @@ test("a subagent that has issued nothing yet is not outstanding", async () => {
   const dir = seed({ a1: { meta: meta(), records: [firstRecord()] } });
   const [s] = await readSubagents(dir);
   assert.strictEqual(s.outstanding, false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// --- the read cache ----------------------------------------------------------
+//
+// The 1s agent poll calls readSubagents on every tick, and a subagent's files
+// persist for the whole session. The cache is what keeps a tick at a readdir
+// plus a stat per running row: finished subagents are skipped before any file
+// is opened, the meta (written once at spawn) is parsed once, and the
+// transcript is re-read only when its mtime has moved.
+
+test("readSubagents skips a finished subagent's files entirely", async () => {
+  const dir = seed({
+    a1: { meta: meta(), records: [firstRecord()] },
+    a2: { meta: meta({ toolUseId: "toolu_a2" }), records: [firstRecord()] },
+  });
+  // Finished by its own id (the backgrounded shape) and by its toolUseId (the
+  // synchronous shape): neither gets a row, and a1's files are never opened.
+  const found = await readSubagents(dir, {
+    cache: newSubagentDirCache(),
+    finished: new Set(["a1", "toolu_a2"]),
+  });
+  assert.deepStrictEqual(found, []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readSubagents parses the immutable meta once and never re-reads it", async () => {
+  const dir = seed({ a1: { meta: meta(), records: [firstRecord()] } });
+  const cache = newSubagentDirCache();
+  await readSubagents(dir, { cache });
+  // Corrupt the meta in place. The row must survive on the cached parse — the
+  // meta is written once at spawn, so an already-parsed id is never re-read.
+  fs.writeFileSync(path.join(dir, "agent-a1.meta.json"), "{ not json");
+  const [s] = await readSubagents(dir, { cache });
+  assert.strictEqual(s.type, "Explore");
+  assert.strictEqual(s.task, "Cache the settings read");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readSubagents re-reads a transcript only when its mtime moves", async () => {
+  const T0 = NOW - 60_000;
+  const dir = seed({
+    a1: { meta: meta(), records: [firstRecord()], mtimeMs: T0 },
+  });
+  const cache = newSubagentDirCache();
+  let [s] = await readSubagents(dir, { cache });
+  assert.strictEqual(s.outstanding, false);
+  // Append an unanswered call but pin the old mtime: the cached state is
+  // served, which is the point — an unchanged mtime means no file open.
+  const file = path.join(dir, "agent-a1.jsonl");
+  fs.appendFileSync(file, JSON.stringify(callRecord("toolu_new")) + "\n");
+  fs.utimesSync(file, new Date(T0), new Date(T0));
+  [s] = await readSubagents(dir, { cache });
+  assert.strictEqual(s.outstanding, false, "unchanged mtime serves the cache");
+  // Let the mtime move: the append is picked up.
+  fs.utimesSync(file, new Date(NOW), new Date(NOW));
+  [s] = await readSubagents(dir, { cache });
+  assert.strictEqual(s.outstanding, true);
   fs.rmSync(dir, { recursive: true, force: true });
 });

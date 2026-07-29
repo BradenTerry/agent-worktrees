@@ -19,7 +19,10 @@ transition:
   "kind": "interactive", "name": "agent-worktrees-9f" }
 ```
 
-`src/sessionRegistry.ts` reads it on every refresh. The directory is also the
+`src/sessionRegistry.ts` reads it on every refresh — through an mtime-keyed
+cache, so a file is opened and parsed only when Claude has rewritten it and an
+unchanged session costs one stat. The pid is re-probed on every read regardless
+(a killed process leaves its file behind, unchanged). The directory is also the
 panel's refresh signal: a file appearing, changing or vanishing is a session
 starting, transitioning or ending, which is exactly when a card needs redrawing.
 
