@@ -1,200 +1,136 @@
-# Agent status from hooks
+# Agent status
 
 How the panel learns what each Claude session is doing, and how it retires
 sessions whose process is gone.
 
-The panel cannot tell on its own whether a Claude session is working, waiting on
-you, or idle. Claude Code's
-[hooks](https://docs.claude.com/en/docs/claude-code/hooks) fire exactly on those
-transitions, so the extension installs one small emitter script wired to a handful
-of events.
+Claude Code keeps a registry of its live sessions and records what each one is
+doing in it. The panel reads that. There is nothing to install, nothing to
+consent to, and no process is spawned per event.
 
-| Hook                                                                              | Status             |
-| --------------------------------------------------------------------------------- | ------------------ |
-| `SessionStart`, `Stop`                                                            | idle               |
-| `UserPromptSubmit`, `PostToolUse`, `SubagentStart`, `SubagentStop`                | active             |
-| `PreToolUse` (Agent/Task/Skill only)                                              | active             |
-| `Notification` (permission / question)                                            | waiting            |
-| `PermissionRequest`                                                               | unchanged          |
-| `SessionEnd`                                                                      | removed from panel |
+## The registry
 
-Three of those do more than set a status:
+One file per session, at `~/.claude/sessions/<pid>.json`
+(`$CLAUDE_CONFIG_DIR/sessions` when that is set), rewritten by Claude on every
+transition:
 
-- `PreToolUse` is installed with a matcher limited to the `Agent`, `Task` and
-  `Skill` tools — the only PreToolUse payloads the emitter reads (which skills a
-  session invoked, and what a subagent was asked to do, which arrives one event
-  before `SubagentStart`). Every other tool call already fires `PostToolUse`,
-  which covers the Active status, liveness timestamps and title rechecks, so
-  matching all tools would only add a second hook process per tool call for
-  payloads the emitter ignores. Note `PreToolUse` runs *before* the permission
-  prompt, so it never was the post-approval "back to work" signal — that is
-  `PostToolUse`.
+```json
+{ "pid": 567, "sessionId": "ad71415e-...", "cwd": "/repo",
+  "status": "busy", "startedAt": 1785193745550, "version": "2.1.220",
+  "kind": "interactive", "name": "agent-worktrees-9f" }
+```
 
-- `SubagentStart` / `SubagentStop` also open and pause the subagent rows under the
-  agent, which the `background_tasks` registry then reconciles (see
-  [Subagents](subagents.md)).
-- `PermissionRequest` is installed purely to name the subagent behind a prompt,
-  and deliberately leaves the status alone. It runs in the permission decision
-  path, ahead of any prompt, and fires for calls an allowlist or auto mode settles
-  silently, so reporting a status from it would clear a genuine waiting state (and
-  the Activity Bar badge) while the user was still answering.
+`src/sessionRegistry.ts` reads it on every refresh. The directory is also the
+panel's refresh signal: a file appearing, changing or vanishing is a session
+starting, transitioning or ending, which is exactly when a card needs redrawing.
 
-## `Notification` is not always "waiting"
+| Claude's `status` | Panel   |
+| ----------------- | ------- |
+| `busy`            | active  |
+| `shell`           | active  |
+| `waiting`         | waiting |
+| `idle`            | idle    |
 
-The emitter reads the payload's `notification_type`:
+- `shell` is a local bash command rather than an LLM turn, but it is work in
+  progress as far as the user is concerned.
+- A status this table does not list maps to **nothing**, and the row reads idle.
+  A status Claude adds later should be added here rather than collapsing into a
+  guess.
+- `status` needs Claude Code **v2.1.119** or newer, and has been observed absent
+  on a session whose `entrypoint` is not a local one. A session without it still
+  gets a row - it is a real agent working in that worktree - it just reads idle
+  until Claude says otherwise.
+- `kind` filters the list: headless (`-p`) runs and other non-interactive kinds
+  are not agents anyone is watching a card for. A file with no `kind` predates
+  the field and is kept.
 
-- **`agent_completed`** keeps the agent **active**. A background subagent
-  finished; the parent is about to pick the result up.
-- **`idle_prompt`** is not a "needs you" signal at all. It fires ~60s after any
-  turn ends with no user input, including when a session simply finished and is
-  sitting idle, which used to flag every done agent as waiting and pin a permanent
-  count on the Activity Bar badge. It now keeps the agent **active** while
-  background subagents are still running, and otherwise preserves the prior state
-  (an unanswered permission prompt stays waiting, a finished turn stays idle).
-- **Everything else** marks **waiting** as before: permission prompts, a subagent
-  needing input, or an older Claude Code that sends no type.
+## Which card a session lands on
 
-The pending count comes from the transcript's latest `turn_duration` record
-(`pendingBackgroundAgentCount`), which Claude Code appends at every turn end,
-*after* the `Stop` hook has already run. Only `Notification`, which fires much
-later, trusts it.
+The registry gives a `cwd`. A session appears on the card whose worktree path
+contains it, longest match first, so a session working in a nested worktree
+lands on that worktree's card rather than the repo root's. A session working
+outside every worktree of this repo has no card to appear on and is skipped.
 
-## Installing the hooks
+## Work summaries come from the transcript
 
-- Installing edits your global `~/.claude/settings.json`, so it is always gated
-  behind **explicit consent** in the panel. Nothing is written until you accept.
-- On accept, the bundled `hooks/agent-worktrees-emit.mjs` is copied into the
-  extension's global storage and wired into settings.
-- The command passes the state directory to the emitter via `--dir`, since that
-  separate process cannot read the extension's context.
+The registry's `name` is derived from the directory (`agent-worktrees-9f`), so it
+is the same for every session in a worktree and useless as a row label. The
+label the panel wants is Claude's generated title, which it writes into the
+session's transcript:
 
-## What the emitter writes
+```json
+{ "type": "ai-title",     "aiTitle": "port the git tests" }
+{ "type": "custom-title", "customTitle": "renamed by hand" }
+```
 
-- One small state file per session, into the extension's **global storage**,
-  written atomically via tmp + rename so the watcher never reads a half-written
-  file.
-- Files land in `<globalStorage>/sessions/`, e.g.
-  `~/Library/Application Support/Code/User/globalStorage/bradenterry.agent-worktrees/`
-  on macOS. The extension watches that directory and groups the sessions by
-  worktree.
-- **Nothing is sent over the network.** Status flows entirely through local files,
-  and nothing of the extension's lives in your `~/.claude` tree apart from the hook
-  entries in `settings.json`. Status reporting needs `node` on `PATH`.
+The same tail read also collects the ids of tool calls whose results have landed,
+which is what retires a finished subagent (see [Subagents](subagents.md)), and
+any skills invoked in it — one pass over the bytes rather than three.
 
-## Keeping the hot path cheap
+`src/transcript.ts` reads the newest of those from the tail of
+`~/.claude/projects/<project>/<sessionId>.jsonl`, whichever kind wrote it. Only
+the tail is read, so the cost does not grow with the transcript; the result is
+cached per session and re-read only when the file's mtime moves, so a settled
+title costs one stat per refresh. The project directory name is Claude's
+encoding of the cwd, so rather than reproduce that encoding the reader looks for
+the session's own `<sessionId>.jsonl`.
 
-Every hook event is a fresh process — Claude Code runs the command anew each
-time (a `node` startup, behind a shell wrapper on Windows) and blocks until it
-exits. That per-event floor cannot be amortized away, so the design minimizes
-both how often the hot-path hooks fire and what each run does. On Windows,
-where process spawns are expensive, this is the difference between hooks being
-free and every tool call paying a visible startup tax.
+A session Claude has not summarized yet has no title, and its row falls back to
+`Claude 1`, `Claude 2` - ordinals counted per card, oldest first.
 
-- A tool call costs **one** hook process (`PostToolUse`), not two:
-  `PreToolUse`'s matcher is limited to the Agent/Task/Skill tools (see above),
-  so an agent grinding through a long tool-heavy turn — a test suite, a build —
-  fires half the hook processes it would with both matchers at `*`.
-- The session's worktree/branch resolution is cached in the state file, keyed by
-  the session's `cwd`, so follow-up events reuse it instead of spawning git.
-  `SessionStart` re-resolves — a single `git rev-parse` spawn answering both
-  queries at once.
-- Events fired *by* a subagent carry its `agent_id`, and when it runs in an
-  isolated worktree its own `cwd`. They always reuse the parent's cached worktree
-  for the *session*; re-resolving would move the parent's row onto the subagent's
-  card. That cwd is resolved separately, cached against itself, and recorded on the
-  subagent instead (see
-  [Subagents follow the worktree they were given](subagents.md#subagents-follow-the-worktree-they-were-given)),
-  so a subagent costs one `git` spawn rather than one per tool call.
-- The transcript tail read that picks up Claude's generated session title runs on
-  the turn-boundary events (`UserPromptSubmit`, `Stop`, `Notification`,
-  `SubagentStop`, `SessionStart`) and is kept off `PreToolUse`/`PostToolUse` once a
-  title is known (the prior title is carried forward). While the session has no
-  title yet, and the first lands mid-turn a few seconds after the first prompt,
-  tool events do read the tail, throttled to once per 5 seconds.
+### Skills
 
-## Session ids survive `/resume`
+A Skill tool call is an ordinary `tool_use` block, so the chip on an agent row is
+recoverable too: `input.skill`, reduced to its bare name so `plugin:foo` and
+`path/to/foo` dedupe to `foo` (the same normalization the emitter did on the
+`PreToolUse` payload).
 
-- When the extension launched the agent it passes `claude --session-id <uuid>` and
-  stamps that same uuid into the terminal env as `AGENT_WORKTREES_SID`.
-- The emitter, a child of the Claude process, inherits it and keys the state file
-  by it rather than by Claude's live `session_id`.
-- That id is stable across `/resume` (Claude's own `session_id` changes, but the
-  launch id in the terminal env and the process argv does not), so the panel row,
-  its terminal handle, and `pkill -f <id>` stay linked after a resume instead of
-  orphaning the row.
-- Sessions not launched by the extension fall back to the live `session_id`.
+Skills are the one thing that cannot come from the tail alone: they accumulate
+over a whole session, so one used an hour ago is far behind the end of the file.
+`scanSkills` walks the transcript once, the first time a window sees that
+session, and every tail read after that tops the list up — anything new is by
+definition at the end.
 
 ## Retiring agents that are no longer running
 
-- `SessionEnd` deletes a session's state file, so a session that exits cleanly takes
-  its row with it.
-- Nothing fires when a session dies *with* its terminal: the window was closed, the
-  terminal killed, the machine restarted. The file survives in the shared state dir
-  with whatever status it last had.
-- The dir is global, so the next window to open renders those sessions as live
-  agents with no process and no terminal behind them, often mid-work, with a spinner
-  and an Activity Bar badge.
+Claude removes a session's file when it exits, so a clean exit takes its row with
+it. A session that dies with its terminal - the window closed, the terminal
+killed, the machine restarted - never gets the chance, and the file survives
+saying whatever it last said. Every entry is therefore confirmed against its
+recorded pid before it becomes a row.
 
-The emitter therefore stamps two liveness markers into every state file, and the
-panel sweeps the dir with them before each refresh:
+That pid is the Claude process itself, so its absence is proof on every platform
+(`process.kill(pid, 0)`; `EPERM` means it exists but belongs to another user, so
+it counts as alive). This replaced a sweep that had to reason about a hook
+process's *parent* pid, could not trust a missing one on Windows, and needed a
+grace period and a process-table scan to make up the difference.
 
-- **`pid`**: Claude Code runs a hook command as a **direct child** of the session
-  process, so the emitter's parent *is* the agent. Checked with `kill(pid, 0)`: no
-  spawn, and exact modulo pid reuse. Re-stamped on every event, so a session
-  resumed into another process records the pid actually running it; never from a
-  subagent-fired event, whose parent may be shorter-lived than the session.
-- **`launched`**: set when the id came from `AGENT_WORKTREES_SID`, i.e. the
-  extension started this agent and passed the id on Claude's own argv. Such a
-  session can be found by scanning running processes' command lines for
-  `--session-id <id>` (`ps -Ao args=`, or PowerShell's CIM query on Windows, the
-  same mechanism the Windows stop path uses).
+## What this does not cover
 
-The sweep is throttled to once every 30s, and re-arms on a self-armed timer when a
-file is younger than the grace period, so a window reopened seconds after the
-previous one closed still clears.
+- **A session that was resumed.** The row is keyed by Claude's live `sessionId`.
+  The extension starts agents with `claude --session-id <uuid>` and stamps that
+  uuid into the terminal's environment, which is how a row finds its terminal.
+  `/resume` gives the session a new id while the terminal keeps the old one, so
+  after a resume the row and its terminal are no longer linked: the row still
+  shows the agent and its status, but revealing and stopping it from the panel
+  will not find the terminal. The hook emitter used to paper over this by keying
+  its state file to the launch id from its environment.
 
-```mermaid
-flowchart TD
-  A[session state file] --> B{"last event<br/>< 60s ago?"}
-  B -->|yes| K["keep<br/>(arm a recheck)"]
-  B -->|no| C{"pid alive?"}
-  C -->|yes| K2[keep: its process is there]
-  C -->|no / no pid| D{"launched by<br/>the extension?"}
-  D -->|yes| E{"--session-id id<br/>in a live command line?"}
-  E -->|yes| K3["keep: resumed into<br/>another process"]
-  E -->|"no (scan ran)"| X[delete the state file]
-  E -->|"scan failed"| K4[keep: no evidence]
-  D -->|no| F{"pid recorded,<br/>and trusted here?"}
-  F -->|yes| X
-  F -->|no| K5["keep: 24h backstop<br/>decides"]
-```
+## Removing the old hooks
 
-### Positive evidence of death, never absence of evidence of life
+Earlier versions installed an emitter script on ten Claude Code hooks, which
+wrote a state file per session. `removeManagedHooks` takes all of it back out on
+activation, and is idempotent:
 
-A wrong prune hides a live agent, so the sweep only ever acts on proof. Three
-consequences:
+- Hook entries in `~/.claude/settings.json` whose command names
+  `agent-worktrees-emit` - the emitter or the launcher that ran it. A user's own
+  hooks survive even when they share an event, or a matcher entry, with ours; an
+  event we emptied is dropped, and `hooks` itself only if we are what emptied it
+  (`src/hookCleanup.ts`, which is split out so this can be tested without an
+  extension host).
+- The emitter, its launcher, and the state files, all under the extension's
+  global storage, plus the pre-global-storage `~/.claude/agent-worktrees`.
 
-- A file written by an emitter too old to record either marker is left to the 24h
-  backstop.
-- **A dead pid is not proof on Windows**, where a hook run through a short-lived
-  shell wrapper would make the recorded parent exit immediately and look exactly
-  like a dead agent. (A *live* pid is trusted everywhere: it can only make the
-  sweep more conservative.) Windows keeps the argv check, which covers every
-  session the extension launched.
-- A wrong prune self-heals anyway: the state file is rewritten by the session's
-  very next hook event, so a live agent that was pruned reappears the moment it
-  does anything.
-
-## Failures stay silent by design
-
-Claude Code surfaces any nonzero hook exit, or any stderr output at all, as a
-`hook error ... failed with non-blocking status code` warning in the session. Wired
-to `PreToolUse` that would mean a warning per tool call.
-
-- The emitter swallows every failure and always exits 0 silently. A state write
-  that cannot land (deleted global storage, a synced `settings.json` whose `--dir`
-  path does not exist on this machine, a read-only disk) degrades to a missed
-  status update, never a visible error.
-- The hook command runs `node --no-warnings`, so node's own startup warnings
-  (deprecation/experimental, varying by node version) cannot hit stderr before the
-  emitter gets control.
+It is best effort and never blocks activation: an emitter left on disk with no
+hook entry pointing at it is inert. In a test host it does nothing at all, since
+`~/.claude/settings.json` is the real user's file rather than something the test
+runner's throwaway `--user-data-dir` sandboxes.
