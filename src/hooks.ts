@@ -75,11 +75,20 @@ export const HOOKS: HookSpec[] = [
       "Marks an agent Active the moment you send it a prompt, without waiting for its first tool call.",
   },
   {
+    // Only the three tools whose PreToolUse payload the emitter actually
+    // reads: Skill (which skills the agent invoked) and Agent/Task (the
+    // subagent description, which arrives one event before SubagentStart).
+    // Everything else PreToolUse used to provide (the Active flip, liveness
+    // ts bumps, the pre-title transcript recheck) PostToolUse also provides,
+    // and PreToolUse runs BEFORE the permission prompt, so it was never the
+    // post-approval signal either. Matching all tools cost one extra hook
+    // process per tool call per session (node startup, plus a shell wrapper
+    // on Windows) for payloads the emitter ignored.
     event: "PreToolUse",
-    matcher: "*",
+    matcher: "Agent|Task|Skill",
     label: "PreToolUse",
     description:
-      "Keeps an agent marked Active while it is running tools and doing work.",
+      "Records which skills an agent uses and what it asked a subagent to do, the moment the call starts. Fires only for the Agent, Task and Skill tools.",
   },
   {
     event: "PostToolUse",
@@ -184,20 +193,54 @@ async function writeSettings(settings: Settings): Promise<void> {
   await fs.promises.rename(tmp, SETTINGS_PATH);
 }
 
-/** Our hook in an event is the one whose command runs our emitter script. */
+/** Our hook in an event is the one whose command runs our emitter script.
+ *  Returns the containing entry too, so a repair can fix its matcher. */
 function findHook(
   settings: Settings,
   spec: HookSpec
-): { command?: string } | undefined {
+): { entry: HookEntry; hook: { command?: string } } | undefined {
   const entries = settings.hooks?.[spec.event];
   if (!Array.isArray(entries)) return undefined;
   for (const entry of entries) {
     for (const h of entry.hooks ?? []) {
       if (typeof h.command === "string" && h.command.includes(EMITTER))
-        return h;
+        return { entry, hook: h };
     }
   }
   return undefined;
+}
+
+/**
+ * Bring every managed hook in `settings` up to date: add the missing ones and
+ * repair a stale command path or matcher on those already present (an update
+ * can move the storage path or narrow a matcher). The matcher is only touched
+ * when the entry holds nothing but our hook — an entry the user merged other
+ * commands into is theirs, and rewriting its matcher would rescope those too.
+ * Returns whether anything changed (i.e. settings.json needs writing).
+ */
+function reconcileHooks(settings: Settings, command: string): boolean {
+  let changed = false;
+  for (const spec of HOOKS) {
+    const found = findHook(settings, spec);
+    if (!found) {
+      addHook(settings, spec, command);
+      changed = true;
+      continue;
+    }
+    if (found.hook.command !== command) {
+      found.hook.command = command; // repair a stale path after an update
+      changed = true;
+    }
+    if (
+      (found.entry.hooks?.length ?? 0) === 1 &&
+      found.entry.matcher !== spec.matcher
+    ) {
+      if (spec.matcher === undefined) delete found.entry.matcher;
+      else found.entry.matcher = spec.matcher;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 function addHook(settings: Settings, spec: HookSpec, command: string): void {
@@ -261,19 +304,9 @@ export async function installHooks(
   if (!managesUserSettings(context.extensionMode)) return;
   await ensureEmitter(context);
   const settings = await readSettings();
-  const command = hookCommand(context);
-  let changed = false;
-  for (const spec of HOOKS) {
-    const existing = findHook(settings, spec);
-    if (!existing) {
-      addHook(settings, spec, command);
-      changed = true;
-    } else if (existing.command !== command) {
-      existing.command = command; // repair a stale path after an update
-      changed = true;
-    }
+  if (reconcileHooks(settings, hookCommand(context))) {
+    await writeSettings(settings);
   }
-  if (changed) await writeSettings(settings);
   await fs.promises.mkdir(sessionsDir(context), { recursive: true });
   await cleanupLegacy();
 }
@@ -296,19 +329,9 @@ export function syncHooks(context: vscode.ExtensionContext): Promise<void> {
       const anyInstalled = HOOKS.some((spec) => !!findHook(settings, spec));
       if (!anyInstalled) return;
       await ensureEmitter(context);
-      const command = hookCommand(context);
-      let changed = false;
-      for (const spec of HOOKS) {
-        const existing = findHook(settings, spec);
-        if (!existing) {
-          addHook(settings, spec, command);
-          changed = true;
-        } else if (existing.command !== command) {
-          existing.command = command;
-          changed = true;
-        }
+      if (reconcileHooks(settings, hookCommand(context))) {
+        await writeSettings(settings);
       }
-      if (changed) await writeSettings(settings);
       await cleanupLegacy();
     } catch {
       /* best effort: a repair failure shouldn't block activation */

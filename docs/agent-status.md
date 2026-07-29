@@ -12,12 +12,23 @@ of events.
 | Hook                                                                              | Status             |
 | --------------------------------------------------------------------------------- | ------------------ |
 | `SessionStart`, `Stop`                                                            | idle               |
-| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`  | active             |
+| `UserPromptSubmit`, `PostToolUse`, `SubagentStart`, `SubagentStop`                | active             |
+| `PreToolUse` (Agent/Task/Skill only)                                              | active             |
 | `Notification` (permission / question)                                            | waiting            |
 | `PermissionRequest`                                                               | unchanged          |
 | `SessionEnd`                                                                      | removed from panel |
 
-Two of those do more than set a status:
+Three of those do more than set a status:
+
+- `PreToolUse` is installed with a matcher limited to the `Agent`, `Task` and
+  `Skill` tools — the only PreToolUse payloads the emitter reads (which skills a
+  session invoked, and what a subagent was asked to do, which arrives one event
+  before `SubagentStart`). Every other tool call already fires `PostToolUse`,
+  which covers the Active status, liveness timestamps and title rechecks, so
+  matching all tools would only add a second hook process per tool call for
+  payloads the emitter ignores. Note `PreToolUse` runs *before* the permission
+  prompt, so it never was the post-approval "back to work" signal — that is
+  `PostToolUse`.
 
 - `SubagentStart` / `SubagentStop` also open and pause the subagent rows under the
   agent, which the `background_tasks` registry then reconciles (see
@@ -72,14 +83,21 @@ later, trusts it.
 
 ## Keeping the hot path cheap
 
-`PreToolUse` fires on every tool call and Claude Code blocks the tool until the
-hook exits, so the emitter caches aggressively. On Windows, where process spawns
-are expensive, that cache is the difference between hooks being free and every
-tool call paying a visible startup tax.
+Every hook event is a fresh process — Claude Code runs the command anew each
+time (a `node` startup, behind a shell wrapper on Windows) and blocks until it
+exits. That per-event floor cannot be amortized away, so the design minimizes
+both how often the hot-path hooks fire and what each run does. On Windows,
+where process spawns are expensive, this is the difference between hooks being
+free and every tool call paying a visible startup tax.
 
+- A tool call costs **one** hook process (`PostToolUse`), not two:
+  `PreToolUse`'s matcher is limited to the Agent/Task/Skill tools (see above),
+  so an agent grinding through a long tool-heavy turn — a test suite, a build —
+  fires half the hook processes it would with both matchers at `*`.
 - The session's worktree/branch resolution is cached in the state file, keyed by
-  the session's `cwd`, so follow-up events reuse it instead of spawning
-  `git rev-parse` twice per event. `SessionStart` re-resolves from git.
+  the session's `cwd`, so follow-up events reuse it instead of spawning git.
+  `SessionStart` re-resolves — a single `git rev-parse` spawn answering both
+  queries at once.
 - Events fired *by* a subagent carry its `agent_id`, and when it runs in an
   isolated worktree its own `cwd`. They always reuse the parent's cached worktree
   for the *session*; re-resolving would move the parent's row onto the subagent's

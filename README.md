@@ -86,7 +86,8 @@ idle, so the extension installs one small emitter script
 | Hook                                                                              | Status             |
 | --------------------------------------------------------------------------------- | ------------------ |
 | `SessionStart`, `Stop`                                                            | idle               |
-| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`  | active             |
+| `UserPromptSubmit`, `PostToolUse`, `SubagentStart`, `SubagentStop`                | active             |
+| `PreToolUse` (Agent/Task/Skill only: records skills + subagent tasks)             | active             |
 | `Notification` (permission / question)                                            | waiting            |
 | `PermissionRequest`                                                               | unchanged          |
 | `SessionEnd`                                                                      | removed from panel |
@@ -99,8 +100,9 @@ from the hook entries in `settings.json`. Installing the hooks edits your global
 panel. Sessions whose Claude process is gone are retired by a liveness sweep that
 requires positive evidence of death, never merely the absence of evidence of life.
 
-Details, including the `Notification` type handling, the worktree/branch caching
-that keeps `PreToolUse` cheap, and the sweep's decision tree:
+Details, including the `Notification` type handling, the caching and hook
+matchers that keep the per-tool-call cost to one hook process, and the sweep's
+decision tree:
 [docs/agent-status.md](docs/agent-status.md).
 
 ## Architecture

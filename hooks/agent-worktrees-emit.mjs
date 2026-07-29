@@ -67,6 +67,31 @@ function git(cwd, args) {
   }
 }
 
+/**
+ * Worktree root + branch in ONE git spawn: `rev-parse` takes several queries
+ * and prints one line per result. Claude Code blocks the tool (or session
+ * start) until this process exits, so a cache miss costs one process, not two
+ * — which matters most on Windows, where each spawn is expensive.
+ *
+ * On an unborn branch (fresh `git init`, no commits) the branch query fails
+ * AFTER the toplevel was already printed, failing the whole call, so the
+ * partial stdout on the error is salvaged rather than thrown away.
+ */
+function resolveGit(dir) {
+  let out = "";
+  try {
+    out = execFileSync(
+      "git",
+      ["rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"],
+      { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    );
+  } catch (e) {
+    out = e && typeof e.stdout === "string" ? e.stdout : "";
+  }
+  const [top, branch] = out.split("\n").map((s) => s.trim());
+  return { top: top || dir, branch: branch || "HEAD" };
+}
+
 // Hook event -> agent status. Anything not listed falls back to "active".
 // Notification is refined further in main(): not every notification means the
 // agent needs the user (see notificationState).
@@ -276,12 +301,8 @@ function main() {
   // it its own cwd — so they must never re-key the row's worktree.
   const subagentId = safeId(payload.agent_id);
 
-  /** Resolve the worktree root + branch from git. Two process spawns, so hot
-   *  paths avoid this via the prior-state cache below. */
-  const resolveGit = (dir) => ({
-    top: git(dir, ["rev-parse", "--show-toplevel"]) || dir,
-    branch: git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]) || "HEAD",
-  });
+  // Worktree root + branch, resolved lazily (one git spawn; hot paths avoid
+  // even that via the prior-state cache below).
   let resolved = null;
 
   // The file is keyed by a STABLE launch id so the panel row stays tied to its
@@ -324,9 +345,9 @@ function main() {
 
   // Worktree + branch. A session's worktree never changes for a given cwd, so
   // reuse what a previous event resolved (keyed by cwd) instead of spawning git
-  // twice per event. That matters because PreToolUse fires on EVERY tool call
-  // and Claude Code blocks the tool until this hook exits: on Windows, node
-  // startup plus two git.exe spawns per event is a visible per-tool-call lag.
+  // per event. That matters because PostToolUse fires on EVERY tool call and
+  // Claude Code blocks until the hook exits: on Windows, node startup plus a
+  // git.exe spawn per event is a visible per-tool-call lag.
   // SessionStart re-resolves so a fresh/resumed session starts accurate.
   // Caveat: `branch` is frozen with the cache, so a mid-session `git switch`
   // in the same cwd leaves it stale until the next SessionStart. Harmless
