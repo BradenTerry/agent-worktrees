@@ -1225,7 +1225,14 @@ export class WorktreeWebviewProvider
     const api = await this.gitApi();
     if (!api) return;
     this.scmWatchSet = true;
-    const onScm = () => this.scheduleRefresh();
+    // A repo opening or closing moves only the blue scope pill; nothing about
+    // the worktrees' own git state changed. Patch the highlight on the cached
+    // payload instead of scheduling a full refresh: the Git extension often
+    // registers a newly-scoped worktree AFTER scopeScm's bounded settle gave
+    // up, and recovering via the debounced full gather (a git status per
+    // worktree) left the pill trailing the Source Control view by seconds on
+    // Windows with many worktrees.
+    const onScm = () => void this.refreshScmHighlight();
     this.context.subscriptions.push(
       api.onDidOpenRepository(onScm),
       api.onDidCloseRepository(onScm)
@@ -1236,6 +1243,18 @@ export class WorktreeWebviewProvider
     if (api.onDidChangeState) {
       this.context.subscriptions.push(api.onDidChangeState(onScm));
     }
+  }
+
+  /** Re-annotate the Source Control highlight on the cached payload and
+   *  repost, without any git spawns — the cheap counterpart of a full refresh
+   *  for events that can only move the scope pill. postData's unchanged-payload
+   *  guard swallows the repost when the highlight did not actually move. */
+  private async refreshScmHighlight(): Promise<void> {
+    const data = this.lastData;
+    if (!this.view || !data || !data.scmEnabled) return;
+    const seq = ++this.updateSeq;
+    await this.annotateScmActive(data);
+    this.postData(data, seq);
   }
 
   /** Mark the single worktree that is the current Source Control scope as
@@ -1301,14 +1320,25 @@ export class WorktreeWebviewProvider
           .then(undefined, () => {});
       },
     };
-    await applyScopeScm(model, target);
-
-    // Remember this as the active scope so the panel highlights exactly this
-    // worktree, regardless of which repos the Git extension leaves open.
+    // Remember the choice BEFORE driving the swap: the open/close events the
+    // swap fires trigger highlight reposts, and one that ran before this write
+    // used to paint the OLD scope mid-swap (corrected only by the final full
+    // refresh, seconds later on a many-worktree Windows setup).
     await this.context.globalState.update(SCM_SCOPED_PATH_KEY, target);
 
-    // Reflect the new scope on the buttons without switching to the view.
-    await this.refresh();
+    await applyScopeScm(model, target);
+
+    // Reflect the new scope on the buttons without switching to the view. The
+    // swap changes which repos are open, never the worktrees' git state, so
+    // patching the highlight is enough — no full gather. Only when the Git
+    // model already lists the target, though: if it is still registering the
+    // repo (it regularly outlives applyScopeScm's bounded settle on Windows
+    // with many worktrees), an eager repost would paint "no scope anywhere"
+    // over the webview's optimistic highlight. Leave that window to the
+    // onDidOpenRepository watcher, which patches the moment the repo lands.
+    if (model.list().includes(target)) {
+      await this.refreshScmHighlight();
+    }
   }
 
   // --- GitHub settings -------------------------------------------------------

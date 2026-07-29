@@ -2259,6 +2259,25 @@
         send("refreshGithub");
         return;
       }
+      // Scope button: move the blue pill immediately. The extension's
+      // confirmation follows on a later post, but the Git extension can take
+      // seconds to register the repo swap (Windows, many worktrees) and the
+      // click must not look ignored while it does. The cached data is patched
+      // too so a webview-local re-render keeps the optimistic state.
+      if (action === "scopeScm") {
+        const path = btn.getAttribute("data-path");
+        root.querySelectorAll(".scm-scope.active").forEach(function (b) {
+          b.classList.remove("active");
+        });
+        btn.classList.add("active");
+        if (lastData && lastData.worktrees) {
+          lastData.worktrees.forEach(function (wt) {
+            wt.scmActive = wt.path === path;
+          });
+        }
+        send("scopeScm", { path: path || undefined });
+        return;
+      }
       // Stop one debug session by its VS Code session id. The row is removed by
       // the extension's terminate event, not here, so a session that refuses to
       // die keeps its stop button.

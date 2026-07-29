@@ -23,6 +23,17 @@ All notable changes to the Agent Worktrees extension are documented here.
   live session id, so an agent you `/resume` keeps its row and status but is no
   longer linked to its terminal, and revealing or stopping it from the panel
   will not find it.
+- **The Source Control scope pill responds the moment you click** - scoping a
+  worktree swaps repositories in the built-in Git extension, and on Windows
+  with many worktrees that swap regularly finished after the panel had already
+  re-rendered, so the blue pill stayed on the old worktree (or nowhere) while
+  the Source Control view was clearly showing the new one - it caught up only
+  with the next full refresh, seconds later. The pill now moves optimistically
+  on the click itself, the chosen scope is stored before the swap so no
+  in-flight render can repaint the old one, and repo open/close events patch
+  just the highlight on the cached payload instead of scheduling a full
+  refresh, so the confirmation costs no git spawns and lands as soon as the
+  Git extension registers the repo.
 - **Pre-releases live on odd minor versions** - the Marketplace does not accept
   semver suffixes like `-pre.1`, so the release channel is now encoded the way
   the VS Code publishing docs recommend: an odd minor (`3.9.x`) is a
