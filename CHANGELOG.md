@@ -4,6 +4,13 @@ All notable changes to the Agent Worktrees extension are documented here.
 
 ## 4.0.0
 
+- **Stopping an agent on Windows is instant** - the stop button used to find
+  the agent's process by sweeping every process on the machine through a
+  PowerShell CIM query, which paid PowerShell's multi-second cold start on each
+  stop. Claude's session registry already names the exact pid of each session's
+  process (including the `claude -w` child whose command line no longer carries
+  the session id), so the panel now tree-kills that pid directly with
+  `taskkill /T` - no PowerShell, no process-table scan.
 - **The hooks are gone** - agent status came from an emitter script the
   extension asked to install on ten Claude Code hooks, and everything about that
   was a cost you paid: it edited your global `settings.json`, which is why the

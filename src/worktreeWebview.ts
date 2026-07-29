@@ -1484,25 +1484,27 @@ export class WorktreeWebviewProvider
   /**
    * Stop a session by every means we have, so it dies even if our in-memory
    * terminal handle was lost (e.g. the extension host reloaded since launch):
-   *  - kill the Claude process by the session id we passed in its argv
-   *    (`claude --session-id <id>`), which is reload-proof and works for idle
-   *    agents that were never sent a prompt;
-   *  - dispose the terminal we launched it in, if we still hold it;
-   *  - delete its state file so the row disappears immediately.
+   *  - on Windows, tree-kill the pid Claude's session registry records for the
+   *    session. The registry file is written by the Claude process about
+   *    itself, so the pid is exact even for a `claude -w` child whose argv no
+   *    longer carries our session id, and it is reload-proof;
+   *  - elsewhere, dispose the terminal (which SIGHUPs the pty's foreground
+   *    process group) with `pkill -f <session id>` as the reload-proof backup;
+   *  - the registry's liveness probe retires the row once the pid is gone.
    */
   private async stopSession(sessionId: string): Promise<void> {
     if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return;
     if (process.platform === "win32") {
       // Windows has no `pkill -f`, and no process-group teardown: disposing the
-      // terminal kills the shell (and can take the `--session-id` parent with
-      // it) but leaves the `claude -w` child -- which drops our id from its own
-      // argv -- running, holding the worktree directory open. So tree-kill by
-      // the session id *first*, while the id-bearing parent is still alive and
-      // that child is still its descendant, so `taskkill /T` reaches the whole
-      // subtree. Disposing first would orphan the id-less child before the query
-      // runs, leaving it alive to keep the worktree locked -- the exact symptom
-      // this ordering fixes. Await so the terminal is not torn down mid-kill.
-      await this.killTreeByCommandLine(sessionId);
+      // terminal kills the shell but can leave the `claude -w` child running,
+      // holding the worktree directory open. The session registry names that
+      // exact process (each session writes `sessions/<pid>.json` about itself),
+      // so tree-kill it by pid *before* disposing the terminal, and await so
+      // the teardown never races the kill.
+      const pid = (await this.readAgents()).find(
+        (s) => s.sessionId === sessionId
+      )?.pid;
+      if (pid !== undefined) await this.killTreeByPid(pid);
       this.terminals.get(sessionId)?.dispose();
     } else {
       // Disposing the terminal SIGHUPs the pty's foreground process group, which
@@ -1526,9 +1528,9 @@ export class WorktreeWebviewProvider
   private killClaudeInDir(dir: string): void {
     // Windows: there is no portable way to read another process's cwd, but it
     // does not need one. stopSession already tree-kills each tracked agent by
-    // session id (taskkill /T), which reaches the `claude -w` child this method
-    // exists to catch on Unix. So the worktree's agents are already gone by the
-    // time this runs on Windows.
+    // its registry pid (taskkill /T), which reaches the `claude -w` child this
+    // method exists to catch on Unix. So the worktree's agents are already gone
+    // by the time this runs on Windows.
     if (process.platform === "win32") return;
     const norm = normalize(dir);
     let out = "";
@@ -1561,31 +1563,23 @@ export class WorktreeWebviewProvider
   }
 
   /**
-   * Windows force-kill of every process whose command line contains `needle`,
-   * along with its child process tree (`taskkill /T`). This is our `pkill -f`
-   * stand-in: PowerShell's CIM query is the only portable way to read other
-   * processes' command lines. The match is case-insensitive and literal (no
-   * `-like` wildcards, so a path with `[`/`]` can't misfire), and our own
-   * PowerShell is excluded by `$PID` because the needle is embedded in its
-   * command line. Best-effort: a missing PowerShell or no match is a no-op.
-   * Resolves once the kill has run (or failed) so callers can order a terminal
-   * dispose after it rather than racing the query.
+   * Windows force-kill of a process and its child tree by pid
+   * (`taskkill /PID <pid> /T /F`). The pid comes from Claude's session
+   * registry, so no process-table scan is needed — this replaces a PowerShell
+   * `Get-CimInstance Win32_Process` sweep that enumerated every process and
+   * paid PowerShell's multi-second cold start on each stop. Best-effort: an
+   * already-dead pid or a missing taskkill is a no-op. Resolves once the kill
+   * has run (or failed) so callers can order a terminal dispose after it.
    */
-  private killTreeByCommandLine(needle: string): Promise<void> {
+  private killTreeByPid(pid: number): Promise<void> {
     if (process.platform !== "win32") return Promise.resolve();
-    // Single-quote escape for the PowerShell string literal.
-    const lit = needle.toLowerCase().replace(/'/g, "''");
-    const script =
-      "Get-CimInstance Win32_Process | Where-Object { " +
-      `$_.ProcessId -ne $PID -and $_.CommandLine -and ` +
-      `$_.CommandLine.ToLower().Contains('${lit}') } | ` +
-      "ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null }";
     return new Promise<void>((resolve) => {
       try {
         cp.execFile(
-          "powershell.exe",
-          ["-NoProfile", "-NonInteractive", "-Command", script],
-          () => resolve() /* powershell missing / nothing to kill -> best effort */
+          "taskkill",
+          ["/PID", String(pid), "/T", "/F"],
+          { windowsHide: true },
+          () => resolve() /* already gone / access denied -> best effort */
         );
       } catch {
         resolve(); /* spawn failed -> nothing we can do */
