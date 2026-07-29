@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut an Agent Worktrees release (patch/minor/major) or pre-release. Use when asked to "release", "cut a release", "ship a version", "publish the extension", "do a minor/major/patch version bump and release", or "publish a pre-release/beta". Regular releases push a plain vX.Y.Z tag; pre-releases run the workflow manually with the prerelease box ticked (plain version numbers, no suffix). ALWAYS derives the next version from the latest existing tag and the CHANGELOG, never from package.json.
+description: Cut an Agent Worktrees release (patch/minor/major) or pre-release. Use when asked to "release", "cut a release", "ship a version", "publish the extension", "do a minor/major/patch version bump and release", or "publish a pre-release/beta". The version's minor parity picks the channel - odd minor (v3.9.x) publishes a pre-release, even minor (v4.0.0) a regular release; pre-release tags may point at a PR branch head, regular tags only at main. ALWAYS derives the next version from the latest existing tag and the CHANGELOG, never from package.json.
 ---
 
 # Releasing Agent Worktrees
@@ -14,8 +14,8 @@ A release is cut by pushing a `vX.Y.Z` tag. That triggers
 
 ```mermaid
 flowchart LR
-  A["git tag vX.Y.Z<br/>+ push"] --> B[release.yml]
-  M["Actions -> Release<br/>Run workflow (prerelease)"] --> B
+  A["git tag vX.EVEN.Z on main<br/>+ push (regular)"] --> B[release.yml]
+  M["git tag vX.ODD.Z anywhere<br/>+ push (pre-release)"] --> B
   B --> C["npm version from tag<br/>(package.json is a placeholder)"]
   C --> D[compile + test]
   D --> E["vsce package<br/>agent-worktrees.vsix"]
@@ -32,19 +32,28 @@ placeholder (it has sat at `0.0.1`). **Never** read the next version from
 history is `CHANGELOG.md` (e.g. the latest section is the current released
 version).
 
-## Regular vs pre-release channel (chosen per run, no suffix)
+## Regular vs pre-release channel (the minor's parity)
 
-Versions are **one continuous line that always increments** - no odd/even split
-and **no `-suffix`**. Every build takes the next plain `vX.Y.Z` above the latest
-tag; the channel is an independent choice at publish time:
+The channel is encoded in the version number, the convention the VS Code
+publishing docs recommend: an **odd minor** is a pre-release (`3.9.x`), an
+**even minor** is a regular release (`3.8.x`, `4.0.0`). The Marketplace rejects
+semver suffixes (`-pre.1`, `-rc.2`, dates), so the parity is the only standard
+way to keep the two channels' version lines apart - the workflow refuses a
+suffixed tag with that explanation. Versions still only ever increment; the
+convention starts at 3.9/4.0 (older tags predate it).
 
-- **Regular release** -> push a plain `vX.Y.Z` tag (the workflow's `push`
-  trigger). Always the regular channel.
-- **Pre-release** -> run the workflow manually (Actions tab -> **Release** ->
-  **Run workflow**), enter the version and tick **prerelease**. That publishes
-  `vsce publish --pre-release` and tags the commit for you. Publishing any
-  pre-release is what makes the "Switch to Pre-Release Version" button show on
-  the listing; users opt in per-install.
+- **Regular release** -> tag the merge commit **on `main`** with the next even
+  minor `vX.Y.Z` and push the tag.
+- **Pre-release** -> tag the commit to preview - a PR branch head is fine, that
+  is what the channel is for - with the next `vX.ODD.Z` *below* the upcoming
+  stable (previews of `4.0.0` are `3.9.0`, `3.9.1`, ...) and push the tag. Each
+  build bumps the odd line's patch. Publishing any pre-release is what makes
+  the "Switch to Pre-Release Version" button show on the listing; users opt in
+  per-install.
+
+Both tag pushes run the same workflow; it derives the channel from the minor.
+The manual run (Actions -> **Release** -> **Run workflow**) publishes the same
+way from a typed version, and tags the chosen ref for you.
 
 ## Steps
 
@@ -59,30 +68,35 @@ tag; the channel is an independent choice at publish time:
    ```
 
 2. **Compute the next version** from that latest version (plain numbers, no
-   suffix):
-   - patch: bump Z (`v2.1.0` -> `v2.1.1`) - bug fixes, packaging, docs, screenshots
-   - minor: bump Y, reset Z (`v2.1.0` -> `v2.2.0`) - new features
-   - major: bump X (`v2.1.0` -> `v3.0.0`) - breaking changes
+   suffix - the workflow rejects one):
+   - **Regular release** (even minor):
+     - patch: bump Z (`v2.2.0` -> `v2.2.1`) - bug fixes, packaging, docs, screenshots
+     - minor: bump Y by TWO, reset Z (`v2.2.1` -> `v2.4.0`) - new features (the
+       odd minor between them is the pre-release line)
+     - major: bump X (`v2.2.0` -> `v3.0.0`) - breaking changes
+   - **Pre-release** (odd minor): the odd line just below the upcoming stable,
+     next free patch - previews of `4.0.0` are `v3.9.0`, `v3.9.1`, ...
 
    Confirm it does not already exist (`git tag | grep -x vX.Y.Z` returns
    nothing).
 
-3. **Land the changes and a CHANGELOG entry on `main` first.** The workflow
-   builds the commit at the tag, so everything must already be merged to
-   `origin/main`. Add a `## X.Y.Z` section at the top of `CHANGELOG.md` (match
-   the existing style: bold lead-in, `-` separators, no em dashes, no emojis)
-   and keep `README.md` (mechanism) + `MARKETPLACE.md` (user-facing) in sync per
-   the project CLAUDE.md. Regenerate screenshots if `panel.js`/`panel.css`
-   changed. Verify locally:
+3. **Regular releases only: land the changes and a CHANGELOG entry on `main`
+   first.** The workflow builds the commit at the tag, so everything must
+   already be merged to `origin/main`. Add a `## X.Y.Z` section at the top of
+   `CHANGELOG.md` (match the existing style: bold lead-in, `-` separators, no
+   em dashes, no emojis) and keep `README.md` (mechanism) + `MARKETPLACE.md`
+   (user-facing) in sync per the project CLAUDE.md. Regenerate screenshots if
+   `panel.js`/`panel.css` changed. A pre-release skips this: it may be tagged
+   on a PR branch head to preview unmerged work, and its changelog entry is
+   the upcoming stable section on that branch. Verify locally either way:
 
    ```sh
    npm run compile && npm test
    ```
 
-4. **Publish on the chosen channel** (only after the release commit is on
-   `origin/main`).
+4. **Publish by pushing the tag.**
 
-   - **Regular release** - tag the merge commit and push:
+   - **Regular release** - tag the merge commit on main and push:
 
      ```sh
      git checkout main && git pull
@@ -90,11 +104,12 @@ tag; the channel is an independent choice at publish time:
      git push origin vX.Y.Z
      ```
 
-   - **Pre-release** - trigger the workflow manually (it tags for you, so do NOT
-     also push a tag):
+   - **Pre-release** - tag the commit to preview (a PR branch head is fine)
+     with the odd-minor version and push:
 
      ```sh
-     gh workflow run release.yml -f version=X.Y.Z -f prerelease=true
+     git tag -a vX.Y.Z -m vX.Y.Z <commit>
+     git push origin vX.Y.Z
      ```
 
 5. **Watch the workflow and confirm it published.**
