@@ -26,8 +26,10 @@ its running agents in one view.
 - Every worktree (primary + linked) as a card, with `Primary` / `detached` /
   `locked` badges and a per-card refresh that re-reads just that worktree.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
-  upstream. Recomputed on discrete signals, never a workspace-wide file watcher
-  (see [Refresh coalescing](docs/refresh-coalescing.md)).
+  upstream. Recomputed on discrete signals (the agent poll, saves, the Git
+  extension's repo state), never a workspace-wide file watcher, so a card does not
+  disagree with the Source Control view: see
+  [Refresh coalescing](docs/refresh-coalescing.md).
 - **New Worktree**, **Open in new window** (focuses an existing window via the
   `code` CLI when it is on `PATH`), and **Change branch** via a quick pick of the
   branches free to check out, plus a create-new-branch entry. The switch runs
@@ -60,8 +62,13 @@ its running agents in one view.
   reveal or stop them from the panel. The active terminal's agent is highlighted
   by a class toggle, with no re-render and no git spawns. Titles are left to
   Claude Code on purpose (see [Terminal tab titles](docs/terminal-titles.md)).
+- A row finds its terminal by process ancestry, not by the launch id, since a
+  session can register an id that is not in its own argv (see
+  [Agent status](docs/agent-status.md)).
 - **Agent & Worktree** creates a worktree with `claude -w` and starts an agent in
-  it in one step.
+  it in one step. The new worktree gets its card without a manual refresh: a
+  session whose cwd is not itself a card is the cue to re-list worktrees (see
+  [Refresh coalescing](docs/refresh-coalescing.md)).
 - Status per agent, read from Claude Code's own session registry (see
   [Agent status](docs/agent-status.md)). Collapsible lists with per-status counts,
   and a number badge on the Activity Bar icon counting **waiting** agents, so a

@@ -94,12 +94,13 @@ export interface AgentVM {
 export interface SessionIndex {
   agents: Map<string, AgentVM[]>;
   subagents: Map<string, WorktreeSubagentVM[]>;
-  /** Subagent working directories that are not themselves one of the given
-   *  paths, so the row landed on a card further up the tree (usually its
-   *  parent's) or on none at all. A subagent handed a worktree of its own gets
-   *  a real one created inside the repo mid-turn, after the panel last listed
-   *  worktrees, and it looks exactly like this until the list is refreshed - so
-   *  this is the caller's cue to re-gather (see refreshAgents). */
+  /** Session and subagent working directories that are not themselves one of the
+   *  given paths, so the row landed on a card further up the tree (usually the
+   *  repo root's) or on none at all. Both a `claude -w` session and a subagent
+   *  handed a worktree of its own get a real worktree created inside the repo
+   *  after the panel last listed worktrees, and it looks exactly like this until
+   *  the list is refreshed - so this is the caller's cue to re-gather (see
+   *  refreshAgents). */
   unplaced: string[];
 }
 

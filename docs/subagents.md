@@ -101,7 +101,10 @@ appeared to be working in the parent's checkout.
 
 `indexRegistry` therefore reports every subagent `cwd` that is not itself one of
 the cards as `unplaced`, and the agent-only refresh re-gathers once per such
-path. One gather settles it: a real worktree gets its card and the row moves onto
+path. A top-level session's own `cwd` goes through the same reporting, since
+`claude -w` creates its worktree the same way and used to leave the new agent's
+row on the main worktree's card; see
+[refresh coalescing](refresh-coalescing.md#the-agent-only-path). One gather settles it: a real worktree gets its card and the row moves onto
 it, while a cwd that is merely a subdirectory of a card stays where it is and is
 never gathered for again. The reverse case is handled by the same counter that
 traces the rows - when the number of running subagents drops, the isolated

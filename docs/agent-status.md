@@ -116,16 +116,53 @@ it counts as alive). This replaced a sweep that had to reason about a hook
 process's *parent* pid, could not trust a missing one on Windows, and needed a
 grace period and a process-table scan to make up the difference.
 
+## Which terminal a row belongs to
+
+Reveal and Stop need the terminal behind a row, and **the id cannot be trusted to
+find it**. The extension starts agents with `claude --session-id <uuid>` and
+stamps that uuid into the terminal's environment, but the row comes from the
+registry, and the id a session registers is not always the one in its argv.
+Measured on a live 2.1.220 session started by the panel:
+
+```
+registry:  { sessionId: "9cb50d5b-...", pid: 63074 }
+that pid:  claude --session-id c19e3fe7-...        <- the id we launched with
+ancestry:  63074 -> claude 62919 -> /bin/zsh 47236 -> Code Helper
+```
+
+Two things are wrong with an id lookup here: the ids differ, and the registered
+process is a **child** of the one the terminal started. `claude -w` is the common
+way to get there (`/resume` is another), and it is not a corner case - it is what
+the Agent & Worktree button does. The symptoms were a Reveal that insisted "this
+agent's terminal isn't in this window" about a terminal the user was looking at,
+and a Stop button that killed nothing, because `pkill -f <session id>` matched an
+argv that does not contain that id.
+
+So the link is resolved by **process ancestry** (`src/processTree.ts`): a
+terminal's shell pid is an ancestor of every process running in it and of nothing
+else, which also makes the test inherently per-window. The registry pid is what
+makes this possible, since it names the exact process behind the row.
+
+- The id map is still tried first, so a normally launched agent costs nothing.
+- The process table is read only on a click, never on a refresh, and the answer is
+  cached under the registry's id, so it is one listing per session per window.
+  `ps -Ao pid=,ppid=` on macOS and Linux, `Get-CimInstance Win32_Process` on
+  Windows (not `wmic`, which is removed in Windows 11 24H2).
+- Stop kills the registry pid on **every** platform now (SIGTERM on POSIX,
+  `taskkill /T /F` on Windows) and disposes the terminal after, rather than
+  relying on an id match that a `-w` child never satisfies.
+
+A side effect worth having: an agent started by hand in a VS Code terminal, which
+the panel never had a handle for, is now revealable and stoppable too.
+
 ## What this does not cover
 
-- **A session that was resumed.** The row is keyed by Claude's live `sessionId`.
-  The extension starts agents with `claude --session-id <uuid>` and stamps that
-  uuid into the terminal's environment, which is how a row finds its terminal.
-  `/resume` gives the session a new id while the terminal keeps the old one, so
-  after a resume the row and its terminal are no longer linked: the row still
-  shows the agent and its status, but revealing and stopping it from the panel
-  will not find the terminal. The hook emitter used to paper over this by keying
-  its state file to the launch id from its environment.
+- **A terminal in another VS Code window.** Rows come from a registry shared
+  across every window; terminal handles are per-window, and ancestry says the
+  same thing (the session is not beneath any shell in *this* window). The panel
+  says so rather than pretending.
+- **A machine that will not report its process table.** Reveal falls back to the
+  id lookup, so a panel-launched agent still works and a `-w` child does not.
 
 ## Removing the old hooks
 

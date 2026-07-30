@@ -12,7 +12,7 @@ single view.
 ## The short version
 
 - **See every worktree at once**, with changed files, `+`/`-` lines and
-  ahead/behind counts.
+  ahead/behind counts, kept in step with the Source Control view as you work.
 - **Start a Claude agent in any worktree in one click**, or create a worktree and
   an agent together.
 - **Watch each agent's status live**: active, waiting, or idle.
@@ -26,10 +26,14 @@ single view.
 
 - Launch a Claude CLI session in any worktree, each in its own terminal.
 - **Agent & Worktree** creates a fresh worktree with `claude -w` and starts an
-  agent in it, in one step.
-- Reveal or stop any session from the panel. Reveal works in the window that
-  started the agent; another window can still see and stop it, and tells you when
-  the terminal lives elsewhere.
+  agent in it, in one step. Its card appears on its own, with the agent on it -
+  no refresh click.
+- Reveal or stop any session from the panel, including agents you started by hand
+  in a terminal and the ones Agent & Worktree creates. A row finds its terminal by
+  looking at which one the process is actually running in, so Reveal no longer
+  claims a terminal you are looking at belongs to another window, and Stop reaches
+  the agent instead of missing it. A session in a different VS Code window still
+  says so, since its terminal genuinely is not here.
 - The agent whose terminal is open is highlighted, so switching between worktrees
   never leaves you typing to the wrong agent.
 - Terminal tabs are titled by Claude Code itself, so each tab tracks that

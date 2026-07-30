@@ -277,8 +277,20 @@ export function indexRegistry(
 ): SessionIndex {
   const keys = worktreePaths.map(normalize);
   const byPath = new Map<string, RegistrySession[]>();
+  const unplaced: string[] = [];
   for (const session of registry) {
     const key = placeIn(session.cwd, keys);
+    // A `claude -w` session runs in a worktree it created itself, inside the
+    // repo, after the panel last listed worktrees - so it looks exactly like an
+    // isolated subagent's worktree does, and needs the same cue. "No card
+    // matched" is NOT that cue: the new worktree lives under the repo root, so
+    // it matches the root's card, one level too far up. That is what put a
+    // `claude -w` agent's row on the main worktree's card and left its own card
+    // missing until the user clicked refresh. Report any cwd that is not itself
+    // a card and let one re-gather decide (see refreshAgents); a cwd that is
+    // merely a subdirectory of a card, or in another repo entirely, costs one
+    // re-gather and then settles.
+    if (key !== normalize(session.cwd)) unplaced.push(session.cwd);
     if (!key) continue;
     const list = byPath.get(key) ?? [];
     list.push(session);
@@ -287,7 +299,6 @@ export function indexRegistry(
 
   const agents = new Map<string, AgentVM[]>();
   const elsewhere = new Map<string, WorktreeSubagentVM[]>();
-  const unplaced: string[] = [];
   for (const [key, sessions] of byPath) {
     sessions.sort((a, b) => a.startedAt - b.startedAt);
     agents.set(
