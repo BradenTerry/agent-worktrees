@@ -7,6 +7,10 @@ const {
   ancestorsOf,
   isDescendantOf,
   readParentMap,
+  namesClaude,
+  readCommandLine,
+  parentMapSnapshot,
+  clearParentMapSnapshot,
 } = require("../out/processTree.js");
 
 /**
@@ -46,8 +50,9 @@ test("parsePsTree skips anything that is not two integers", () => {
 });
 
 test("parseWindowsTree reads the PowerShell one-liner's pid,ppid with CRLF", () => {
-  // What `Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId),$($_.ParentProcessId)" }`
-  // emits: one line per process, CRLF, pid first.
+  // What the command in treeCommand() emits - `$_.ProcessId.ToString() + ',' +
+  // $_.ParentProcessId.ToString()`, deliberately concatenation rather than an
+  // interpolated "$(...)" string - one line per process, CRLF, pid first.
   const out = "0,0\r\n4,0\r\n8112,4\r\n9240,8112\r\n9612,9240\r\n\r\n";
   const map = parseWindowsTree(out);
   assert.strictEqual(map.get(9612), 9240);
@@ -134,4 +139,61 @@ test("readParentMap parses this platform's output through the right parser", asy
   const map = await readParentMap(fake);
   assert.strictEqual(map.get(200), 100);
   assert.strictEqual(map.size, 2);
+});
+
+// --- identity, the gate on every kill -----------------------------------------
+
+test("namesClaude accepts the shapes Claude actually runs as", () => {
+  // Observed on 2.1.220: the plain argv0, and the versioned binary whose own name
+  // is a version number - only its path says claude.
+  assert.strictEqual(namesClaude("claude --session-id c14fdb55"), true);
+  assert.strictEqual(
+    namesClaude("/Users/b/.local/share/claude/versions/2.1.220 --session-id x"),
+    true,
+    "the versioned binary is named for its version, not for claude"
+  );
+  assert.strictEqual(
+    namesClaude("node.exe C:\\Users\\b\\AppData\\Local\\claude\\cli.js"),
+    true,
+    "on Windows the process name is node; the path is what identifies it"
+  );
+});
+
+test("namesClaude rejects a recycled pid, which is the whole point", () => {
+  // The failure this guards: a session killed with SIGKILL leaves its registry
+  // file behind, the OS hands its pid to something else, and the row still looks
+  // live because the liveness probe only asks whether the pid exists. Stop would
+  // then force-kill a stranger's process tree.
+  assert.strictEqual(namesClaude("/usr/bin/postgres -D /var/lib/pg"), false);
+  assert.strictEqual(namesClaude(""), false, "no command line is not a match");
+  assert.strictEqual(namesClaude("svchost.exe -k netsvcs"), false);
+});
+
+test("readCommandLine yields the empty string rather than throwing", async () => {
+  const gone = (_f, _a, _o, cb) => cb(new Error("no such process"), "", "");
+  assert.strictEqual(await readCommandLine(999999, gone), "");
+  const threw = () => {
+    throw new Error("spawn failed");
+  };
+  assert.strictEqual(await readCommandLine(1, threw), "");
+});
+
+test("readCommandLine trims the trailing newline ps and powershell both add", async () => {
+  const fake = (_f, _a, _o, cb) => cb(null, "claude --session-id abc\n", "");
+  assert.strictEqual(await readCommandLine(1, fake), "claude --session-id abc");
+});
+
+// --- one listing per burst ----------------------------------------------------
+
+test("parentMapSnapshot shares one listing across a burst, then re-reads", async () => {
+  // Removing a worktree stops every agent in it at once. Without sharing, that is
+  // one process-table read per agent - on Windows, one PowerShell cold start each.
+  clearParentMapSnapshot();
+  const first = parentMapSnapshot(1_000);
+  const second = parentMapSnapshot(1_500);
+  assert.strictEqual(first, second, "same in-flight promise, not a second listing");
+  const later = parentMapSnapshot(2_100);
+  assert.notStrictEqual(later, first, "past the TTL it reads again");
+  await Promise.all([first, second, later]);
+  clearParentMapSnapshot();
 });

@@ -64,7 +64,12 @@ import {
   RegistrySession,
 } from "./sessionRegistry";
 import { systemProbes } from "./liveness";
-import { isDescendantOf, readParentMap } from "./processTree";
+import {
+  isDescendantOf,
+  namesClaude,
+  parentMapSnapshot,
+  readCommandLine,
+} from "./processTree";
 import { TranscriptReader } from "./transcript";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import {
@@ -1972,20 +1977,57 @@ export class WorktreeWebviewProvider
   ): Promise<vscode.Terminal | undefined> {
     const known = this.terminals.get(sessionId);
     if (known) return known;
-    const pid = (await this.readAgents()).find(
-      (s) => s.sessionId === sessionId
-    )?.pid;
+    const pid = await this.claudePidFor(sessionId);
     if (pid === undefined) return undefined;
-    const parents = await readParentMap();
+    const parents = await parentMapSnapshot();
     if (!parents.size) return undefined; // no process listing: id lookup is all we have
     for (const terminal of vscode.window.terminals) {
       const shell = await terminal.processId;
       if (shell === undefined) continue;
       if (!isDescendantOf(pid, shell, parents)) continue;
       diag(`terminal for session ${sessionId} resolved by pid ${pid} under shell ${shell}`);
+      // One id per terminal, and it is the registry's. The launch id this
+      // terminal was first filed under matches no row (that is what made the
+      // lookup miss), and leaving both in would keep activeSessionId returning
+      // the one nothing is keyed by, so the row for the terminal the user is
+      // looking at would still never highlight.
+      for (const [id, term] of this.terminals) {
+        if (term !== terminal) continue;
+        this.terminals.delete(id);
+        // The name caches are keyed the same way, and forgetTerminal only reaches
+        // ids still in this map, so they go now or they never do.
+        this.appliedTerminalNames.delete(id);
+        this.desiredTerminalNames.delete(id);
+      }
       this.terminals.set(sessionId, terminal);
       return terminal;
     }
+    return undefined;
+  }
+
+  /**
+   * The pid behind a row, once confirmed to still be the Claude it claims to be.
+   *
+   * The registry's pid is only as good as the file it came from, and a session
+   * that died without cleaning up (SIGKILL, crash, power loss) leaves one the OS
+   * is free to reuse. The liveness probe is a bare existence check, so a recycled
+   * pid reads as a live agent. Everything downstream of this either kills the
+   * process or caches a terminal against it, so both need the identity, not just
+   * the number. This is the guard `killClaudeInDir` has always applied before
+   * killing by cwd; the pid paths were the ones missing it.
+   */
+  private async claudePidFor(sessionId: string): Promise<number | undefined> {
+    const pid = (await this.readAgents()).find(
+      (s) => s.sessionId === sessionId
+    )?.pid;
+    if (pid === undefined) return undefined;
+    const cmd = await readCommandLine(pid);
+    if (namesClaude(cmd)) return pid;
+    diag(
+      `session ${sessionId}: pid ${pid} is not a claude process (${
+        cmd || "no command line"
+      }); leaving it alone`
+    );
     return undefined;
   }
 
@@ -2034,9 +2076,9 @@ export class WorktreeWebviewProvider
     // Resolve before killing: resolution reads the registry for this session's
     // pid, and a dead session has no file left to read it from.
     const terminal = await this.resolveTerminal(sessionId);
-    const pid = (await this.readAgents()).find(
-      (s) => s.sessionId === sessionId
-    )?.pid;
+    // Confirmed to still be Claude, so a registry file left behind by a crashed
+    // session cannot aim a force-kill at whatever now owns that pid.
+    const pid = await this.claudePidFor(sessionId);
     if (pid !== undefined) await this.killTreeByPid(pid);
     terminal?.dispose();
     if (pid === undefined && process.platform !== "win32") {
@@ -2102,13 +2144,18 @@ export class WorktreeWebviewProvider
    * `Get-CimInstance Win32_Process` sweep that enumerated every process and
    * paid PowerShell's multi-second cold start on each stop.
    *
-   * POSIX sends SIGTERM to the pid itself, letting Claude shut down and remove
-   * its own registry file. This used to be a no-op here, on the assumption that
+   * POSIX sends SIGTERM to the pid itself - one process, not a group, with the
+   * terminal dispose that follows doing the rest via SIGHUP - letting Claude shut
+   * down and remove its own registry file. This used to be a no-op here, on the assumption that
    * disposing the terminal was enough; it is not for a row whose terminal we
    * could not identify, which was every `claude -w` agent (see stopSession).
    * SIGTERM rather than SIGKILL: the process being asked to stop is one that
    * cleans up after itself (a worktree lock, its registry entry), and the caller
    * disposes the terminal straight after, which SIGHUPs anything still standing.
+   *
+   * Callers must pass a pid confirmed to be Claude (see claudePidFor): this will
+   * force-kill a whole tree on Windows, and a recycled pid from a stale registry
+   * file would otherwise take an unrelated process with it.
    *
    * Best-effort throughout: an already-dead pid or a missing taskkill is a no-op.
    * Resolves once the kill has run (or failed) so callers can order a terminal
