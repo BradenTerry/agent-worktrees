@@ -78,6 +78,16 @@ suite("Agent Worktrees extension host", () => {
     }
   });
 
+  test("the built-in commands the worktree search actions drive still exist", async () => {
+    // The panel's per-worktree search and file picker hand off to these two.
+    // Neither is contributed by us, so a rename or removal upstream would only
+    // surface as a failed click at runtime; assert them in the real host instead.
+    const cmds = await vscode.commands.getCommands(true);
+    for (const id of ["workbench.action.findInFiles", "vscode.open"]) {
+      assert.ok(cmds.includes(id), `built-in command missing: ${id}`);
+    }
+  });
+
   test("can obtain the built-in Git extension API", async () => {
     // The panel reads worktree status and drives the Source Control scope through
     // this API; if it is unavailable the panel degrades, so assert it is here.

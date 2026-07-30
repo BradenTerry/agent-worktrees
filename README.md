@@ -32,6 +32,11 @@ its running agents in one view.
   `code` CLI when it is on `PATH`), and **Change branch** via a quick pick of the
   branches free to check out, plus a create-new-branch entry. The switch runs
   `git switch` in that worktree only.
+- **[Searching a worktree](docs/worktree-search.md)** from this window, since a
+  worktree is not a workspace folder and so neither Find in Files nor `Ctrl/Cmd+P`
+  reaches it. Two per-card actions scope those to the worktree instead: a search
+  that pre-fills the search view's include path, and a file picker fed by
+  `git ls-files`. Neither touches the workspace, so the agents stay in this window.
 - **Delete Worktree** behind one modal that discloses everything upfront: agents
   to be stopped, uncommitted changes to be discarded, the branch left behind and
   its unpushed commits. Offers **Remove** or **Remove and Delete Branch**, then
@@ -144,6 +149,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | [Run and Debug in a worktree](docs/debug-sessions.md) | Why the debug view can't be retargeted, launch.json parsing, session tracking |
 | [Terminal tab titles](docs/terminal-titles.md) | Why the extension does not pass `name` to `createTerminal` |
 | [Linked files](docs/linked-files.md) | The symlink list and the Windows junction/hard-link fallbacks |
+| [Searching a worktree](docs/worktree-search.md) | Scoping Find in Files to a worktree, the `git ls-files` picker, and why neither mounts a workspace folder |
 
 ## Requirements
 

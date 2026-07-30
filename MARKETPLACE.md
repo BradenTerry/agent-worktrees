@@ -155,6 +155,24 @@ first. The panel adds a **Debug** button to each card instead.
 The button appears only on worktrees that have launch configurations, so a repo
 with no debug setup gets no extra clutter.
 
+## Find files in a worktree without leaving your window
+
+A worktree is a separate folder on disk, not part of your open workspace, so
+**Find in Files** and `Ctrl/Cmd+P` never see it. Reaching a worktree's code used to
+mean opening it in a second window, which leaves your agents running back in the
+first one. Each card now carries two buttons instead.
+
+- **Search this worktree** opens the search view already scoped to that worktree,
+  with the scope shown so you can see what is being searched. Type your query and
+  go.
+- **Find file in this worktree** lists that worktree's files and opens the one you
+  pick, right here in your current window. Type any part of the path to narrow it.
+- **The list matches what `Ctrl/Cmd+P` would show**: tracked and untracked files,
+  with anything gitignored left out, so `node_modules` and build output never
+  bury the file you wanted.
+- **Your workspace is untouched.** Nothing is added to the Explorer, no window
+  reloads, and every agent stays exactly where it is.
+
 ## Also included
 
 - **Open in a new window**, focusing an existing window instead of duplicating it.
