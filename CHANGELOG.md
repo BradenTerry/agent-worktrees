@@ -2,115 +2,37 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## Unreleased
-
-- **Settings → Performance: git's own speedups, with a switch each** - the panel
-  runs `git status` for every worktree, and on a large repository most of that
-  time is git walking the working tree to find untracked files. Git has two opt-in
-  fixes for exactly this (`core.untrackedCache`, which remembers each folder's
-  result, and `core.fsmonitor`, which watches the filesystem instead of re-reading
-  it), and they are off by default. The new tab shows whether this repository has
-  them and lets you turn each one on, or back off, without leaving the panel. Only
-  this repository's config is touched: nothing global, nothing committed, and off
-  really is off (for the untracked cache that means writing `false`, since git
-  treats the setting being absent as "keep the cache you already have"). It also
-  declines to do the wrong thing, and says why on the row: a filesystem that fails
-  git's own suitability check, a git too old for the built-in monitor, a platform
-  git has no monitor for, and a monitor you already run yourself are all left
-  alone. Previously this advice existed only as a line in a log channel.
-- **PR status no longer re-runs git for every worktree** - fresh PR or CI status
-  arriving from GitHub used to drive a full refresh, which re-read the working
-  tree of every worktree to learn nothing about any of them. A PR with checks
-  still running is polled every 15 seconds (7 in the window just after a push),
-  so on a repo with several worktrees that was the panel's largest steady-state
-  cost. The badge is now patched onto the cards directly, with no git at all.
-- **A working agent no longer re-runs `git status` twice a second** - Claude
-  rewrites its session file on every status transition, and a busy turn produces
-  several a second, each of which re-checked that agent's worktree. The check is
-  now made at most every two seconds per worktree. The card's own refresh button
-  and the global Refresh are unaffected.
-- **The Debug button stops re-reading every `launch.json`** - whether a worktree
-  has anything to debug was re-read and re-parsed for every worktree on every
-  refresh. It is now read once per edit; a worktree with no `launch.json` costs
-  a single failed `stat`.
-- **Background windows go quiet** - the one-second subagent poll and the webview's
-  elapsed-time tick now stop when the window is unfocused or the panel is hidden.
-  Waiting-agent badges still update, since those come from Claude's session files
-  rather than the poll.
-- **The panel appears faster in a freshly opened window** - the list of skills an
-  agent has used needs one pass over that session's whole transcript, which for a
-  long session is several megabytes, and it was read before the panel could draw
-  anything. It now happens in the background: rows appear immediately, and the
-  skills a row used earlier in its session fill in a moment later.
-- **Long sessions stop paying for their finished subagents** - a subagent's files
-  persist for the session's life, and ones retired for going silent (rather than
-  by a result the panel saw) were still checked on every poll tick. A session that
-  had run a hundred subagents paid a hundred file checks a second to render the
-  two still running; they are now skipped, and re-checked once a minute in case
-  one revives.
-
 ## 4.0.0
 
-- **The agent poll no longer re-reads what it already knows** - while agents
-  are on screen the panel re-checks their files every second, and it used to
-  re-open and re-parse all of them on every tick: every session's registry
-  file, and every subagent's meta and transcript - including subagents that
-  finished long ago, whose files persist for the session's life. Now finished
-  subagents are skipped before any of their files are opened, the meta (written
-  once at spawn) is parsed once, and registry files and subagent transcripts
-  are re-read only when their mtime has moved. A steady-state tick costs a
-  couple of readdirs plus a stat per live row - the difference that matters on
-  Windows, where every file open pays for filter drivers.
-- **Cheaper `git status`, and a pointer when it is still slow** - the
-  per-worktree status call now passes `--no-renames` (rename detection is
-  similarity matching the panel's counts never use), and the first time a
-  status takes over two seconds the output channel logs a one-time hint at
-  git's own fix: `core.untrackedCache` and `core.fsmonitor`, which make status
-  near-instant on big repositories. The extension never changes your git
-  configuration itself.
-- **Stopping an agent on Windows is instant** - the stop button used to find
-  the agent's process by sweeping every process on the machine through a
-  PowerShell CIM query, which paid PowerShell's multi-second cold start on each
-  stop. Claude's session registry already names the exact pid of each session's
-  process (including the `claude -w` child whose command line no longer carries
-  the session id), so the panel now tree-kills that pid directly with
-  `taskkill /T` - no PowerShell, no process-table scan.
-- **The hooks are gone** - agent status came from an emitter script the
-  extension asked to install on ten Claude Code hooks, and everything about that
-  was a cost you paid: it edited your global `settings.json`, which is why the
-  panel opened on a consent page; it spawned a process per event, on the path
-  Claude blocks while a tool runs; and it needed an interpreter to spawn. Claude
-  Code records what each session is doing in its own registry, so none of it is
-  needed. The panel reads that instead, and activation takes the old machinery
-  back out: our hook entries (leaving any you added yourself alone, including
-  where they share an event or a matcher entry with ours), the emitter and its
-  launcher, and the state files they wrote. Nothing is installed, nothing is
-  asked for, and nothing of the extension's lives in your `~/.claude` tree.
-  Each row's label is Claude's own work summary, now read from the tail of that
-  session's transcript. Subagent rows and the per-agent skills list survive the
-  removal: subagents are read from the files Claude writes for each one beside
-  the parent's transcript, and skills from the Skill tool calls in the
-  transcript itself. One consequence worth knowing: a row is keyed by Claude's
-  live session id, so an agent you `/resume` keeps its row and status but is no
-  longer linked to its terminal, and revealing or stopping it from the panel
-  will not find it.
-- **The Source Control scope pill responds the moment you click** - scoping a
-  worktree swaps repositories in the built-in Git extension, and on Windows
-  with many worktrees that swap regularly finished after the panel had already
-  re-rendered, so the blue pill stayed on the old worktree (or nowhere) while
-  the Source Control view was clearly showing the new one - it caught up only
-  with the next full refresh, seconds later. The pill now moves optimistically
-  on the click itself, the chosen scope is stored before the swap so no
-  in-flight render can repaint the old one, and repo open/close events patch
-  just the highlight on the cached payload instead of scheduling a full
-  refresh, so the confirmation costs no git spawns and lands as soon as the
-  Git extension registers the repo.
-- **Pre-releases live on odd minor versions** - the Marketplace does not accept
-  semver suffixes like `-pre.1`, so the release channel is now encoded the way
-  the VS Code publishing docs recommend: an odd minor (`3.9.x`) is a
-  pre-release, an even minor (`4.0.0`) is a regular release. Pre-release builds
-  of an upcoming version stack up on the odd line below it instead of consuming
-  its version number.
+### Features
+
+- **Search a worktree without opening a second window** - two buttons per card:
+  search its contents, or open one of its files by name. Your workspace is
+  untouched and your agents stay where they are.
+- **No more hooks** - agent status now comes from Claude Code's own session files,
+  so nothing is installed in your `~/.claude` and the consent page is gone. One
+  catch: an agent you `/resume` keeps its row, but the panel can no longer reveal
+  or stop its terminal.
+- **Settings -> Performance** - turn git's own `status` speedups
+  (`core.untrackedCache`, `core.fsmonitor`) on or off for this repository. Rows
+  git will not accept say why.
+- **A pre-release channel** - odd minor versions (`3.9.x`) are pre-releases, even
+  ones (`4.0.0`) are regular releases, since the Marketplace rejects `-pre.1`
+  suffixes. Opt in from the Marketplace to get builds early.
+
+### Bug fixes
+
+- **The Source Control pill moves the moment you click it**, instead of catching
+  up a few seconds later.
+
+### Performance
+
+- **Far less work per refresh** - PR and CI badges no longer trigger git, a busy
+  agent's worktree is re-checked at most every two seconds, `launch.json` is read
+  once per edit, finished subagents are skipped, unfocused windows stop polling,
+  and the per-agent skills scan no longer delays the first paint.
+- **Stopping an agent on Windows is instant** - a direct `taskkill` on the pid
+  from Claude's registry, instead of a PowerShell sweep of every process.
 
 ## 3.8.1
 
