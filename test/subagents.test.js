@@ -8,6 +8,7 @@ const {
   readSubagents,
   liveSubagents,
   newSubagentDirCache,
+  rememberRetired,
 } = require("../out/subagents.js");
 
 /**
@@ -273,5 +274,52 @@ test("readSubagents re-reads a transcript only when its mtime moves", async () =
   fs.utimesSync(file, new Date(NOW), new Date(NOW));
   [s] = await readSubagents(dir, { cache });
   assert.strictEqual(s.outstanding, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a silence-retired subagent is skipped, then re-checked a minute later", async () => {
+  // Its files stay in the directory for the session's life, so the 1s poll must
+  // not keep stating them. Nothing said it finished — only its silence did.
+  const dir = seed({
+    a1: { meta: meta(), records: [firstRecord()], mtimeMs: NOW - 20 * 60_000 },
+  });
+  const cache = newSubagentDirCache();
+  const found = await readSubagents(dir, { cache, now: NOW });
+  assert.deepStrictEqual(
+    found.map((s) => s.id),
+    ["a1"]
+  );
+  const live = liveSubagents(found, new Set(), NOW);
+  assert.deepStrictEqual(live, [], "silent for 20 minutes: presumed finished");
+  rememberRetired(cache, found, live, NOW);
+
+  // Skipped outright while the re-check is not due.
+  assert.deepStrictEqual(
+    await readSubagents(dir, { cache, now: NOW + 30_000 }),
+    []
+  );
+  // Once it is due the row comes back through the normal path, so a subagent
+  // that revives after a long silence is not written off forever.
+  const again = await readSubagents(dir, { cache, now: NOW + 61_000 });
+  assert.deepStrictEqual(
+    again.map((s) => s.id),
+    ["a1"]
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("rememberRetired leaves live subagents alone", async () => {
+  const dir = seed({
+    a1: { meta: meta(), records: [firstRecord()], mtimeMs: NOW - 1000 },
+  });
+  const cache = newSubagentDirCache();
+  const found = await readSubagents(dir, { cache, now: NOW });
+  rememberRetired(cache, found, liveSubagents(found, new Set(), NOW), NOW);
+  assert.strictEqual(cache.retired.size, 0);
+  const again = await readSubagents(dir, { cache, now: NOW + 1000 });
+  assert.deepStrictEqual(
+    again.map((s) => s.id),
+    ["a1"]
+  );
   fs.rmSync(dir, { recursive: true, force: true });
 });

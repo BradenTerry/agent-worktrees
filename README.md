@@ -139,7 +139,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | --- | --- |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
-| [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the agent-only path, why there is no `**/*` watcher |
+| [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the agent-only path, why there is no `**/*` watcher, and the Performance tab |
 | [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |
 | [Run and Debug in a worktree](docs/debug-sessions.md) | Why the debug view can't be retargeted, launch.json parsing, session tracking |
 | [Terminal tab titles](docs/terminal-titles.md) | Why the extension does not pass `name` to `createTerminal` |
@@ -193,13 +193,12 @@ after a UI change.
 - Agent terminals are tracked in memory; after an extension-host reload the panel
   can still show and stop agents (by session id / working directory) but loses
   the terminal handle used to reveal them.
-- The session list lives in global storage shared by every VS Code window, but
-  terminal handles are per-window. A window can show and stop an agent that
-  another window launched, yet clicking it cannot reveal a terminal it does not
-  own; the panel says so instead of silently doing nothing.
-- A terminal closed without `/exit` never fires `SessionEnd`; the liveness sweep
-  retires that session once its process is gone, and a file the sweep cannot
-  judge is pruned once it is older than 24 hours.
-- The sweep answers "is this process alive", not "can this window reach it". An
-  agent running in another window, or in a terminal outside VS Code, stays listed
-  as it should.
+- Claude's session registry is shared by every VS Code window, but terminal
+  handles are per-window. A window can show and stop an agent that another window
+  launched, yet clicking it cannot reveal a terminal it does not own; the panel
+  says so instead of silently doing nothing.
+- A session killed with its terminal never gets to remove its own registry file,
+  so every session is confirmed against the pid it recorded for itself. That
+  answers "is this process alive", not "can this window reach it", so an agent
+  running in another window (or in a terminal outside VS Code) stays listed as it
+  should.

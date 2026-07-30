@@ -39,6 +39,19 @@ export function setGitTracer(fn: ((msg: string) => void) | null): void {
   traceSink = fn;
 }
 
+/**
+ * Told once, the first time a `git status` here is slow enough that git's own
+ * caches would fix it (see SLOW_STATUS_MS). The panel uses it to point at
+ * Settings → Performance, since a hint logged to an output channel is a hint
+ * nobody reads. Injected, like the sinks above, to keep this file vscode-free.
+ */
+let slowStatusHinted: (() => void) | null = null;
+
+/** Be told when a status was slow enough to recommend git's caches. */
+export function setSlowStatusHandler(fn: (() => void) | null): void {
+  slowStatusHinted = fn;
+}
+
 function emitTrace(msg: string): void {
   try {
     traceSink?.(msg);
@@ -184,10 +197,246 @@ export async function fetchRemotes(
 /** A status slower than this (per worktree, after process spawn) is git doing
  *  real work — on Windows almost always the untracked-file traversal. Enabling
  *  git's own caches fixes that at the source, but they live in the user's repo
- *  config, which this extension does not edit without being asked; a one-time
- *  hint in the output channel points the user at them instead. */
+ *  config, which this extension does not edit without being asked; the hint
+ *  points at Settings → Performance, which asks and then does it. */
 const SLOW_STATUS_MS = 2_000;
 let hintedSlowStatus = false;
+
+/**
+ * Git's two opt-in `status` accelerators, as they stand in one repository.
+ *
+ * Both address the same cost: `status` has to report untracked files, and to do
+ * that it walks every directory in the working tree. That walk is the bulk of a
+ * slow status, and this panel runs status per worktree, repeatedly.
+ *
+ *  - `core.untrackedCache` stores each directory's untracked-file result in
+ *    `.git/index` alongside its stat data, so a directory whose mtime has not
+ *    moved is not re-read at all.
+ *  - `core.fsmonitor` goes further: git runs a per-repo daemon subscribed to the
+ *    OS's change notifications (FSEvents, ReadDirectoryChangesW) and asks it what
+ *    changed instead of looking. Built into git since 2.37.
+ */
+export interface GitPerfConfig {
+  /** `core.untrackedCache` is set to true. */
+  untrackedCache: boolean;
+  /** `core.fsmonitor` is on. `builtin` when it is git's own daemon (`true`),
+   *  `hook` when the user has pointed it at their own program (a path, e.g.
+   *  Watchman), which we must not overwrite. */
+  fsmonitor: false | "builtin" | "hook";
+}
+
+/** Parse `git config --get-regexp`'s `key value` lines. Pure, so the value
+ *  handling (git's booleans are case-insensitive, and `keep`/a hook path are
+ *  neither true nor false) is unit-tested without a repo.
+ *
+ *  A key set in more than one scope appears once per scope, in increasing
+ *  precedence order (system, global, local), so the **last** line for a key is
+ *  the effective one — which is why each match overwrites rather than breaks. */
+export function parsePerfConfig(stdout: string): GitPerfConfig {
+  const out: GitPerfConfig = { untrackedCache: false, fsmonitor: false };
+  for (const line of stdout.split("\n")) {
+    const at = line.indexOf(" ");
+    if (at === -1) continue;
+    const key = line.slice(0, at).trim().toLowerCase();
+    const value = line.slice(at + 1).trim();
+    const lower = value.toLowerCase();
+    if (key === "core.untrackedcache") {
+      // `keep` means "use a cache that is already there but do not extend it",
+      // which is not the state we are offering to put the repo in.
+      out.untrackedCache = lower === "true";
+    } else if (key === "core.fsmonitor") {
+      out.fsmonitor =
+        lower === "true" ? "builtin" : lower === "false" || !value ? false : "hook";
+    }
+  }
+  return out;
+}
+
+/** How `git config` reports the two settings we manage. A repo with neither set
+ *  exits non-zero with no output, which is not an error here. */
+export async function readPerfConfig(repoRoot: string): Promise<GitPerfConfig> {
+  try {
+    const { stdout } = await git(
+      ["config", "--get-regexp", "^core\\.(untrackedcache|fsmonitor)$"],
+      { cwd: repoRoot }
+    );
+    return parsePerfConfig(stdout);
+  } catch {
+    return { untrackedCache: false, fsmonitor: false };
+  }
+}
+
+/** `git --version`'s major/minor, or undefined if it cannot be read. Pure half,
+ *  so the parsing of the platform suffixes git appends (`2.39.3 (Apple Git-146)`,
+ *  `2.45.1.windows.1`) is unit-tested. */
+export function parseGitVersion(stdout: string): [number, number] | undefined {
+  const m = /(\d+)\.(\d+)/.exec(stdout);
+  return m ? [Number(m[1]), Number(m[2])] : undefined;
+}
+
+/** Why git's built-in filesystem monitor is or is not on the table here. */
+export type FsmonitorSupport =
+  /** Offerable. */
+  | "yes"
+  /** `core.fsmonitor=true` only means "use the daemon" from git 2.37. Before
+   *  that the key held the path of an fsmonitor hook, so writing `true` would
+   *  configure a hook named "true" and break every index refresh. */
+  | "old-git"
+  /** This git has the daemon but not for this platform. It shipped for macOS and
+   *  Windows; where it is missing, enabling it makes `git status` fail outright,
+   *  so this is the difference between a speedup and a broken repo. */
+  | "platform";
+
+/** Whether the daemon reports itself unavailable *here*, as opposed to merely not
+ *  running. Git says "not supported" on a platform it has no backend for, and
+ *  "not watching"/"not running" when it simply has not started - both non-zero,
+ *  so the message is what tells them apart. Pure, so both shapes are tested. */
+export function saysUnsupported(text: string): boolean {
+  return /not supported/i.test(text);
+}
+
+/**
+ * Whether the built-in monitor can be turned on for this repository.
+ *
+ * Asks git rather than mapping platforms ourselves: the set of supported
+ * platforms is git's, it grows between releases, and `fsmonitor--daemon status`
+ * answers it without starting anything. Memoized for the window - neither the
+ * git binary nor the platform changes under us.
+ */
+let fsmonitorSupport: Promise<FsmonitorSupport> | undefined;
+export function gitFsmonitorSupport(cwd: string): Promise<FsmonitorSupport> {
+  fsmonitorSupport ??= (async () => {
+    let version: [number, number] | undefined;
+    try {
+      version = parseGitVersion((await git(["--version"])).stdout);
+    } catch {
+      return "old-git";
+    }
+    if (!version || version[0] < 2 || (version[0] === 2 && version[1] < 37)) {
+      return "old-git";
+    }
+    try {
+      // Exits non-zero whenever no daemon is running, which is the normal case,
+      // so only the message matters here.
+      await git(["fsmonitor--daemon", "status"], { cwd, timeout: 10_000 });
+      return "yes";
+    } catch (err) {
+      const e = err as { stdout?: string; stderr?: string; message?: string };
+      const said = `${e.stdout ?? ""}\n${e.stderr ?? ""}\n${e.message ?? ""}`;
+      return saysUnsupported(said) ? "platform" : "yes";
+    }
+  })();
+  return fsmonitorSupport;
+}
+
+/**
+ * Whether this working tree's filesystem reports directory mtimes the way the
+ * untracked cache needs. Git ships the check (`--test-untracked-cache`), and it
+ * is worth running rather than assuming: the cache is only correct if a directory
+ * whose contents changed comes back with a new mtime, which not every filesystem
+ * or network mount guarantees.
+ */
+const untrackedCacheOk = new Map<string, Promise<boolean>>();
+export function untrackedCacheSupported(cwd: string): Promise<boolean> {
+  // Memoized per repo for the window. The test creates and removes files in the
+  // working tree to watch what the filesystem reports, so re-running it every
+  // time the tab is opened would be the opposite of the point, and the answer is
+  // a property of the filesystem rather than of the repo's state. A window reload
+  // re-asks, which is enough for the case of a repo that has moved.
+  let hit = untrackedCacheOk.get(cwd);
+  if (!hit) {
+    hit = (async () => {
+      try {
+        // Exits non-zero (and says so) when the filesystem is unsuitable.
+        await git(["update-index", "--test-untracked-cache"], {
+          cwd,
+          timeout: 30_000,
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    untrackedCacheOk.set(cwd, hit);
+  }
+  return hit;
+}
+
+/** The two settings, by the name the panel and the config both use. */
+export type PerfKey = "untrackedCache" | "fsmonitor";
+
+const PERF_CONFIG_KEY: Record<PerfKey, string> = {
+  untrackedCache: "core.untrackedCache",
+  fsmonitor: "core.fsmonitor",
+};
+
+/**
+ * Turn one accelerator on or off in the repository's own config.
+ *
+ * Written at the repo root, so one call covers every worktree: linked worktrees
+ * share `.git/config` (absent `extensions.worktreeConfig`, which we neither set
+ * nor need).
+ *
+ * Turning **off** is not simply unsetting, and the two keys differ, because git's
+ * defaults differ:
+ *
+ *  - `core.untrackedCache` unset means **keep**: an untracked cache already in
+ *    the index stays there and stays in use. Only `false` removes it. So off is
+ *    always written as `false` - unsetting would look like it worked and change
+ *    nothing.
+ *  - `core.fsmonitor` unset means no monitor, so off unsets it, which leaves the
+ *    config as clean as we found it. But an inherited value (a `--global`
+ *    `core.fsmonitor=true`) would survive that, so the effective value is re-read
+ *    and `false` written locally if it is still on. Off has to mean off.
+ *
+ * One case that write cannot beat: a local config whose `[include]` sets the key
+ * *after* the section we write into, since git resolves an include where it
+ * appears rather than by scope. Rewriting someone's include structure is not this
+ * feature's business, so the toggle reports what it reads back and the user is
+ * looking at the truth either way.
+ *
+ * Throws with git's stderr if a write fails, so the caller can say which.
+ */
+export async function setPerfSetting(
+  repoRoot: string,
+  key: PerfKey,
+  on: boolean
+): Promise<void> {
+  const configKey = PERF_CONFIG_KEY[key];
+  const write = async (value: string) => {
+    try {
+      await git(["config", configKey, value], { cwd: repoRoot });
+    } catch (err) {
+      const msg = String((err as { stderr?: string }).stderr ?? err).trim();
+      throw new Error(`Could not set ${configKey}: ${msg}`);
+    }
+  };
+
+  if (on) {
+    await write("true");
+    log(`setPerfSetting: ${configKey}=true in ${repoRoot}`);
+    return;
+  }
+
+  if (key === "untrackedCache") {
+    await write("false");
+    log(`setPerfSetting: ${configKey}=false in ${repoRoot} (unset would keep it)`);
+    return;
+  }
+
+  try {
+    await git(["config", "--unset-all", configKey], { cwd: repoRoot });
+  } catch {
+    /* exit 5 = it was not set locally; either way, check what is left */
+  }
+  const still = (await readPerfConfig(repoRoot)).fsmonitor !== false;
+  if (still) {
+    await write("false");
+    log(`setPerfSetting: ${configKey}=false in ${repoRoot} (inherited value)`);
+  } else {
+    log(`setPerfSetting: unset ${configKey} in ${repoRoot}`);
+  }
+}
 
 /**
  * Summarize the working-tree state of a worktree using
@@ -215,12 +464,13 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
     if (took >= SLOW_STATUS_MS && !hintedSlowStatus) {
       hintedSlowStatus = true;
       log(
-        `getStatus: ${took}ms in ${cwd}. If the panel feels slow, git's own ` +
-          `caches usually fix it: run "git config core.untrackedCache true" ` +
-          `and "git config core.fsmonitor true" in the repository (see ` +
+        `getStatus: ${took}ms in ${cwd}. Git's own caches usually fix this: ` +
+          `open Settings -> Performance in the Agent Worktrees panel to turn ` +
+          `on core.untrackedCache and core.fsmonitor for this repository (see ` +
           `https://git-scm.com/docs/git-update-index#_untracked_cache and ` +
           `git-fsmonitor--daemon).`
       );
+      slowStatusHinted?.();
     }
     for (const raw of stdout.split("\n")) {
       const line = raw.trimEnd();

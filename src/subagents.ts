@@ -84,11 +84,44 @@ export interface SubagentDirCache {
       outstanding: boolean;
     }
   >;
+  /** Ids the caller retired by the silence backstop rather than by a result
+   *  (see rememberRetired), and when. Their files stay in the directory for the
+   *  session's life, so without this every poll stats every subagent the session
+   *  has ever run. */
+  retired: Map<string, number>;
 }
 
 /** A fresh, empty cache for one subagents dir. */
 export function newSubagentDirCache(): SubagentDirCache {
-  return { metas: new Map(), transcripts: new Map() };
+  return { metas: new Map(), transcripts: new Map(), retired: new Map() };
+}
+
+/** How long a silence-retired subagent is skipped before it is stat'd again.
+ *  Only a write to its transcript could revive it, and a subagent silent for
+ *  SILENT_FOR_FINISHED is already presumed gone, so the re-check is a cheap
+ *  hedge against presuming wrong (a subagent parked on something very slow)
+ *  rather than something correctness rests on. */
+const RETIRE_RECHECK_MS = 60_000;
+
+/**
+ * Record which of the subagents just read are no longer live, so later polls can
+ * skip them. Called with the same two lists liveSubagents produced.
+ *
+ * Only the silence backstop needs this: a subagent retired by a result is in
+ * `finished`, which readSubagents already skips for free and forever. A silent
+ * one has no such signal, so it is skipped for RETIRE_RECHECK_MS at a time.
+ */
+export function rememberRetired(
+  cache: SubagentDirCache | undefined,
+  found: readonly FoundSubagent[],
+  live: readonly FoundSubagent[],
+  now = Date.now()
+): void {
+  if (!cache || found.length === live.length) return;
+  const alive = new Set(live.map((s) => s.id));
+  for (const s of found) {
+    if (!alive.has(s.id)) cache.retired.set(s.id, now);
+  }
 }
 
 /** Where a session's subagents live. */
@@ -204,15 +237,25 @@ export async function readSubagents(
   opts: {
     cache?: SubagentDirCache;
     finished?: ReadonlySet<string>;
+    now?: number;
   } = {}
 ): Promise<FoundSubagent[]> {
   const { cache, finished } = opts;
+  const now = opts.now ?? Date.now();
   const files = await fs.promises.readdir(dir).catch(() => [] as string[]);
   const out: FoundSubagent[] = [];
   for (const fn of files) {
     if (!fn.startsWith(AGENT_PREFIX) || !fn.endsWith(META_SUFFIX)) continue;
     const id = fn.slice(AGENT_PREFIX.length, -META_SUFFIX.length);
     if (!id) continue;
+    // Silence-retired: skipped without touching either of its files until the
+    // re-check falls due, at which point it takes the normal path again and is
+    // either revived by a fresh mtime or retired for another window.
+    const retiredAt = cache?.retired.get(id);
+    if (retiredAt !== undefined) {
+      if (now - retiredAt < RETIRE_RECHECK_MS) continue;
+      cache?.retired.delete(id);
+    }
     if (finished?.has(id)) {
       // Done for good; its transcript-derived state will never be asked for
       // again. The meta stays cached: it is what keeps this skip free when the

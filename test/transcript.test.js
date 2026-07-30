@@ -171,18 +171,62 @@ test("scanSkills finds skills anywhere in the transcript, deduped in order", asy
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+/** Records enough to bury anything before them past the 64KB tail. */
+const PAST_TAIL = Array.from({ length: 2000 }, () => msg);
+
+/** Await until `read()` reports what we are waiting for, or give up. Used for the
+ *  full skill scan, which deliberately does not block the read that starts it. */
+async function eventually(read, want, label) {
+  for (let i = 0; i < 100; i++) {
+    if (JSON.stringify(await read()) === JSON.stringify(want)) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.deepStrictEqual(await read(), want, label);
+}
+
 test("skillsFor keeps a skill used before the tail, and adds new ones", async () => {
-  const root = seed("s1", [
-    skillCall("code-review"),
-    ...Array.from({ length: 400 }, () => msg),
-  ]);
+  const root = seed("s1", [skillCall("code-review"), ...PAST_TAIL]);
   const reader = new TranscriptReader(root);
-  assert.deepStrictEqual(await reader.skillsFor("s1"), ["code-review"]);
+  // Buried past the tail, so only the background scan can find it.
+  await eventually(
+    () => reader.skillsFor("s1"),
+    ["code-review"],
+    "the full scan fills in the skills the tail cannot see"
+  );
 
   // A skill invoked while the window is open arrives in the tail.
   const file = await findTranscript(root, "s1");
   fs.appendFileSync(file, JSON.stringify(skillCall("pdf")) + "\n");
   assert.deepStrictEqual(await reader.skillsFor("s1"), ["code-review", "pdf"]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("the first read does not wait on the full skill scan", async () => {
+  // Awaiting it put a multi-megabyte read per live session in front of the
+  // panel's first render. The tail is what the first read is allowed to cost, so
+  // a skill only the whole-file scan can see must NOT be there yet.
+  const root = seed("s1", [skillCall("code-review"), ...PAST_TAIL, skillCall("pdf")]);
+  const reader = new TranscriptReader(root);
+  assert.deepStrictEqual(
+    await reader.skillsFor("s1"),
+    ["pdf"],
+    "only what the tail showed"
+  );
+  // ...and the buried one lands on a later read, in first-use order.
+  await eventually(() => reader.skillsFor("s1"), ["code-review", "pdf"]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a session dropped mid-scan does not come back", async () => {
+  const root = seed("s1", [skillCall("code-review"), ...PAST_TAIL]);
+  const reader = new TranscriptReader(root);
+  await reader.skillsFor("s1"); // starts the scan
+  reader.retain(new Set()); // the session ended before it finished
+  await new Promise((r) => setTimeout(r, 150)); // let the scan land
+  fs.rmSync(path.join(root, "-home-u-repo", "s1.jsonl"));
+  // A scan that finishes after its session was dropped must write nothing back,
+  // or every cache here grows for the life of the window.
+  assert.deepStrictEqual(await reader.skillsFor("s1"), []);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

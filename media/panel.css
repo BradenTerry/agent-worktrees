@@ -1363,6 +1363,48 @@ button.busy {
 }
 
 /* --- Linked Files settings tab ------------------------------------------ */
+/* Settings -> Performance: one row per git accelerator, each a switch with the
+   state explained underneath. A row that cannot be changed (old git, unsupported
+   platform, the user's own monitor) is dimmed and its switch disabled, but the
+   row stays: "why is this off" is what it exists to answer. */
+.perf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.perf-row {
+  padding: 7px 10px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
+}
+.perf-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.perf-row.locked .perf-toggle {
+  cursor: default;
+  opacity: 0.6;
+}
+.perf-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+}
+.perf-detail {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--vscode-descriptionForeground);
+}
+
 .linked-list {
   list-style: none;
   margin: 0;

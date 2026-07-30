@@ -12,6 +12,7 @@ import {
   SubagentVM,
   WorktreeData,
   BranchData,
+  GitPerfVM,
 } from "./worktreeData";
 import {
   countWaitingAgents,
@@ -44,6 +45,12 @@ import {
   getRemoteInfo,
   RemoteInfo,
   listIgnoredPaths,
+  readPerfConfig,
+  setPerfSetting,
+  PerfKey,
+  gitFsmonitorSupport,
+  untrackedCacheSupported,
+  setSlowStatusHandler,
 } from "./git";
 import {
   indexRegistry,
@@ -80,14 +87,6 @@ import { diag } from "./diagnostics";
  *  events (heaviest on Windows) down to one refresh. */
 const REFRESH_DEBOUNCE_MS = 500;
 
-/** Minimum gap (ms) between liveness sweeps of the session-state dir. The sweep
- *  reads every state file and, when one looks dead, scans the process table, so
- *  it must not ride along with every refresh (window focus alone can trigger
- *  those). Sessions are retired within a sweep of dying, which for the case that
- *  matters — a reopened window showing agents from the closed one — is the
- *  activation refresh, before anything is ever rendered. */
-const LIVENESS_SWEEP_MS = 30_000;
-
 /** How often the panel re-reads agent state while agents are on screen.
  *
  *  Everything else the panel shows changes on a signal it can watch: the session
@@ -115,6 +114,22 @@ const LIVENESS_SWEEP_MS = 30_000;
  *  still goes through the same 500ms coalescer as the watcher, so a burst of
  *  registry writes and a poll tick collapse into one refresh. */
 const AGENT_POLL_MS = 1_000;
+
+/** How long a worktree's git status is reused on the agent-only refresh path.
+ *
+ *  Claude rewrites a session's registry file on every status transition, and a
+ *  working agent transitions several times a second, so the coalescer alone
+ *  still let a busy turn re-stat that agent's worktree twice a second - one or
+ *  two git spawns each time, which on Windows is the most expensive thing the
+ *  panel does in steady state. The numbers on a card (dirty count, +/- lines)
+ *  are a summary of a tree the agent is still editing; showing one a couple of
+ *  seconds late is invisible, and it is refreshed by anything the user does
+ *  deliberately (the card's refresh button and the global Refresh bypass this,
+ *  since they gather from scratch).
+ *
+ *  Only the agent path throttles. A full gather always re-stats, so this can
+ *  never hold a stale count for longer than the next real refresh. */
+const STATUS_TTL_MS = 2_000;
 
 /** globalState key for the opt-in Source Control scope button. */
 const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
@@ -152,6 +167,8 @@ interface ActionMessage {
     | "togglePr"
     | "toggleScm"
     | "toggleTrace"
+    | "loadGitPerf"
+    | "setGitPerf"
     | "addLinkedPath"
     | "browseLinkedPath"
     | "pickIgnoredPaths"
@@ -174,8 +191,11 @@ interface ActionMessage {
   debugId?: string;
   /** GitHub PAT, for setGithubToken. */
   token?: string;
-  /** New on/off state, for togglePr; or the Prune choice for fetchBranches. */
+  /** New on/off state, for togglePr and setGitPerf; or the Prune choice for
+   *  fetchBranches. */
   value?: boolean;
+  /** Which git accelerator setGitPerf is flipping. */
+  perfKey?: PerfKey;
   /** Branch name, for worktreeFromBranch / deleteBranch. */
   branch?: string;
   /** Repo-relative file path, for addLinkedPath / removeLinkedPath. */
@@ -244,6 +264,9 @@ export class WorktreeWebviewProvider
   /** Subagent worktrees a full gather has already been run for, so a cwd that
    *  never becomes a card costs one re-gather rather than one per poll. */
   private readonly regathered = new Set<string>();
+  /** Epoch ms each worktree's git status was last read, so a burst of agent
+   *  transitions doesn't re-spawn git for the same worktree; see STATUS_TTL_MS. */
+  private readonly statusAt = new Map<string, number>();
   /** Subagent rows in the last agent refresh. Only a change is traced: the poll
    *  runs every second, and a row's whole life can be three of those, so a line
    *  per tick would bury the transitions that matter. */
@@ -335,6 +358,13 @@ export class WorktreeWebviewProvider
     // which also catches an agent creating a new worktree). The git line is
     // recomputed on those refreshes rather than tracked keystroke-by-keystroke.
 
+    // A slow status is the one thing that turns Settings → Performance from a
+    // detail into a recommendation, and git is where it is measured.
+    setSlowStatusHandler(() => {
+      this.statusWasSlow = true;
+      if (this.gitPerf) this.repostSettings();
+    });
+
     // Re-link any agent terminals VS Code restored from before this host
     // started (e.g. an extension update or window reload), and keep claiming
     // ones that surface afterward, so focus/stop reach them again.
@@ -342,8 +372,12 @@ export class WorktreeWebviewProvider
 
     context.subscriptions.push(
       this.prService,
-      // Re-render whenever fresh PR status lands.
-      this.prService.onChange(() => void this.refresh()),
+      // Re-render whenever fresh PR status lands. PR data is the only thing that
+      // moved, so patch the cached payload rather than re-running the whole
+      // gather: a PR with pending checks polls every 15s (7s just after a push),
+      // and a full refresh per poll spawned git for every worktree to learn
+      // nothing about any of them.
+      this.prService.onChange(() => this.postPrState()),
       // Re-link a terminal restored after activation to its session.
       vscode.window.onDidOpenTerminal((t) => this.reclaimTerminal(t)),
       // Clean up our terminal handle when its terminal is closed by any means.
@@ -357,14 +391,17 @@ export class WorktreeWebviewProvider
         this.postActiveTerminal();
         void this.flushTerminalNames();
       }),
-      // Catch external/agent edits and commits when the window regains focus.
+      // Catch external/agent edits and commits when the window regains focus,
+      // and start/stop the subagent poll with focus (see syncAgentPoll).
       vscode.window.onDidChangeWindowState((s) => {
+        this.syncAgentPoll();
         if (s.focused) this.scheduleRefresh();
       })
     );
   }
 
   dispose(): void {
+    setSlowStatusHandler(null);
     this.watcher?.dispose();
     this.branchesPanel?.dispose();
     this.refreshDebounce.cancel();
@@ -386,12 +423,20 @@ export class WorktreeWebviewProvider
   /**
    * Start or stop the agent poll to match what is on screen (see AGENT_POLL_MS).
    *
-   * Called whenever either input can have changed: a payload landing (agents
-   * appeared or went away) and the view being shown or hidden.
+   * Called whenever any input can have changed: a payload landing (agents
+   * appeared or went away), the view being shown or hidden, and the window
+   * gaining or losing focus.
+   *
+   * Focus counts because the poll exists only to make short-lived subagent rows
+   * appear, which is on-screen detail nobody is reading in a background window.
+   * Everything a hidden or unfocused window still owes the user comes from the
+   * registry watcher instead - notably the Activity Bar waiting-agent badge - so
+   * pausing this costs nothing while several windows are open.
    */
   private syncAgentPoll(): void {
     const wanted =
       !!this.view?.visible &&
+      vscode.window.state.focused &&
       !!this.lastData?.worktrees.some(
         (wt) => wt.agents.length > 0 || (wt.subagents?.length ?? 0) > 0
       );
@@ -436,6 +481,13 @@ export class WorktreeWebviewProvider
     webviewView.onDidChangeVisibility(() => {
       this.prService.setVisible(webviewView.visible);
       this.syncAgentPoll();
+      // The webview cannot see this for itself: its iframe is display:none while
+      // hidden, but an iframe's document.hidden follows the window, not its own
+      // CSS. It uses this to stop its elapsed-time tick.
+      void webviewView.webview.postMessage({
+        type: "visibility",
+        visible: webviewView.visible,
+      });
       if (webviewView.visible) {
         this.lastPosted = ""; // a re-shown view needs a fresh push
         void this.refresh();
@@ -458,6 +510,16 @@ export class WorktreeWebviewProvider
     // that is gone has no file, so there is nothing to sweep or expire.
     const registry = await this.readAgents();
     const data = await gatherWorktrees(force, registry, this.reader);
+    // A full gather just read every worktree's status, so the agent path has
+    // nothing to re-read for a moment (see STATUS_TTL_MS). Worktrees that are
+    // gone drop out, so the map tracks the cards rather than every path this
+    // window has ever seen.
+    const gatheredAt = Date.now();
+    const live = new Set(data.worktrees.map((wt) => normalize(wt.path)));
+    for (const key of this.statusAt.keys()) {
+      if (!live.has(key)) this.statusAt.delete(key);
+    }
+    for (const key of live) this.statusAt.set(key, gatheredAt);
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
     await this.annotateDebug(data);
@@ -465,6 +527,10 @@ export class WorktreeWebviewProvider
       .getConfiguration()
       .get<boolean>(TRACE_SETTING, false);
     if (data.repoRoot) data.linkedPaths = this.getLinkedPaths(data.repoRoot);
+    // Whatever Settings → Performance last learned. Never read here: it is git
+    // calls for a tab that is usually closed, so it is fetched on demand
+    // (loadGitPerf) and carried on every payload after that.
+    if (this.gitPerf) data.gitPerf = this.withSlowFlag(this.gitPerf);
     data.activeSessionId = this.activeSessionId();
     if (this.view.visible) {
       await this.attachPrStatus(data, force);
@@ -588,12 +654,18 @@ export class WorktreeWebviewProvider
       return this.refresh();
     }
     if (fewer) return this.refresh();
-    const touched = data.worktrees.filter((wt) =>
-      (sessions.agents.get(normalize(wt.path)) ?? []).some((a: AgentVM) =>
-        changed.has(a.sessionId)
-      )
+    const now = Date.now();
+    const touched = data.worktrees.filter(
+      (wt) =>
+        (sessions.agents.get(normalize(wt.path)) ?? []).some((a: AgentVM) =>
+          changed.has(a.sessionId)
+        ) &&
+        // Read at most once per STATUS_TTL_MS: a working agent transitions far
+        // faster than its dirty count is worth re-spawning git for.
+        now - (this.statusAt.get(normalize(wt.path)) ?? 0) >= STATUS_TTL_MS
     );
     const statuses = await mapLimit(touched, 4, (wt) => getStatus(wt.path));
+    for (const wt of touched) this.statusAt.set(normalize(wt.path), now);
     // An agent that ran `git checkout` (typically back to main once its PR
     // merged) changed more than this cached payload can patch: the card's
     // branch name, and the PR status keyed off it. The status call already
@@ -777,6 +849,10 @@ export class WorktreeWebviewProvider
         return this.toggleScm(msg.value);
       case "toggleTrace":
         return this.toggleTrace(msg.value);
+      case "loadGitPerf":
+        return this.loadGitPerf();
+      case "setGitPerf":
+        return this.setGitPerf(msg.perfKey, msg.value);
       case "addLinkedPath":
         return this.addLinkedPath(msg.linkPath);
       case "browseLinkedPath":
@@ -852,6 +928,135 @@ export class WorktreeWebviewProvider
       else delete wt.debugSessions;
     }
     this.postData(data, ++this.updateSeq);
+  }
+
+  /**
+   * Re-post with fresh PR badges. The counterpart of postDebugState for the PR
+   * poller: `pr` is read off the (already fetched) service cache and swapped into
+   * the cached payload, so a checks-still-running poll costs no git at all.
+   *
+   * A worktree with no cached value for the branch it currently has checked out
+   * loses its badge rather than keeping the last one: that is what a cleared
+   * cache (token removed) and a branch switch both look like from here. Falls
+   * back to a full refresh before the first gather has landed.
+   *
+   * Posts under the *current* claim instead of taking a new one. The PR poller
+   * fires on a timer, so it regularly lands mid-refresh, and claiming here would
+   * invalidate that refresh — throwing away the git it had just finished
+   * spawning, to show the same cards with a badge on them. Not claiming means
+   * both post, newest last, and any genuinely newer claim still supersedes this.
+   */
+  private postPrState(): void {
+    const data = this.lastData;
+    if (!this.view || !data) {
+      void this.refresh();
+      return;
+    }
+    for (const wt of data.worktrees) {
+      const pr = wt.branch
+        ? this.prService.get(normalize(wt.path), wt.branch)
+        : undefined;
+      if (pr !== undefined) wt.pr = pr;
+      else delete wt.pr;
+    }
+    this.postData(data, this.updateSeq);
+  }
+
+  // --- Git performance (Settings → Performance) -------------------------------
+
+  /** What the Performance tab last learned about this repo, so the section
+   *  renders from the payload like everything else instead of re-running git on
+   *  every refresh. Re-read (never patched) after we write a setting, so what the
+   *  switches show is always what git just told us. */
+  private gitPerf?: GitPerfVM;
+  /** A status in this window was slow enough for git's caches to be worth it
+   *  (see setSlowStatusHandler). Sticky: it says "this repo is big", which does
+   *  not stop being true. */
+  private statusWasSlow = false;
+
+  private withSlowFlag(perf: GitPerfVM): GitPerfVM {
+    return this.statusWasSlow ? { ...perf, statusWasSlow: true } : perf;
+  }
+
+  /**
+   * Read the state of git's `status` accelerators and post it.
+   *
+   * Fired when the Performance tab is opened, not on every refresh: it is a few
+   * git calls, one of which (`--test-untracked-cache`) walks the working tree, so
+   * it has no business on the refresh path. The filesystem test is skipped once
+   * the cache is already on - the answer cannot change what we would offer.
+   */
+  private async loadGitPerf(): Promise<void> {
+    const repoRoot = this.lastData?.repoRoot;
+    if (!repoRoot) return;
+    const [config, fsmonitorSupport] = await Promise.all([
+      readPerfConfig(repoRoot),
+      gitFsmonitorSupport(repoRoot),
+    ]);
+    const perf: GitPerfVM = { ...config, fsmonitorSupport };
+    if (!config.untrackedCache) {
+      perf.untrackedCacheOk = await untrackedCacheSupported(repoRoot);
+    }
+    this.gitPerf = perf;
+    diag(
+      `gitPerf: untrackedCache=${perf.untrackedCache} fsmonitor=${perf.fsmonitor} ` +
+        `fsmonitorSupport=${fsmonitorSupport} ` +
+        `untrackedCacheOk=${perf.untrackedCacheOk ?? "n/a"}`
+    );
+    this.repostSettings();
+  }
+
+  /**
+   * Turn one accelerator on or off, from its toggle in Settings → Performance.
+   *
+   * The toggle is the consent: it is labelled with what it writes, sitting under
+   * a paragraph naming the two config keys, and it goes both ways - so there is
+   * no modal here. What there is instead is a refusal to act on a toggle the view
+   * should not have offered (an unsupported platform, a filesystem that failed
+   * git's check, a `core.fsmonitor` that is the user's own hook program), since a
+   * stale payload must not be able to talk us into writing one of those.
+   */
+  private async setGitPerf(key?: PerfKey, on?: boolean): Promise<void> {
+    const repoRoot = this.lastData?.repoRoot;
+    const perf = this.gitPerf;
+    if (!repoRoot || !perf || (key !== "untrackedCache" && key !== "fsmonitor")) {
+      return;
+    }
+    const want = on === true;
+    const refuse =
+      key === "untrackedCache"
+        ? want && perf.untrackedCacheOk === false
+        : perf.fsmonitor === "hook" ||
+          (want && perf.fsmonitorSupport !== "yes");
+    if (refuse) {
+      diag(`gitPerf: refused ${key}=${want} (not offerable in this repo)`);
+      // The switch has already moved in the DOM. Re-post so it springs back to
+      // what the repo actually says, rather than sitting on a state we declined
+      // to write.
+      this.repostSettings();
+      return;
+    }
+
+    try {
+      await setPerfSetting(repoRoot, key, want);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      diag(`gitPerf: ${msg}`);
+      void vscode.window.showErrorMessage(msg);
+    }
+    // Re-read either way: a failed write must be reported as it actually stands,
+    // not as either of us intended, and the toggle springs back on its own.
+    await this.loadGitPerf();
+  }
+
+  /** Push a payload for the settings view alone: no git, no PR work, just the
+   *  cached data with the fields the settings tabs read. */
+  private repostSettings(): void {
+    const data = this.lastData;
+    if (!this.view || !data) return;
+    if (this.gitPerf) data.gitPerf = this.withSlowFlag(this.gitPerf);
+    this.lastPosted = ""; // the user clicked; always show the result
+    this.postData(data, this.updateSeq);
   }
 
   // --- Source Control --------------------------------------------------------

@@ -61,6 +61,7 @@
     cross:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
     dot: '<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="3.2"/></svg>',
+    zap: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M9 1.5L3.5 9h4l-.5 5.5L12.5 7h-4z"/></svg>',
     comment:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
     // Requested-reviewer marker (review pending): an eye, GitHub's convention for
@@ -318,12 +319,33 @@
       .join("");
   }
 
+  // Whether the sidebar view is on screen, per the extension's visibility
+  // messages. Assumed true until told otherwise: the first payload only arrives
+  // when the view is being shown.
+  let panelVisible = true;
+
+  // Whether any row carries an elapsed label, from the data rather than the DOM.
+  // Only subagent rows have one, and having none is the usual state.
+  function anyAges() {
+    const wts = (lastData && lastData.worktrees) || [];
+    return wts.some(
+      (wt) =>
+        (wt.subagents && wt.subagents.length) ||
+        (wt.agents || []).some((a) => a.subagents && a.subagents.length)
+    );
+  }
+
   // Elapsed labels have to tick on their own. The extension only re-posts when
   // the payload actually changes, and a subagent quietly working changes
   // nothing the panel renders — so an age rendered once would sit frozen at
   // whatever it read when the row first appeared. Rewrite just the text of the
   // labels that moved; no re-render, no DOM rebuild.
+  //
+  // Nothing to rewrite when no row has a label, or when nobody can see the panel
+  // (it is retained across hides, so this timer outlives being hidden). Both are
+  // checked before touching the DOM at all, since both are the common case.
   function tickAges() {
+    if (document.hidden || !panelVisible || !anyAges()) return;
     root.querySelectorAll(".subagent-age[data-since]").forEach((el) => {
       const since = Number(el.getAttribute("data-since"));
       if (!since) return;
@@ -1057,6 +1079,9 @@
       (data && data.scmEnabled) === true,
       (data && data.traceEnabled) === true,
       (data && data.linkedPaths) || [],
+      // The Performance tab's state arrives after the tab asks for it, so it has
+      // to be part of the signature or the section would sit on "Checking…".
+      (data && data.gitPerf) || null,
     ]);
   }
 
@@ -1071,6 +1096,12 @@
       section: integrationsSection,
     },
     { id: "linked", icon: "link", label: "Linked Files", section: linkedSection },
+    {
+      id: "performance",
+      icon: "zap",
+      label: "Performance",
+      section: performanceSection,
+    },
     { id: "debug", icon: "bug", label: "Debug", section: debugSection },
   ];
 
@@ -1281,6 +1312,126 @@
     );
   }
 
+  /**
+   * One accelerator, as a switch with its state explained underneath.
+   *
+   * `locked` is a reason string when the switch cannot be moved (an old git, a
+   * platform git has no monitor for, a filesystem that failed git's check, or a
+   * monitor the user runs themselves). A locked switch is disabled rather than
+   * hidden: "why is this off" is the question the row exists to answer.
+   */
+  function perfRow(key, label, on, detail, locked) {
+    return (
+      '<li class="perf-row' +
+      (on ? " on" : "") +
+      (locked ? " locked" : "") +
+      '">' +
+      '<label class="perf-toggle">' +
+      '<span class="perf-name">' +
+      label +
+      "</span>" +
+      '<input type="checkbox" class="switch-input" data-perf="' +
+      key +
+      '"' +
+      (on ? " checked" : "") +
+      (locked ? " disabled" : "") +
+      ' role="switch" aria-label="' +
+      esc(label) +
+      '" />' +
+      '<span class="switch" aria-hidden="true"></span>' +
+      "</label>" +
+      '<span class="perf-detail dim">' +
+      (locked || detail) +
+      "</span>" +
+      "</li>"
+    );
+  }
+
+  function performanceSection(data) {
+    const perf = data && data.gitPerf;
+    if (!perf) {
+      // The extension reads this on demand (it is git calls), so the first paint
+      // of this tab is a loading line replaced by the payload that follows. With
+      // no repository there is nothing to read and no payload will ever arrive,
+      // so that must not read as "checking" forever.
+      const noRepo = !(data && data.repoRoot);
+      return (
+        '<section class="gh-section">' +
+        '<h3 class="gh-h">' +
+        icons.zap +
+        " Performance</h3>" +
+        '<p class="gh-lead">' +
+        (noRepo
+          ? "These are per-repository git settings, and this workspace's first " +
+            "folder is not in a git repository."
+          : "Checking what this repository has enabled…") +
+        "</p>" +
+        "</section>"
+      );
+    }
+
+    const cacheOn = perf.untrackedCache === true;
+    const monitorOn = perf.fsmonitor !== false;
+    const rows =
+      '<ul class="perf-list">' +
+      perfRow(
+        "untrackedCache",
+        "Untracked cache",
+        cacheOn,
+        cacheOn
+          ? "git reuses each folder's result instead of re-reading it"
+          : "git re-reads every folder to find new files",
+        // Only blocked by the filesystem, and only for turning it ON: a cache
+        // already in place can always be turned back off.
+        !cacheOn && perf.untrackedCacheOk === false
+          ? "Unavailable: this filesystem failed git's own check for it"
+          : ""
+      ) +
+      perfRow(
+        "fsmonitor",
+        "Filesystem monitor",
+        monitorOn,
+        monitorOn
+          ? "git asks its watcher what changed instead of looking"
+          : "git walks the working tree on every status",
+        perf.fsmonitor === "hook"
+          ? "Your own monitor program is configured here, so the panel leaves " +
+            "this alone"
+          : monitorOn
+          ? ""
+          : perf.fsmonitorSupport === "old-git"
+          ? "Unavailable: needs git 2.37 or newer"
+          : perf.fsmonitorSupport === "platform"
+          ? "Unavailable: git has no built-in monitor for this platform"
+          : ""
+      ) +
+      "</ul>";
+
+    const lead = perf.statusWasSlow
+      ? "A <code>git status</code> in this window took over two seconds, which is " +
+        "git walking your working tree. These two settings are its own fix."
+      : "The panel runs <code>git status</code> for every worktree. These two git " +
+        "settings let it skip work it has already done, which on a large " +
+        "repository is the difference between an instant refresh and a slow one.";
+
+    return (
+      '<section class="gh-section">' +
+      '<h3 class="gh-h">' +
+      icons.zap +
+      " Performance</h3>" +
+      '<p class="gh-lead">' +
+      lead +
+      "</p>" +
+      rows +
+      '<p class="gh-help dim">Each switch writes one of this repository\'s own git ' +
+      "settings (<code>core.untrackedCache</code>, <code>core.fsmonitor</code>): " +
+      "nothing global, nothing committed, and turning one off puts it back the way " +
+      "it was. The same as <code>git config</code> in this repository, which is " +
+      "still there if you prefer it.</p>" +
+      "</section>"
+    );
+  }
+
   function debugSection(data) {
     const traceEnabled = !!(data && data.traceEnabled);
     const toggle =
@@ -1365,6 +1516,15 @@
       linkInput.onkeydown = (e) => {
         if (e.key === "Enter") addLinkedPath();
       };
+    }
+    // The Performance tab's state is git calls, so the extension reads it only
+    // when asked. Requested here rather than on the tab click: `settingsTab`
+    // survives closing Settings, so reopening straight onto this tab has to ask
+    // too or the section sits on "Checking…" forever. The extension answers with
+    // a payload, which re-renders this; if there is no repo to read it answers
+    // nothing and no render follows, so this cannot spin.
+    if (settingsTab === "performance" && !(lastData && lastData.gitPerf)) {
+      send("loadGitPerf");
     }
   }
 
@@ -2091,7 +2251,9 @@
       });
       return;
     }
-    // Settings tab switch (webview-only; no round trip).
+    // Settings tab switch (webview-only; no round trip. The Performance tab's
+    // state is requested by renderSettings, which covers being switched to AND
+    // being the tab Settings reopens on).
     const tab = e.target.closest("[data-tab]");
     if (tab && settingsOpen) {
       settingsTab = tab.getAttribute("data-tab") || "github";
@@ -2304,6 +2466,15 @@
       send("toggleScm", { value: !!e.target.checked });
     } else if (e.target && e.target.id === "debug-trace") {
       send("toggleTrace", { value: !!e.target.checked });
+    } else if (e.target && e.target.getAttribute("data-perf")) {
+      // Each git accelerator has its own switch, so one can be turned off without
+      // touching the other. The extension re-reads the repo's config and posts
+      // the result, which is what re-renders these; a write that fails therefore
+      // springs the switch back on its own.
+      send("setGitPerf", {
+        perfKey: e.target.getAttribute("data-perf"),
+        value: !!e.target.checked,
+      });
     } else if (e.target && e.target.id === "branches-prune") {
       // Remember the Prune choice for the next fetch; the value is read live when
       // Fetch is clicked, so no re-render is needed here.
@@ -2389,6 +2560,12 @@
       applyActiveTerminal();
     } else if (msg.type === "openSettings") {
       openSettings();
+    } else if (msg.type === "visibility") {
+      // The extension tells us, because we cannot see it: the panel's iframe is
+      // display:none when the view is hidden, and an iframe's document.hidden
+      // follows the window rather than its own CSS, so it stays false. Only the
+      // elapsed-time tick cares (see tickAges).
+      panelVisible = msg.visible !== false;
     }
   });
 

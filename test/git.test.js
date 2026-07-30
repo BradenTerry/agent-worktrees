@@ -17,6 +17,11 @@ const {
   removeWorktree,
   claudeSessionLockPid,
   releaseStaleClaudeLocks,
+  parsePerfConfig,
+  parseGitVersion,
+  readPerfConfig,
+  setPerfSetting,
+  saysUnsupported,
 } = require("../out/git.js");
 
 function git(cwd, args) {
@@ -589,4 +594,156 @@ test("removeWorktree with force removes a locked worktree", async () => {
   await removeWorktree(r, wt, true);
   assert.ok(!fs.existsSync(wt), "worktree directory removed");
   assert.strictEqual((await listWorktrees(r)).length, 1, "only the primary remains");
+});
+
+/**
+ * Git's two `status` accelerators, offered by Settings -> Performance. The
+ * parsing is where the traps are: git's booleans are case-insensitive, and
+ * neither `keep` nor a hook path is a boolean at all.
+ */
+
+test("parsePerfConfig reads the states git can report", () => {
+  assert.deepStrictEqual(
+    parsePerfConfig("core.untrackedCache true\ncore.fsmonitor true\n"),
+    { untrackedCache: true, fsmonitor: "builtin" }
+  );
+  // Git accepts any case, and prints the key as it was written.
+  assert.deepStrictEqual(
+    parsePerfConfig("core.untrackedcache TRUE\ncore.fsmonitor True"),
+    { untrackedCache: true, fsmonitor: "builtin" }
+  );
+  // `keep` uses an existing cache without extending it: not the state we offer.
+  assert.deepStrictEqual(parsePerfConfig("core.untrackedCache keep"), {
+    untrackedCache: false,
+    fsmonitor: false,
+  });
+  // A path means the user runs their own monitor (Watchman); never overwrite it.
+  assert.deepStrictEqual(parsePerfConfig("core.fsmonitor .git/hooks/fsmonitor"), {
+    untrackedCache: false,
+    fsmonitor: "hook",
+  });
+  assert.deepStrictEqual(parsePerfConfig("core.fsmonitor false"), {
+    untrackedCache: false,
+    fsmonitor: false,
+  });
+  // No output at all: git exits non-zero when neither key is set.
+  assert.deepStrictEqual(parsePerfConfig(""), {
+    untrackedCache: false,
+    fsmonitor: false,
+  });
+});
+
+test("parseGitVersion survives the suffixes each platform adds", () => {
+  assert.deepStrictEqual(parseGitVersion("git version 2.37.0"), [2, 37]);
+  assert.deepStrictEqual(parseGitVersion("git version 2.39.3 (Apple Git-146)"), [2, 39]);
+  assert.deepStrictEqual(parseGitVersion("git version 2.45.1.windows.1"), [2, 45]);
+  assert.deepStrictEqual(parseGitVersion("git version 3.0.0"), [3, 0]);
+  assert.strictEqual(parseGitVersion("not a version"), undefined);
+});
+
+/** A fresh repo for the git-perf tests: each needs its own config to write. */
+function perfRepo(name) {
+  const r = path.join(dir, name);
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hi\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  return r;
+}
+
+test("saysUnsupported tells 'no backend here' from 'not running'", () => {
+  // Both exit non-zero, so only the message distinguishes a platform git has no
+  // monitor for (never offer it) from one where the daemon simply is not up yet.
+  assert.strictEqual(
+    saysUnsupported("fatal: fsmonitor--daemon is not supported on this platform"),
+    true
+  );
+  assert.strictEqual(
+    saysUnsupported("fsmonitor-daemon is not watching '/repo'"),
+    false
+  );
+  assert.strictEqual(saysUnsupported("fsmonitor-daemon is not running"), false);
+});
+
+test("setPerfSetting turns each accelerator on, one key at a time", async () => {
+  const r = perfRepo("perf-on");
+  // A fresh repo has neither, and asking must not look like an error.
+  assert.deepStrictEqual(await readPerfConfig(r), {
+    untrackedCache: false,
+    fsmonitor: false,
+  });
+
+  await setPerfSetting(r, "untrackedCache", true);
+  assert.deepStrictEqual(await readPerfConfig(r), {
+    untrackedCache: true,
+    fsmonitor: false,
+  });
+  assert.strictEqual(gitOut(r, ["config", "core.untrackedCache"]), "true");
+  // The other key is not touched: `git config --get` on an unset key exits 1.
+  assert.throws(
+    () => gitOut(r, ["config", "--get", "core.fsmonitor"]),
+    "core.fsmonitor was left alone"
+  );
+
+  await setPerfSetting(r, "fsmonitor", true);
+  assert.deepStrictEqual(await readPerfConfig(r), {
+    untrackedCache: true,
+    fsmonitor: "builtin",
+  });
+});
+
+test("turning the untracked cache off writes false, because unset means keep", async () => {
+  // git: the cache "will be kept, if this variable is unset or set to keep. It
+  // will automatically be removed, if set to false." So unsetting would look like
+  // it worked and leave the cache in the index, still in use.
+  const r = perfRepo("perf-off-cache");
+  await setPerfSetting(r, "untrackedCache", true);
+  await setPerfSetting(r, "untrackedCache", false);
+  assert.strictEqual(gitOut(r, ["config", "core.untrackedCache"]), "false");
+  assert.deepStrictEqual(await readPerfConfig(r), {
+    untrackedCache: false,
+    fsmonitor: false,
+  });
+});
+
+test("turning the monitor off unsets it, leaving the config as it was", async () => {
+  // Unset is what "no monitor" means for this key, so off can leave no trace.
+  const r = perfRepo("perf-off-monitor");
+  await setPerfSetting(r, "fsmonitor", true);
+  await setPerfSetting(r, "fsmonitor", false);
+  assert.throws(
+    () => gitOut(r, ["config", "--get", "core.fsmonitor"]),
+    "the key is gone, not set to false"
+  );
+  assert.deepStrictEqual(await readPerfConfig(r), {
+    untrackedCache: false,
+    fsmonitor: false,
+  });
+});
+
+test("turning the monitor off overrides a value inherited from --global", async () => {
+  // A `core.fsmonitor=true` in an outer scope survives unsetting the local key,
+  // so off has to fall back to writing false locally. GIT_CONFIG_GLOBAL points
+  // git at a throwaway file, so this never touches the developer's real one.
+  const r = perfRepo("perf-off-inherited");
+  const outer = path.join(dir, "global.gitconfig");
+  fs.writeFileSync(outer, "[core]\n\tfsmonitor = true\n");
+  const had = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = outer;
+  try {
+    assert.strictEqual((await readPerfConfig(r)).fsmonitor, "builtin");
+    await setPerfSetting(r, "fsmonitor", false);
+    assert.strictEqual(
+      (await readPerfConfig(r)).fsmonitor,
+      false,
+      "local false beats the inherited true"
+    );
+    assert.strictEqual(gitOut(r, ["config", "--local", "core.fsmonitor"]), "false");
+  } finally {
+    if (had === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = had;
+  }
 });
