@@ -93,6 +93,15 @@ over a whole session, so one used an hour ago is far behind the end of the file.
 session, and every tail read after that tops the list up — anything new is by
 definition at the end.
 
+That one pass is **not** awaited. A long session's transcript runs to several
+megabytes (5-12MB is ordinary), and awaiting it here put one such read per live
+session in front of the panel's first render — the slowest thing a freshly opened
+window did, and worse on Windows where reads of `~/.claude` pay for filter
+drivers. So the list is seeded from the tail and the scan fills in the rest on a
+later refresh, which the 1s poll delivers within a second. It runs once per
+session (`scanning` guards against the poll starting a second one mid-scan) and
+writes nothing back if the session was retired while it ran.
+
 ## Retiring agents that are no longer running
 
 Claude removes a session's file when it exits, so a clean exit takes its row with

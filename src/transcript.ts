@@ -5,6 +5,7 @@ import {
   liveSubagents,
   newSubagentDirCache,
   readSubagents,
+  rememberRetired,
   SubagentDirCache,
 } from "./subagents";
 
@@ -277,9 +278,12 @@ export class TranscriptReader {
   /** Only sessions whose transcript has been found; see transcript(). */
   private readonly located = new Map<string, string>();
   private readonly cache = new Map<string, { mtimeMs: number; tail: TranscriptTail }>();
-  /** Skills this session has invoked, scanned in full once and topped up from
-   *  every tail read after that. */
+  /** Skills this session has invoked, seeded from the tail and completed by one
+   *  background scan (see fillSkills), then topped up from every tail read. */
   private readonly skills = new Map<string, string[]>();
+  /** Sessions whose one-time full scan is in flight, so the poll cannot pile up
+   *  a scan of the same transcript on every tick. */
+  private readonly scanning = new Set<string>();
   /** Tool calls seen to have finished, per session. Accumulated across refreshes
    *  because a result scrolls out of the tail as the session goes on, and a
    *  subagent that finished must not come back to life when it does. */
@@ -332,14 +336,51 @@ export class TranscriptReader {
     const seen = this.finished.get(sessionId) ?? new Set<string>();
     for (const id of tail.finished) seen.add(id);
     this.finished.set(sessionId, seen);
-    // First sight of this session pays for the full scan; after that the tail
-    // is enough, since anything new is by definition at the end.
-    const skills = this.skills.get(sessionId) ?? (await scanSkills(file));
+    // Skills are the one thing here that needs a pass over the whole transcript
+    // (see scanSkills), and a long session's is megabytes: awaiting it put a
+    // multi-megabyte read per live session on the path to the panel's first
+    // render, which is the slowest thing a freshly opened window did. So seed
+    // from the tail and let the scan land on a later refresh. A row shows the
+    // skills its tail mentions in the meantime rather than none, and the poll
+    // reposts within a second of the scan finishing.
+    const known = this.skills.get(sessionId);
+    const skills = known ?? [];
     for (const skill of tail.skills) {
       if (!skills.includes(skill)) skills.push(skill);
     }
     this.skills.set(sessionId, skills);
+    if (!known) void this.fillSkills(sessionId, file);
     return tail;
+  }
+
+  /**
+   * Fill in the skills used before the tail, off the refresh path.
+   *
+   * Once per session, and never twice at once: the 1s poll would otherwise start
+   * a fresh scan of the same file every tick until the first one finished. The
+   * result is merged rather than assigned, since tail reads keep adding to the
+   * list while the scan runs, and dropped entirely if the session was retired
+   * meanwhile.
+   */
+  private async fillSkills(sessionId: string, file: string): Promise<void> {
+    if (this.scanning.has(sessionId)) return;
+    this.scanning.add(sessionId);
+    try {
+      const scanned = await scanSkills(file);
+      const seeded = this.skills.get(sessionId);
+      if (!seeded) return; // retained away mid-scan: nothing to fill in
+      // Scan order first (it is first-use order over the whole file), then
+      // anything only the tail has seen, which is by definition newer.
+      const merged = [...scanned];
+      for (const skill of seeded) {
+        if (!merged.includes(skill)) merged.push(skill);
+      }
+      this.skills.set(sessionId, merged);
+    } catch {
+      /* unreadable or gone: the tail-seeded list stands */
+    } finally {
+      this.scanning.delete(sessionId);
+    }
   }
 
   /** Claude's generated work summary for this session, or "". */
@@ -373,6 +414,9 @@ export class TranscriptReader {
     const found = await readSubagents(dir, { cache, finished });
     if (!found.length) return [];
     const live = liveSubagents(found, finished);
+    // Anything dropped for silence is skipped by later polls, so a session that
+    // has run dozens of subagents stops re-stating all of them every second.
+    rememberRetired(cache, found, live);
     // `toolUseId` and `lastActivity` are how a row is judged, not part of it.
     return live.map(({ toolUseId, lastActivity, ...row }) => row);
   }

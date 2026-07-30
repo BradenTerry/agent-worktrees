@@ -2,6 +2,53 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## Unreleased
+
+- **Settings → Performance: git's own speedups, with a switch each** - the panel
+  runs `git status` for every worktree, and on a large repository most of that
+  time is git walking the working tree to find untracked files. Git has two opt-in
+  fixes for exactly this (`core.untrackedCache`, which remembers each folder's
+  result, and `core.fsmonitor`, which watches the filesystem instead of re-reading
+  it), and they are off by default. The new tab shows whether this repository has
+  them and lets you turn each one on, or back off, without leaving the panel. Only
+  this repository's config is touched: nothing global, nothing committed, and off
+  really is off (for the untracked cache that means writing `false`, since git
+  treats the setting being absent as "keep the cache you already have"). It also
+  declines to do the wrong thing, and says why on the row: a filesystem that fails
+  git's own suitability check, a git too old for the built-in monitor, a platform
+  git has no monitor for, and a monitor you already run yourself are all left
+  alone. Previously this advice existed only as a line in a log channel.
+- **PR status no longer re-runs git for every worktree** - fresh PR or CI status
+  arriving from GitHub used to drive a full refresh, which re-read the working
+  tree of every worktree to learn nothing about any of them. A PR with checks
+  still running is polled every 15 seconds (7 in the window just after a push),
+  so on a repo with several worktrees that was the panel's largest steady-state
+  cost. The badge is now patched onto the cards directly, with no git at all.
+- **A working agent no longer re-runs `git status` twice a second** - Claude
+  rewrites its session file on every status transition, and a busy turn produces
+  several a second, each of which re-checked that agent's worktree. The check is
+  now made at most every two seconds per worktree. The card's own refresh button
+  and the global Refresh are unaffected.
+- **The Debug button stops re-reading every `launch.json`** - whether a worktree
+  has anything to debug was re-read and re-parsed for every worktree on every
+  refresh. It is now read once per edit; a worktree with no `launch.json` costs
+  a single failed `stat`.
+- **Background windows go quiet** - the one-second subagent poll and the webview's
+  elapsed-time tick now stop when the window is unfocused or the panel is hidden.
+  Waiting-agent badges still update, since those come from Claude's session files
+  rather than the poll.
+- **The panel appears faster in a freshly opened window** - the list of skills an
+  agent has used needs one pass over that session's whole transcript, which for a
+  long session is several megabytes, and it was read before the panel could draw
+  anything. It now happens in the background: rows appear immediately, and the
+  skills a row used earlier in its session fill in a moment later.
+- **Long sessions stop paying for their finished subagents** - a subagent's files
+  persist for the session's life, and ones retired for going silent (rather than
+  by a result the panel saw) were still checked on every poll tick. A session that
+  had run a hundred subagents paid a hundred file checks a second to render the
+  two still running; they are now skipped, and re-checked once a minute in case
+  one revives.
+
 ## 4.0.0
 
 - **The agent poll no longer re-reads what it already knows** - while agents

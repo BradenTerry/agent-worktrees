@@ -49,12 +49,14 @@ miss left that session with no work summary, no skills and no subagent rows for
 as long as the window stayed open, which is what "Claude 1" with nothing under it
 meant.
 
-So the panel polls (`AGENT_POLL_MS`, 1s) down the agent-only path, and only
-while the view is **visible** and at least one agent is on a card. With no
-pending session ids that path spawns no git: it is a `readdir` of the registry
-and of each live session's `subagents/` directory, and the posted-payload dedupe
-drops the update entirely unless something changed. An idle window, or one
-behind another view, polls nothing.
+So the panel polls (`AGENT_POLL_MS`, 1s) down the agent-only path, and only while
+the view is **visible**, the window is **focused**, and at least one agent is on
+a card. With no pending session ids that path spawns no git: it is a `readdir` of
+the registry and of each live session's `subagents/` directory, and the
+posted-payload dedupe drops the update entirely unless something changed. An idle
+window, one behind another view, or one sitting in the background polls nothing —
+these rows are on-screen detail, and the badge a background window still needs
+comes from the watcher instead.
 
 What keeps that tick cheap is a per-session cache (`SubagentDirCache`): a
 subagent's files persist for the whole session, so without one a session that
@@ -64,7 +66,14 @@ drivers. Finished subagents are skipped before any of their files are opened
 (the meta stays cached so the finished-by-`toolUseId` skip is free), the meta —
 written once at spawn, immutable after — is parsed once, and a transcript is
 re-read only when its mtime has moved, which for a working subagent it does on
-every append. A steady-state tick is a readdir plus a stat per running row.
+every append.
+
+Subagents retired by the silence backstop below are the one group with no
+finish signal to skip on, so they are remembered as retired and skipped too,
+re-checked once a minute in case one revives. Without that, a session that had
+run a hundred subagents paid a hundred stats per second to render the rows of
+the two still running. A steady-state tick is now a readdir plus a stat per
+running row.
 
 ## Subagents follow the worktree they were given
 
@@ -129,7 +138,15 @@ subagent whose transcript has not been written to for **10 minutes** is treated
 as finished. The threshold has to clear the longest plausible single tool call,
 since a subagent blocked on a slow build writes nothing while it waits; the cost
 of it being generous is that such a row can linger for up to that long, rather
-than forever.
+than forever. A row retired this way stops being stat'd every tick (above), and
+the minute-long re-check is what still lets it come back if the subagent was only
+parked on something very slow.
+
+The elapsed label on a row ticks in the webview rather than from a repost: the
+extension posts nothing while a subagent quietly works, so an age rendered once
+would sit frozen. That timer skips its DOM work entirely when the panel is hidden
+(the webview is retained across hides) or when no row carries a label, which is
+the usual state.
 
 ## What a row is doing, and who is asking you
 

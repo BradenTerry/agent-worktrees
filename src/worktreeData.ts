@@ -133,6 +133,31 @@ export interface WorktreeVM {
   debugSessions?: DebugSessionVM[];
 }
 
+/**
+ * What Settings → Performance shows about this repository: whether git's two
+ * `status` accelerators are on, and whether they can be. The panel runs `git
+ * status` per worktree repeatedly, so these are the difference between a
+ * near-instant refresh and a slow one on a large repo - but they live in the
+ * user's own repo config, so the panel reports and offers rather than acting.
+ */
+export interface GitPerfVM {
+  /** `core.untrackedCache` is on. */
+  untrackedCache: boolean;
+  /** `core.fsmonitor` is on: git's own daemon, or the user's own hook program
+   *  (which we report and leave alone). */
+  fsmonitor: false | "builtin" | "hook";
+  /** Whether the built-in monitor can be turned on here, and if not, why: this
+   *  git is too old for it, or git has no backend for this platform (where
+   *  enabling it would break `git status` rather than speed it up). */
+  fsmonitorSupport: "yes" | "old-git" | "platform";
+  /** `git update-index --test-untracked-cache` passed, i.e. this filesystem
+   *  reports directory mtimes the cache needs. Undefined until tested. */
+  untrackedCacheOk?: boolean;
+  /** A `git status` in this window was slow enough to be worth fixing, so the
+   *  tab says so instead of presenting this as a micro-optimization. */
+  statusWasSlow?: boolean;
+}
+
 export interface WorktreeData {
   repoRoot?: string;
   repoName?: string;
@@ -145,6 +170,10 @@ export interface WorktreeData {
   scmEnabled?: boolean;
   /** Whether debug tracing (the diagnostics output channel) is enabled. */
   traceEnabled?: boolean;
+  /** State of git's two `status` accelerators in this repo, for Settings →
+   *  Performance. Attached only once that tab has asked for it: reading it is
+   *  git calls, and no other view shows it. */
+  gitPerf?: GitPerfVM;
   /** Repo-relative paths symlinked into every worktree the extension creates
    *  (Settings -> Linked Files), so gitignored local config reaches worktrees. */
   linkedPaths?: string[];

@@ -71,9 +71,38 @@ export async function readLaunchFile(
   return parsed;
 }
 
-/** Whether the Debug button should render for this worktree. */
+/** Whether each worktree has anything to debug, valid while its launch.json
+ *  mtime is unchanged. Only the answer is cached, not the parsed file: starting
+ *  a session re-reads it, so a config edit can never be launched from a stale
+ *  copy. */
+const debuggableCache = new Map<string, { mtimeMs: number; has: boolean }>();
+
+/**
+ * Whether the Debug button should render for this worktree.
+ *
+ * Called for every worktree on every full refresh (window focus, an agent
+ * transition, a worktree added), so it must not read and parse a file per
+ * worktree per refresh. A missing launch.json is the common case and costs one
+ * failed stat; a present one is parsed once and re-parsed only when it is
+ * edited.
+ */
 export async function hasDebugTargets(worktreePath: string): Promise<boolean> {
-  return !!(await readLaunchFile(worktreePath));
+  const file = path.join(worktreePath, LAUNCH_REL);
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await fs.stat(file)).mtimeMs;
+  } catch {
+    // No launch.json (or unreadable): nothing to debug, and nothing to cache -
+    // one that appears later must be picked up, and a failed stat is already as
+    // cheap as this gets.
+    debuggableCache.delete(file);
+    return false;
+  }
+  const hit = debuggableCache.get(file);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.has;
+  const has = !!(await readLaunchFile(worktreePath));
+  debuggableCache.set(file, { mtimeMs, has });
+  return has;
 }
 
 /**

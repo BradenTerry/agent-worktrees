@@ -166,6 +166,8 @@ with no debug setup gets no extra clutter.
   crashed agent no longer leaves a worktree stuck as `locked`. Locks you placed
   yourself are never touched.
 - **Source Control scoping**, so VS Code's SCM view follows the worktree you pick.
+- **A Performance tab** that reports whether git's own `status` accelerators are
+  on for this repository, with a switch to turn each one on or back off.
 - **Buttons that show their work**: slow actions show a spinner in place of their
   icon.
 
@@ -192,15 +194,17 @@ are never logged.
 
 Slow on a big repository, especially on Windows? The panel's per-worktree
 `git status` is usually the cost, and git's own caches fix it at the source.
-Run these once in the repository:
+Open **Settings**, then the **Performance** tab: it shows whether this repository
+has git's untracked cache and filesystem monitor turned on, with a switch for
+each. Both make `git status` skip work it has already done, which is exactly what
+the panel keeps asking for.
 
-```
-git config core.untrackedCache true
-git config core.fsmonitor true
-```
-
-The panel logs this same hint to the output channel the first time a status
-call takes over two seconds. It never changes your git configuration itself.
+Each switch writes one of this repository's own git settings
+(`core.untrackedCache`, `core.fsmonitor`) - nothing global, nothing committed -
+and turning one off puts it back the way it was. A switch you cannot move tells
+you why on its own row: a filesystem that fails git's suitability check, a git too
+old for the built-in monitor (pre-2.37), a platform git has no monitor for, or a
+monitor you already run yourself, which the panel reports and leaves alone.
 
 ## Privacy
 
