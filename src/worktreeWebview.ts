@@ -45,6 +45,8 @@ import {
   getRemoteInfo,
   RemoteInfo,
   listIgnoredPaths,
+  listWorktreeFiles,
+  WORKTREE_FILE_CAP,
   readPerfConfig,
   setPerfSetting,
   PerfKey,
@@ -161,6 +163,8 @@ interface ActionMessage {
     | "removeWorktree"
     | "changeBranch"
     | "openWindow"
+    | "searchWorktree"
+    | "findWorktreeFile"
     | "openSettings"
     | "setGithubToken"
     | "clearGithubToken"
@@ -839,6 +843,10 @@ export class WorktreeWebviewProvider
         return this.changeBranchAction(msg.path);
       case "openWindow":
         return this.openWindow(msg.path);
+      case "searchWorktree":
+        return this.searchWorktree(msg.path);
+      case "findWorktreeFile":
+        return this.findWorktreeFile(msg.path);
       case "setGithubToken":
         return this.setGithubToken(msg.token);
       case "clearGithubToken":
@@ -1853,6 +1861,93 @@ export class WorktreeWebviewProvider
         resolve(false);
       }
     });
+  }
+
+  // --- Finding files in a worktree -------------------------------------------
+
+  /**
+   * Open Find in Files scoped to one worktree.
+   *
+   * A worktree is a sibling directory, not a workspace folder, so the search
+   * view's default scope (this window's folders) never covers it: today reaching
+   * a worktree's contents means opening it in its own window, which is exactly
+   * what splits the agents across windows. VS Code's search does honour an
+   * absolute path in "files to include" even when it lies outside the workspace,
+   * so pre-filling the include box scopes the search to the worktree without
+   * mutating the workspace or reloading the window.
+   *
+   * The query is left empty (the user types it) and the includes/excludes row is
+   * expanded, so the scope the search is running under is visible rather than
+   * silently applied.
+   */
+  private async searchWorktree(fsPath?: string): Promise<void> {
+    if (!fsPath) return;
+    await vscode.commands.executeCommand("workbench.action.findInFiles", {
+      filesToInclude: fsPath,
+      triggerSearch: false,
+      showIncludesExcludes: true,
+    });
+  }
+
+  /**
+   * Quick Open for one worktree: pick a file by name and open it in this window.
+   *
+   * `Ctrl/Cmd+P` only indexes the workspace folders, so it cannot reach a
+   * worktree either. The list comes from git (`--cached --others
+   * --exclude-standard`), which is the same set Quick Open would show and keeps
+   * gitignored build output out without us maintaining an exclusion list.
+   *
+   * The item list is handed to showQuickPick as a promise so the picker paints
+   * immediately with its own loading state instead of the sidebar button
+   * appearing dead while git runs. Files open through `vscode.open` rather than
+   * showTextDocument so a non-text pick (an image, a PDF) lands in the editor
+   * that can render it instead of failing.
+   */
+  private async findWorktreeFile(fsPath?: string): Promise<void> {
+    if (!fsPath) return;
+    const name = nameOf(fsPath);
+    const listing = listWorktreeFiles(fsPath).catch((err: unknown) => {
+      const first = (err instanceof Error ? err.message : String(err)).split(
+        "\n"
+      )[0];
+      void vscode.window.showErrorMessage(
+        `Could not list files in ${name}: ${first}`
+      );
+      return { files: [] as string[], truncated: false };
+    });
+    // label/description split mirrors Quick Open: file name first, its directory
+    // as the dimmed remainder. matchOnDescription then makes typing part of the
+    // path narrow the list, as it would there.
+    const items = listing.then(({ files }) =>
+      files.map((rel) => {
+        const dir = path.dirname(rel);
+        return {
+          label: path.basename(rel),
+          description: dir === "." ? "" : dir,
+          rel,
+        };
+      })
+    );
+    // A hit cap is stated, never silent: a truncated list would otherwise make a
+    // missing file read as "not in the worktree". Fired as the listing resolves
+    // (not after the pick) so the caveat arrives while the picker is still open;
+    // a notification does not close it or take its focus.
+    void listing.then(({ truncated }) => {
+      if (!truncated) return;
+      const cap = WORKTREE_FILE_CAP.toLocaleString();
+      void vscode.window.showWarningMessage(
+        `${name} has more than ${cap} files; the picker lists the first ${cap}.`
+      );
+    });
+    const pick = await vscode.window.showQuickPick(items, {
+      placeHolder: `Find file in ${name}`,
+      matchOnDescription: true,
+    });
+    if (!pick) return;
+    await vscode.commands.executeCommand(
+      "vscode.open",
+      vscode.Uri.file(path.join(fsPath, pick.rel))
+    );
   }
 
   /**

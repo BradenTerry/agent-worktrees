@@ -554,6 +554,60 @@ export async function addWorktree(
   }
 }
 
+/** Cap on the file list behind "Find file in worktree". Sized so the quick pick
+ *  stays responsive on a large repo; the picker states the cap rather than
+ *  silently truncating (same rule as the linked-files ignore picker). */
+export const WORKTREE_FILE_CAP = 20_000;
+
+/**
+ * Parse `git ls-files -z` output into a deduplicated, sorted path list.
+ *
+ * Pure and exported so the NUL splitting, the dedupe and the cap are unit-tested
+ * without spawning git. Deduping is not cosmetic: `--cached` lists an unmerged
+ * path once per stage, so a conflicted file would otherwise appear three times
+ * in the picker.
+ */
+export function parseWorktreeFiles(
+  stdout: string,
+  cap = WORKTREE_FILE_CAP
+): { files: string[]; truncated: boolean } {
+  const seen = new Set<string>();
+  for (const raw of stdout.split("\0")) {
+    if (!raw) continue;
+    seen.add(raw.replace(/\\/g, "/"));
+  }
+  // Case-insensitive, with the exact path as tie-break. Deliberately not
+  // localeCompare: the order would then depend on the runner's locale, and CI
+  // spans three OSes. toLowerCase is locale-independent in JS, so this sorts the
+  // same everywhere.
+  const all = [...seen].sort((a, b) => {
+    const la = a.toLowerCase();
+    const lb = b.toLowerCase();
+    if (la !== lb) return la < lb ? -1 : 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  return { files: all.slice(0, cap), truncated: all.length > cap };
+}
+
+/**
+ * Every file in a worktree that git knows about, as worktree-relative paths, for
+ * the panel's file picker.
+ *
+ * `--cached --others --exclude-standard` is the set VS Code's own Quick Open
+ * shows: tracked files plus untracked ones, minus anything gitignored. Asking
+ * git rather than walking the tree ourselves is what keeps `node_modules` and
+ * build output out of the list without us maintaining an exclusion list.
+ */
+export async function listWorktreeFiles(
+  worktreePath: string
+): Promise<{ files: string[]; truncated: boolean }> {
+  const { stdout } = await git(
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd: worktreePath }
+  );
+  return parseWorktreeFiles(stdout);
+}
+
 /** One path git currently ignores, offered as a candidate for linking. */
 export interface IgnoredEntry {
   /** Repo-relative path, forward slashes, no trailing slash. */

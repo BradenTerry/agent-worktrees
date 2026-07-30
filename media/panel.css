@@ -203,11 +203,24 @@ body {
   font-size: 14px;
   line-height: 1;
 }
+/* The action row's left group (search, find file, and Debug when the worktree
+   has launch configs). Its auto margin is what keeps New Agent pinned right, so
+   the group's own contents can come and go without the row reflowing. */
+.agent-action-row .row-lead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  min-width: 0;
+}
+.agent-action-row .row-lead .act.ghost.iconact {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+}
 /* Debug shares the action row with New Agent, taking the space to its left
    rather than costing the card another row. */
 .agent-action-row .act.debug {
   flex: 0 0 auto;
-  margin-right: auto;
   white-space: nowrap;
   gap: 5px;
 }

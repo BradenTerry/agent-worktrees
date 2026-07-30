@@ -39,6 +39,14 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg>',
     window:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
+    // Find in Files, scoped to one worktree: VS Code's own magnifier shape so it
+    // reads as "search" and not as a filter or a zoom control.
+    search:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.8" cy="6.8" r="4.3"/><path d="M10 10l3.5 3.5"/></svg>',
+    // Find file by name in one worktree: a document with a magnifier, pairing it
+    // with the search icon above while reading as "a file, not its contents".
+    fileSearch:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M9 1.8H4.2a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h3"/><path d="M9 1.8l3.3 3.3v2.4"/><circle cx="10.9" cy="10.9" r="2.6"/><path d="M12.8 12.8l1.7 1.7"/></svg>',
     skill:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 2.5L8 7 3 4.5 8 2zM3 8l5 2.5L13 8M3 11.5L8 14l5-2.5"/></svg>',
     // Run and Debug: VS Code's own play-with-bug shape, so the action reads as
@@ -174,7 +182,9 @@
   // Note: "openBranches" is intentionally absent. It opens the branches editor
   // tab (which paints instantly), but the sidebar never re-renders on that
   // action, so a spinner on its button would hang until the safety timeout. The
-  // branches view shows its own load state instead.
+  // branches view shows its own load state instead. "searchWorktree" and
+  // "findWorktreeFile" are absent for the same reason - they hand off to the
+  // search view and to a quick pick, each of which shows its own load state.
   const BUSY_ACTIONS = new Set([
     "agent",
     "agentWorktree",
@@ -829,6 +839,24 @@
       icons.window +
       "</button>";
 
+    // Reach this worktree's files from this window. A worktree is not a
+    // workspace folder, so neither Find in Files nor Ctrl/Cmd+P covers it: these
+    // two scope those to the worktree instead of making you open (and then work
+    // across) a second window. They sit in the action row rather than the card
+    // header, which already carries four buttons on a narrow sidebar.
+    const searchBtn =
+      '<button class="act ghost iconact" data-action="searchWorktree" data-path="' +
+      esc(wt.path) +
+      '" data-tip="Search this worktree\'s contents (Find in Files, scoped to it)" aria-label="Search this worktree">' +
+      icons.search +
+      "</button>";
+    const findFileBtn =
+      '<button class="act ghost iconact" data-action="findWorktreeFile" data-path="' +
+      esc(wt.path) +
+      '" data-tip="Open a file from this worktree by name" aria-label="Find file in this worktree">' +
+      icons.fileSearch +
+      "</button>";
+
     // Run and Debug for this worktree. Only rendered when the worktree has
     // launch configurations of its own; a repo with no debug setup gets no
     // button. It shares the action row with New agent (which is right-aligned),
@@ -913,7 +941,11 @@
       gitLine(wt.git, wt.path, wt.scmActive) +
       "</div>" +
       '<div class="agent-action-row">' +
+      '<span class="row-lead">' +
+      searchBtn +
+      findFileBtn +
       debugBtn +
+      "</span>" +
       agentBtn +
       "</div>" +
       debugRows +
