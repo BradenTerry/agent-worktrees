@@ -1417,6 +1417,24 @@ button.busy {
   line-height: 1.45;
   color: var(--vscode-descriptionForeground);
 }
+/* The poll-interval row uses a dropdown where the accelerators use a switch, so
+   it borrows the editor's own dropdown tokens rather than the button ones: this
+   is a choice among values, not something being turned on. */
+.perf-select {
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+  background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, rgba(128, 128, 128, 0.35)));
+  cursor: pointer;
+}
+.perf-select:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
 
 .linked-list {
   list-style: none;

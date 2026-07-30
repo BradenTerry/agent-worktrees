@@ -12,6 +12,10 @@ import {
 } from "./diagnostics";
 
 const TRACE_SETTING = "agentWorktrees.trace";
+/** The panel reads this per poll tick, so a change takes effect on its own. It
+ *  still needs a re-render: Settings → Performance shows the current rate, and
+ *  the user may have edited it in VS Code's own Settings UI instead. */
+const POLL_SECONDS_SETTING = "agentWorktrees.statusPollSeconds";
 
 /** Read the trace setting and wire git + GitHub tracing to match it. */
 function applyTraceSetting(): void {
@@ -81,6 +85,7 @@ export function activate(context: vscode.ExtensionContext) {
     // React to the trace setting being toggled (from the command or Settings UI).
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(TRACE_SETTING)) applyTraceSetting();
+      if (e.affectsConfiguration(POLL_SECONDS_SETTING)) void provider.refresh();
     }),
 
     // Keep the panel in sync when folders change by any means.

@@ -171,6 +171,9 @@ export interface WorktreeData {
   scmEnabled?: boolean;
   /** Whether debug tracing (the diagnostics output channel) is enabled. */
   traceEnabled?: boolean;
+  /** Configured `git status` poll rate in seconds, for the worktrees the Git
+   *  extension has no repository open for; shown in Settings → Performance. */
+  statusPollSeconds?: number;
   /** State of git's two `status` accelerators in this repo, for Settings →
    *  Performance. Attached only once that tab has asked for it: reading it is
    *  git calls, and no other view shows it. */

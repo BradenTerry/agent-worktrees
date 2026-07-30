@@ -15,9 +15,11 @@ more expensive than on macOS.
   session registry and come and go entirely inside one `busy` status, so the
   watcher never fires for them; see [subagents](subagents.md). It also carries the
   change counts for cards with a working agent, since a turn that long produces no
-  watcher event either (see the agent-only path below). What it does *not* do is
-  anything a background window owes the user: the Activity Bar waiting badge is
-  watcher-driven, so several open windows no longer each tick once a second.
+  watcher event either (see the agent-only path below) — but only for the cards
+  no other signal covers; see [Two tiers](#two-tiers-what-the-poll-is-actually-for).
+  What it does *not* do is anything a background window owes the user: the
+  Activity Bar waiting badge is watcher-driven, so several open windows no longer
+  each tick once a second.
 - Window focus.
 - **Document and file events** (`onDidSaveTextDocument`, plus create / delete /
   rename), filtered to `file`-scheme paths that are inside one of the cards. This
@@ -34,7 +36,13 @@ more expensive than on macOS.
   off, the session watcher is silent), so a change the user made, staged or
   discarded in the Source Control view directly above kept its old count on the
   card until they clicked Refresh. It fires for exactly the repositories that view
-  shows counts for, which is the set the disagreement is visible in.
+  shows counts for, which is the set the disagreement is visible in. It re-stats
+  **only the worktree the event names** (`onRepoStateChange`), not every card:
+  routing it through the full gather meant one repository moving spawned git for
+  every worktree on the panel, on the signal that fires most often. A root that
+  matches no card still falls back to a gather, since "a repository we do not
+  show" and "a card that has not been listed yet" are indistinguishable from
+  there.
 
 Two signals are deliberately **not** full-refresh triggers, because neither says
 anything about a working tree. Both patch the cached payload and repost, with no
@@ -60,7 +68,7 @@ view, so it is worth being explicit about which signal covers what:
 
 ```mermaid
 flowchart LR
-  A[Agent edits files<br/>mid-turn] --> P[Agent poll<br/>re-stats active cards]
+  A[Agent edits files<br/>mid-turn] --> P[Agent poll<br/>re-stats unwatched cards]
   B[You save an edit] --> D[onDidSaveTextDocument]
   C[Explorer add /<br/>delete / rename] --> D
   E[git CLI, discard,<br/>commit, checkout] --> G[Git extension<br/>state.onDidChange]
@@ -98,6 +106,47 @@ take: read-only runs do not write the index, so a refresh cannot be what the
 extension reports next. It is the information a `**/*` watcher would have given,
 already debounced, from a watcher that exists either way.
 
+## Two tiers: what the poll is actually for
+
+A worktree's counts can move without any deliberate user action, and the panel
+has exactly two ways to find out. They cost very different amounts, so cards are
+split by which one they have (`src/statusPoll.ts`):
+
+| | Change signal | `git status` cadence |
+| --- | --- | --- |
+| Repository open in the Git extension | `state.onDidChange` for that repository | on the event, plus `WATCHED_STATUS_TTL_MS` (30s) as a backstop |
+| No open repository | none | `agentWorktrees.statusPollSeconds` (default 10s), and only while an agent is working there |
+
+The first tier is free: something else is already running that watcher, and it
+tells us when to look. The second has no signal at all — nothing sees a file an
+agent writes into a linked worktree — so a timer is the only option.
+
+The old rule was a flat 2s for every card with a working agent, which paid the
+polling price on precisely the cards that least needed it. Two seconds was set
+against "the panel must not contradict the Source Control view", and that
+standard only ever applied to tier one: a card the Source Control view is not
+showing cannot contradict it. So tier two can afford to be slow, and tier one
+does not need a timer at all.
+
+The tier is read off the live subscription map rather than recorded separately,
+which is what makes the **Source Control scope button** work without knowing any
+of this. Scoping closes every other repository (see `applyScopeScm`), those
+entries come out via `onDidCloseRepository`, and their cards fall back onto the
+poll on the next tick — the scoped worktree becomes the one event-driven card,
+and the rest go quiet.
+
+The 30s backstop on tier one is not redundant. "The Git extension will tell us"
+is an assumption the user can switch off underneath the panel (`git.autorefresh`),
+and a card that silently freezes forever is a worse failure than one that costs a
+status every half minute.
+
+The rate is a setting because the right answer is per-machine: on Windows every
+process spawn is far more expensive than on macOS, and a large repository without
+git's own accelerators can take seconds per status. `pollIntervalMs` clamps
+whatever is in `settings.json` to 2–60s rather than trusting it, since
+`package.json` bounds only what the settings UI offers, and a `0` there would
+mean a git spawn per tick.
+
 ## Cost control in a full refresh
 
 - `git diff --numstat HEAD` runs only for worktrees with tracked changes. A clean
@@ -132,6 +181,13 @@ Both live in the user's repository config, so the tab reports the state and give
 each one a switch. The switch is the consent (it is labelled with what it writes,
 under a paragraph naming both keys, and it goes both ways), which is why there is
 no modal in front of it.
+
+The tab carries one control that is *not* git's: the recheck interval, which
+writes this extension's own `agentWorktrees.statusPollSeconds` and applies to
+every repository. It sits here because it answers the same question the switches
+do — "the panel is spending too much time in git" — and a fixed list of rates is
+offered rather than a free number, so the control cannot ask for a value the
+extension will clamp back underneath the user.
 
 **Turning off is not symmetric with turning on**, because git's defaults are not:
 
@@ -188,9 +244,11 @@ changed and files may have changed in *that* agent's worktree, not the others, s
 - re-runs `git status` only for the worktrees that have a reason to have changed:
   one whose session just fired (the watcher records each changed file's session
   id), or one hosting an **active** agent (or a running subagent);
-- and only if that worktree has not been stat'd in the last `STATUS_TTL_MS` (2s),
-  so a card with a working agent costs one status every two seconds rather than
-  one per poll tick.
+- and only if that worktree has not been stat'd within its tier's interval (see
+  [Two tiers](#two-tiers-what-the-poll-is-actually-for)), so a card with a working
+  agent costs one status every `agentWorktrees.statusPollSeconds` rather than one
+  per poll tick — and none at all while its repository is open in the Git
+  extension, which re-stats it on its own event instead.
 
 The non-idle half of that is not optional, and getting it wrong was a bug. The
 original rule was "only worktrees whose sessions fired", justified by *Claude
@@ -228,8 +286,10 @@ It falls back to a full refresh in three cases:
     those.
   - The branch comes free with the status call, since `git status
     --porcelain=v2 --branch` already prints a `# branch.head` header, so the check
-    costs no extra process. A worktree throttled by `STATUS_TTL_MS` is not stat'd,
-    so a checkout can go unnoticed for those two seconds.
+    costs no extra process. A worktree throttled by its tier's interval is not
+    stat'd, so a checkout can go unnoticed for that long — though on a card whose
+    repository is open, the checkout is itself a repo-state event, so it is seen
+    at once.
 
 The posted-payload dedupe strips the `lastActivity` heartbeat (bumped by every
 hook event, never rendered) from its signature, so an agent streaming tool calls

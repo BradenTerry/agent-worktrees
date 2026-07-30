@@ -189,7 +189,8 @@ first one. Each card now carries two buttons instead.
   yourself are never touched.
 - **Source Control scoping**, so VS Code's SCM view follows the worktree you pick.
 - **A Performance tab** that reports whether git's own `status` accelerators are
-  on for this repository, with a switch to turn each one on or back off.
+  on for this repository, with a switch to turn each one on or back off, and an
+  interval for how often the panel rechecks worktrees on its own.
 - **Buttons that show their work**: slow actions show a spinner in place of their
   icon.
 
@@ -227,6 +228,13 @@ and turning one off puts it back the way it was. A switch you cannot move tells
 you why on its own row: a filesystem that fails git's suitability check, a git too
 old for the built-in monitor (pre-2.37), a platform git has no monitor for, or a
 monitor you already run yourself, which the panel reports and leaves alone.
+
+The same tab has a **Recheck every** interval, which is how often the panel
+re-runs `git status` for a worktree an agent is working in. It only applies to
+worktrees that are *not* open in the Source Control view: those refresh the
+moment VS Code's own git support notices a change, and are never polled. Raise
+the interval if the panel is costing you more than the freshness is worth, which
+is most likely on Windows or a very large repository.
 
 ## Privacy
 
