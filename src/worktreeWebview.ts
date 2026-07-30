@@ -11,6 +11,7 @@ import {
   SessionIndex,
   SubagentVM,
   WorktreeData,
+  WorktreeVM,
   BranchData,
   GitPerfVM,
 } from "./worktreeData";
@@ -63,8 +64,15 @@ import {
   RegistrySession,
 } from "./sessionRegistry";
 import { systemProbes } from "./liveness";
+import {
+  isDescendantOf,
+  namesClaude,
+  parentMapSnapshot,
+  readCommandLine,
+} from "./processTree";
 import { TranscriptReader } from "./transcript";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
+import { DEFAULT_POLL_SECONDS, dueForStatus, pollIntervalMs } from "./statusPoll";
 import {
   DebugSessionTracker,
   hasDebugTargets,
@@ -117,21 +125,49 @@ const REFRESH_DEBOUNCE_MS = 500;
  *  registry writes and a poll tick collapse into one refresh. */
 const AGENT_POLL_MS = 1_000;
 
-/** How long a worktree's git status is reused on the agent-only refresh path.
+/** How long a card that has its own change event reuses its git status.
  *
- *  Claude rewrites a session's registry file on every status transition, and a
- *  working agent transitions several times a second, so the coalescer alone
- *  still let a busy turn re-stat that agent's worktree twice a second - one or
- *  two git spawns each time, which on Windows is the most expensive thing the
- *  panel does in steady state. The numbers on a card (dirty count, +/- lines)
- *  are a summary of a tree the agent is still editing; showing one a couple of
- *  seconds late is invisible, and it is refreshed by anything the user does
- *  deliberately (the card's refresh button and the global Refresh bypass this,
- *  since they gather from scratch).
+ *  A worktree whose repository the Git extension has open re-stats when that
+ *  repository's state moves (see onRepoStateChange), not on a timer, so this is
+ *  only a backstop. It exists because "the Git extension will tell us" is an
+ *  assumption the user can switch off underneath us (`git.autorefresh`), and a
+ *  card that freezes forever is a worse failure than one that costs a status
+ *  every half minute. See statusPoll.ts for the split.
  *
- *  Only the agent path throttles. A full gather always re-stats, so this can
- *  never hold a stale count for longer than the next real refresh. */
-const STATUS_TTL_MS = 2_000;
+ *  Why a timer at all was ever needed: Claude writes its session file on status
+ *  *transitions*, and one long turn is one status - measured at 39 seconds
+ *  between writes on a session that was editing files throughout. Keying the
+ *  re-stat purely off registry writes is what froze a card's counts mid-turn.
+ *
+ *  The card's refresh button and the global Refresh bypass this entirely, since
+ *  they gather from scratch. */
+const WATCHED_STATUS_TTL_MS = 30_000;
+
+/** Setting holding the poll rate, in seconds, for a card with no change event of
+ *  its own. Bounds and default live in statusPoll.ts, which is also what
+ *  defends against a value settings.json should not contain. */
+const POLL_SECONDS_SETTING = "agentWorktrees.statusPollSeconds";
+
+/**
+ * How many full gathers one un-carded working directory may trigger.
+ *
+ * A worktree an agent creates for itself is `git worktree add`-ed, chdir'd into
+ * and registered by that agent within a few hundred ms, and a gather reads the
+ * session registry before it spawns its git, so the first gather can land with
+ * the worktree listed but its session not yet registered, or the other way
+ * round. Giving up after exactly one (which is what a plain "already gathered"
+ * set does) is what left a new card sitting there with no agent on it. A few
+ * tries covers the race; a bound is still needed, because a cwd that can never
+ * be a card (an agent in an unrelated repo) must not re-gather every second
+ * for as long as it runs.
+ *
+ * Approximate on purpose: a try is counted when a gather *lands*, so while
+ * gathers are slower than the 1s poll a stuck path can start a few more than
+ * this before the count catches up. Bounding the burst is the point, not the
+ * exact number - and counting on launch instead is what made a single lost race
+ * permanent.
+ */
+const REGATHER_TRIES = 3;
 
 /** globalState key for the opt-in Source Control scope button. */
 const SCM_SCOPE_KEY = "agentWorktrees.scmScopeEnabled";
@@ -173,6 +209,7 @@ interface ActionMessage {
     | "toggleTrace"
     | "loadGitPerf"
     | "setGitPerf"
+    | "setPollSeconds"
     | "addLinkedPath"
     | "browseLinkedPath"
     | "pickIgnoredPaths"
@@ -200,6 +237,8 @@ interface ActionMessage {
   value?: boolean;
   /** Which git accelerator setGitPerf is flipping. */
   perfKey?: PerfKey;
+  /** New poll rate in seconds, for setPollSeconds. */
+  seconds?: number;
   /** Branch name, for worktreeFromBranch / deleteBranch. */
   branch?: string;
   /** Repo-relative file path, for addLinkedPath / removeLinkedPath. */
@@ -262,14 +301,28 @@ export class WorktreeWebviewProvider
   /** Coalesces session-state writes into one agent-only refresh (no full git
    *  sweep); see refreshAgents. */
   private readonly agentsDebounce: Coalescer;
+  /** Coalesces Git-extension repo-state events into one targeted re-stat. The
+   *  extension fires this per repository and can fire several in a burst (a
+   *  stage, a commit, a checkout), and each one is only worth the worktree it
+   *  names; see onRepoStateChange. */
+  private readonly reposDebounce: Coalescer;
+  /** Normalized roots whose repository reported a state change and have not been
+   *  re-stat'd yet. */
+  private readonly repoDirty = new Set<string>();
   /** Running while agents are on screen, so subagents (which the registry
    *  watcher cannot see) appear and disappear; see AGENT_POLL_MS. */
   private agentPoll?: ReturnType<typeof setInterval>;
-  /** Subagent worktrees a full gather has already been run for, so a cwd that
-   *  never becomes a card costs one re-gather rather than one per poll. */
-  private readonly regathered = new Set<string>();
+  /** Working directories a gather has been run for and still could not turn into
+   *  a card, so a cwd that never becomes one (an agent in an unrelated repo, a
+   *  subdirectory of a worktree) costs a bounded number of re-gathers rather than
+   *  one per poll. Counted, not remembered once: the first gather can lose the
+   *  race with the process that is creating the worktree, and giving up after it
+   *  is what left a card with no agent on it. See REGATHER_TRIES. */
+  private readonly regathered = new Map<string, number>();
+  /** Paths the in-flight gather was started for, judged once it lands. */
+  private pendingRegather?: Set<string>;
   /** Epoch ms each worktree's git status was last read, so a burst of agent
-   *  transitions doesn't re-spawn git for the same worktree; see STATUS_TTL_MS. */
+   *  transitions doesn't re-spawn git for the same worktree; see statusPoll.ts. */
   private readonly statusAt = new Map<string, number>();
   /** Subagent rows in the last agent refresh. Only a change is traced: the poll
    *  runs every second, and a row's whole life can be three of those, so a line
@@ -300,6 +353,11 @@ export class WorktreeWebviewProvider
   /** True once we've subscribed to the Git extension's repo open/close events,
    *  so the panel re-renders when the Source Control scope changes. */
   private scmWatchSet = false;
+  /** Working-tree subscriptions, one per repository the Git extension has open,
+   *  keyed by normalized root; see ensureRepoStateWatch. */
+  private readonly repoStateWatch = new Map<string, vscode.Disposable>();
+  /** True once the open/close side of that wiring is in place. */
+  private repoWatchSet = false;
   /** Debug sessions the panel started, so a card can stop what it launched. */
   private readonly debugSessions = new DebugSessionTracker();
 
@@ -319,6 +377,10 @@ export class WorktreeWebviewProvider
     );
     this.agentsDebounce = new Coalescer(
       () => this.refreshAgents(),
+      REFRESH_DEBOUNCE_MS
+    );
+    this.reposDebounce = new Coalescer(
+      () => this.refreshRepos(),
       REFRESH_DEBOUNCE_MS
     );
     this.registryDir = registryDir();
@@ -354,13 +416,15 @@ export class WorktreeWebviewProvider
     this.watcher.onDidChange(onChange);
     this.watcher.onDidDelete(onChange);
 
-    // No workspace-wide `**/*` file watcher: refreshing on every saved file (and,
-    // worse, on git's own `.git/index` writes) spun a perpetual refresh loop that
-    // spawned git for every worktree several times a second. The worktree/git
-    // panel only needs to update on a few discrete signals: extension load, the
-    // manual Refresh button, and Claude activity (the session-state watcher above,
-    // which also catches an agent creating a new worktree). The git line is
-    // recomputed on those refreshes rather than tracked keystroke-by-keystroke.
+    // Still no workspace-wide `**/*` file watcher: what made that untenable was
+    // git's own `.git/index` writes coming back as file events, a perpetual loop
+    // that spawned git for every worktree several times a second. The panel
+    // instead updates on discrete signals, each of which names something that
+    // actually happened: extension load, the manual Refresh button, Claude
+    // activity (the session-state watcher above, which also catches an agent
+    // creating a new worktree), window focus, the Git extension's repo state,
+    // and the document/file events below for hand edits. None of them fires for
+    // our own reads, so none of them can feed itself.
 
     // A slow status is the one thing that turns Settings → Performance from a
     // detail into a recommendation, and git is where it is measured.
@@ -400,7 +464,28 @@ export class WorktreeWebviewProvider
       vscode.window.onDidChangeWindowState((s) => {
         this.syncAgentPoll();
         if (s.focused) this.scheduleRefresh();
-      })
+      }),
+      // The user editing a file by hand. This is the one source of change no
+      // other signal sees: the agent poll only re-stats cards with a working
+      // agent, and the Git extension's repo-state event only fires for the
+      // repositories it has open - which is the workspace's own repo, not
+      // usually a linked worktree. So a hand edit to a worktree file (the
+      // panel's own "open a worktree file here" button lands them in this
+      // window) left that card's counts frozen until the next deliberate
+      // refresh.
+      //
+      // A save, not a keystroke: git only sees what is on disk, so an unsaved
+      // buffer has nothing to report anyway. That also makes this naturally
+      // sparse - one event per save, coalesced with everything else - which is
+      // why it needs no watcher and does not revive the `**\/*` problem.
+      vscode.workspace.onDidSaveTextDocument((doc) => this.onFilesChanged([doc.uri])),
+      // The same for changes made through the explorer rather than an editor:
+      // a new file, a delete, a rename all move a dirty count.
+      vscode.workspace.onDidCreateFiles((e) => this.onFilesChanged(e.files)),
+      vscode.workspace.onDidDeleteFiles((e) => this.onFilesChanged(e.files)),
+      vscode.workspace.onDidRenameFiles((e) =>
+        this.onFilesChanged(e.files.flatMap((f) => [f.oldUri, f.newUri]))
+      )
     );
   }
 
@@ -411,8 +496,12 @@ export class WorktreeWebviewProvider
     this.refreshDebounce.cancel();
     this.prNudge.cancel();
     this.agentsDebounce.cancel();
+    this.reposDebounce.cancel();
     clearInterval(this.agentPoll);
     this.agentPoll = undefined;
+    for (const sub of this.repoStateWatch.values()) sub.dispose();
+    this.repoStateWatch.clear();
+    this.repoWatchSet = false;
     // Only stops tracking: the sessions themselves belong to VS Code and keep
     // running, exactly as they would if they had been started from the debug view.
     this.debugSessions.dispose();
@@ -422,6 +511,36 @@ export class WorktreeWebviewProvider
    *  single refresh. */
   private scheduleRefresh(): void {
     this.refreshDebounce.trigger();
+  }
+
+  /**
+   * A file changed on disk through the editor or the explorer. Refresh only if it
+   * belongs to a worktree the panel is showing.
+   *
+   * The scope check is what keeps this cheap enough to be a trigger at all. With
+   * autosave on, an editing session emits a save every pause, and a full gather is
+   * a `git status` per worktree - so a file in an unrelated folder (a scratch
+   * file, another repo in a multi-root workspace) must not pay for one. Compared
+   * against the cards themselves rather than the workspace folder, since a card
+   * can be a linked worktree the user opened a file from without opening its
+   * folder, which is exactly the case the hand-edit signal exists for.
+   *
+   * Before the first gather there are no cards to compare against, and no payload
+   * to patch either, so a refresh is the right answer regardless.
+   */
+  private onFilesChanged(uris: readonly vscode.Uri[]): void {
+    const cards = this.lastData?.worktrees;
+    const relevant =
+      !cards?.length ||
+      uris.some((uri) => {
+        if (uri.scheme !== "file") return false;
+        const p = normalize(uri.fsPath);
+        return cards.some((wt) => {
+          const root = normalize(wt.path);
+          return p === root || p.startsWith(root + path.sep);
+        });
+      });
+    if (relevant) this.scheduleRefresh();
   }
 
   /**
@@ -499,6 +618,7 @@ export class WorktreeWebviewProvider
     });
 
     this.lastPosted = "";
+    void this.ensureRepoStateWatch();
     void this.refresh();
   }
 
@@ -510,12 +630,16 @@ export class WorktreeWebviewProvider
   async refresh(force = false): Promise<void> {
     if (!this.view) return;
     const seq = ++this.updateSeq;
+    // Claimed before any await, so a gather that throws on its way through
+    // cannot leave the field set and stop the retry from ever being judged.
+    const pending = this.pendingRegather;
+    this.pendingRegather = undefined;
     // Every agent on a card comes from Claude's own session registry; a session
     // that is gone has no file, so there is nothing to sweep or expire.
     const registry = await this.readAgents();
     const data = await gatherWorktrees(force, registry, this.reader);
     // A full gather just read every worktree's status, so the agent path has
-    // nothing to re-read for a moment (see STATUS_TTL_MS). Worktrees that are
+    // nothing to re-read for a moment (see statusPoll.ts). Worktrees that are
     // gone drop out, so the map tracks the cards rather than every path this
     // window has ever seen.
     const gatheredAt = Date.now();
@@ -524,12 +648,14 @@ export class WorktreeWebviewProvider
       if (!live.has(key)) this.statusAt.delete(key);
     }
     for (const key of live) this.statusAt.set(key, gatheredAt);
+    this.judgeRegather(data, live, pending);
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
     await this.annotateDebug(data);
     data.traceEnabled = vscode.workspace
       .getConfiguration()
       .get<boolean>(TRACE_SETTING, false);
+    data.statusPollSeconds = this.pollMs() / 1_000;
     if (data.repoRoot) data.linkedPaths = this.getLinkedPaths(data.repoRoot);
     // Whatever Settings → Performance last learned. Never read here: it is git
     // calls for a tab that is usually closed, so it is fetched on demand
@@ -554,7 +680,7 @@ export class WorktreeWebviewProvider
     // spawns on a many-branch repo — on every agent-activity refresh; it
     // catches up via onDidChangeViewState when re-shown.
     if (this.branchesPanel?.visible) void this.postBranches(false);
-    this.postData(data, seq);
+    await this.postGather(data, seq);
   }
 
   /**
@@ -649,41 +775,208 @@ export class WorktreeWebviewProvider
     for (const key of sessions.agents.keys()) {
       if (!known.has(key)) return this.refresh();
     }
-    // Same for a worktree created to isolate a subagent, which happens while the
-    // session is mid-turn and so is never covered by the last full gather. Once
-    // per path: a cwd that no gather can turn into a card (a subagent pointed at
-    // an unrelated repo) must not make every poll re-run git for every worktree.
-    if (sessions.unplaced.some((p) => !this.regathered.has(normalize(p)))) {
-      for (const p of sessions.unplaced) this.regathered.add(normalize(p));
+    // Same for a worktree an agent just created for itself (`claude -w`) or to
+    // isolate a subagent. Neither is covered by the last full gather, and neither
+    // trips the check above: both live inside the repo, so the row lands on the
+    // repo root's card - which the cache does know - and the new worktree has no
+    // card at all until something re-lists them.
+    //
+    // Which of those paths are worth another gather is decided *after* it lands,
+    // not here (see judgeRegather): a path that now has a card cannot be unplaced
+    // again, so it needs no bookkeeping, and a path that still has none gets a
+    // bounded number of further tries. Deciding up front, by marking every path
+    // as gathered-for before the gather had run, is what made the race with an
+    // agent registering itself permanent instead of momentary.
+    const retry = sessions.unplaced.filter(
+      (p) => (this.regathered.get(normalize(p)) ?? 0) < REGATHER_TRIES
+    );
+    if (retry.length) {
+      this.pendingRegather = new Set(retry.map(normalize));
       return this.refresh();
     }
     if (fewer) return this.refresh();
     const now = Date.now();
-    const touched = data.worktrees.filter(
-      (wt) =>
-        (sessions.agents.get(normalize(wt.path)) ?? []).some((a: AgentVM) =>
-          changed.has(a.sessionId)
-        ) &&
-        // Read at most once per STATUS_TTL_MS: a working agent transitions far
-        // faster than its dirty count is worth re-spawning git for.
-        now - (this.statusAt.get(normalize(wt.path)) ?? 0) >= STATUS_TTL_MS
+    // Which cards are worth a `git status` on this pass. Two reasons to re-stat,
+    // and the second one is not optional:
+    //
+    //  - a session on this card just wrote its registry file (`changed`), so
+    //    something happened in its worktree;
+    //  - a session on this card is `active`, whether or not it said anything.
+    //    Claude rewrites that file on status *transitions* only, and a single
+    //    long turn is one status: measured on a real session, the file went 39
+    //    seconds without a write while the agent edited four files. Keying the
+    //    re-stat purely off transitions is what froze a card's change count
+    //    while its agent worked, and left the panel disagreeing with the Source
+    //    Control view for the length of a turn.
+    //
+    // `active` specifically, not "not idle". Neither an idle nor a *waiting*
+    // session is editing: waiting means Claude is blocked on the user, and both
+    // entering and leaving it are transitions, so the last write before the pause
+    // is caught by `changed` above and the resumption announces itself. Treating
+    // waiting as work would put a card parked on a permission prompt on a
+    // two-second git treadmill for as long as the user takes to read it, which is
+    // the steady-state spawn cost this whole path exists to avoid.
+    const working = (wt: WorktreeVM): boolean => {
+      const key = normalize(wt.path);
+      const rows = sessions.agents.get(key) ?? [];
+      if (rows.some((a: AgentVM) => changed.has(a.sessionId))) return true;
+      // A waiting parent whose subagents are still running is the one exception:
+      // the parent is blocked on the user, but its fan-out keeps editing.
+      if (
+        rows.some(
+          (a: AgentVM) => a.status === "active" || (a.subagents?.length ?? 0) > 0
+        )
+      ) {
+        return true;
+      }
+      // A subagent working here for a parent session on another card: the row is
+      // owned by this card, and its parent is mid-turn by definition.
+      return (sessions.subagents.get(key) ?? []).length > 0;
+    };
+    // Only the cards the poll still owns. A worktree whose repository the Git
+    // extension has open re-stats on that repository's own change event instead
+    // (see onRepoStateChange), so the poll leaves it alone but for a backstop.
+    const due = new Set(
+      dueForStatus({
+        cards: data.worktrees.map((wt) => ({
+          path: normalize(wt.path),
+          working: working(wt),
+        })),
+        watched: new Set(this.repoStateWatch.keys()),
+        statusAt: this.statusAt,
+        now,
+        pollMs: this.pollMs(),
+        watchedMs: WATCHED_STATUS_TTL_MS,
+      })
     );
+    const touched = data.worktrees.filter((wt) => due.has(normalize(wt.path)));
+    if (await this.statWorktrees(touched, now)) return this.refresh();
+    this.applyAgents(data, sessions);
+    this.postData(data, seq);
+  }
+
+  /**
+   * Re-run `git status` for these cards and write the results onto them.
+   *
+   * Returns true when the caller should fall back to a full refresh instead of
+   * posting: an agent that ran `git checkout` (typically back to main once its
+   * PR merged) changed more than a cached payload can patch - the card's branch
+   * name, and the PR status keyed off it. The status call already reports the
+   * checked-out branch, so a mismatch means the cache is stale in ways only a
+   * full gather can fix, including re-targeting the PR service, which otherwise
+   * keeps polling (and showing) the old branch's PR.
+   *
+   * Only a positively reported, different branch counts: a status that failed
+   * (or a detached HEAD) reports none, and treating that as a switch would fall
+   * back to a full refresh on every transition.
+   */
+  private async statWorktrees(
+    touched: WorktreeVM[],
+    now: number
+  ): Promise<boolean> {
+    if (!touched.length) return false;
     const statuses = await mapLimit(touched, 4, (wt) => getStatus(wt.path));
     for (const wt of touched) this.statusAt.set(normalize(wt.path), now);
-    // An agent that ran `git checkout` (typically back to main once its PR
-    // merged) changed more than this cached payload can patch: the card's
-    // branch name, and the PR status keyed off it. The status call already
-    // reports the checked-out branch, so a mismatch here means the cache is
-    // stale in ways only a full gather can fix, including re-targeting the PR
-    // service, which otherwise keeps polling (and showing) the old branch's PR.
-    // Only a positively reported, different branch counts: a status that failed
-    // (or a detached HEAD) reports none, and treating that as a switch would
-    // fall back to a full refresh on every transition.
     const switched = touched.some(
       (wt, i) => !!statuses[i].branch && statuses[i].branch !== wt.branch
     );
-    if (switched) return this.refresh();
+    if (switched) return true;
     touched.forEach((wt, i) => (wt.git = statuses[i]));
+    return false;
+  }
+
+  /**
+   * A repository the Git extension has open reported a state change.
+   *
+   * This is the panel's free working-tree signal: the Git extension is already
+   * watching that repository and already debounces its own status runs, so we
+   * neither add a watcher nor guess when to look. What it is *not* is a reason to
+   * re-read every other worktree, which is what routing it through the full
+   * gather used to mean: one repository moving spawned git for every card on the
+   * panel, on the signal that fires most often. Re-stat the card it names.
+   *
+   * Falling back to a full refresh when nothing matches is deliberate. The root
+   * can be a repository with no card at all (another folder in a multi-root
+   * workspace), and it can be one that *should* have a card and does not yet,
+   * which only a re-list can fix.
+   */
+  private onRepoStateChange(root: string): void {
+    this.repoDirty.add(root);
+    this.reposDebounce.trigger();
+  }
+
+  /** Re-stat the worktrees whose repositories reported a change, then repost. */
+  private async refreshRepos(): Promise<void> {
+    const dirty = new Set(this.repoDirty);
+    this.repoDirty.clear();
+    // A hidden panel is gathered from scratch the moment it is shown again
+    // (onDidChangeVisibility), so spending git on counts nobody can see is pure
+    // waste and dropping these events loses nothing. Unlike the full gather this
+    // replaced, none of it is owed to the Activity Bar badge, which counts
+    // waiting agents from the registry watcher and never reads a working tree.
+    if (!this.view?.visible || !dirty.size) return;
+    const data = this.lastData;
+    if (!data) return this.refresh();
+    const touched = data.worktrees.filter((wt) => dirty.has(normalize(wt.path)));
+    // A root that names no card is a repository this panel does not show, or one
+    // whose card has yet to be listed. Only the second is worth a gather, and the
+    // two are indistinguishable from here, so gather: the first costs one sweep
+    // for a repository whose state rarely moves.
+    if (touched.length !== dirty.size) return this.refresh();
+    const seq = ++this.updateSeq;
+    if (await this.statWorktrees(touched, Date.now())) return this.refresh();
+    this.postData(data, seq);
+  }
+
+  /** Poll rate for a card with no change event of its own; see statusPoll.ts. */
+  private pollMs(): number {
+    return pollIntervalMs(
+      vscode.workspace
+        .getConfiguration()
+        .get<number>(POLL_SECONDS_SETTING, DEFAULT_POLL_SECONDS)
+    );
+  }
+
+  /**
+   * Decide what the gather that just ran proved about the working directories it
+   * was run for, and say so in the diagnostics.
+   *
+   * A path that now has a card is settled: it cannot come back as `unplaced`, so
+   * nothing needs remembering. A path that still has none gets its try counted,
+   * and the reason is worth a line either way - "the card arrived" and "this cwd
+   * is not a worktree of this repo at all" look identical from the panel (an
+   * agent that never appears), and only the second one is a path-matching
+   * problem rather than a timing one.
+   */
+  private judgeRegather(
+    data: WorktreeData,
+    cards: Set<string>,
+    pending?: Set<string>
+  ): void {
+    if (!pending?.size) return;
+    for (const p of pending) {
+      if (cards.has(p)) {
+        diag(`regather: ${p} now has a card`);
+        this.regathered.delete(p);
+        continue;
+      }
+      const tries = (this.regathered.get(p) ?? 0) + 1;
+      this.regathered.set(p, tries);
+      const placed = data.worktrees.some(
+        (wt) => p === normalize(wt.path) || p.startsWith(normalize(wt.path) + path.sep)
+      );
+      diag(
+        `regather: ${p} is still not a card after ${tries} ` +
+          `${tries === 1 ? "gather" : "gathers"} (${
+            placed ? "it is inside another card, so its row lands there" : "no card contains it"
+          })${tries >= REGATHER_TRIES ? "; not gathering for it again" : ""}`
+      );
+    }
+  }
+
+  /** Swap a session index's rows onto a payload's cards. Shared by the
+   *  agent-only refresh and the salvage in postGather. */
+  private applyAgents(data: WorktreeData, sessions: SessionIndex): void {
     for (const wt of data.worktrees) {
       const key = normalize(wt.path);
       wt.agents = sessions.agents.get(key) ?? [];
@@ -695,7 +988,38 @@ export class WorktreeWebviewProvider
       else delete wt.subagents;
     }
     data.activeSessionId = this.activeSessionId();
-    this.postData(data, seq);
+  }
+
+  /**
+   * Post a full gather's payload, re-reading agent state first if a faster
+   * agent-only refresh claimed a newer token while the git was in flight.
+   *
+   * The token guard in postData exists to stop a slow refresh's stale *agent*
+   * snapshot from overwriting newer rows, but dropping the post threw away the
+   * fresh *git* work with it, and the agent poll claims a token every second, so
+   * any gather slower than that (a `git fetch`, a PR fetch, a many-worktree
+   * status sweep) was routinely discarded. That is what left a worktree an agent
+   * had just created missing from the panel, and a card's change counts behind
+   * the Source Control view, until the user clicked Refresh and won the race.
+   *
+   * Re-indexing is cheap (the registry read is mtime-cached, the transcript
+   * titles too), so the agents it posts are current as of the post. Its git is
+   * not necessarily the newest git: a slow forced refresh (fetch + PR work) can
+   * land after a fast one and re-post the older statuses it read at the start.
+   * That self-heals on the next signal and is strictly better than the old
+   * behavior, which discarded the slow gather's payload entirely and left
+   * `lastData` on a cache that predated it.
+   */
+  private async postGather(data: WorktreeData, seq: number): Promise<void> {
+    if (!this.view) return;
+    if (seq === this.updateSeq) return this.postData(data, seq);
+    const registry = await this.readAgents();
+    const sessions = await this.indexAgents(
+      registry,
+      data.worktrees.map((wt) => wt.path)
+    );
+    this.applyAgents(data, sessions);
+    this.postData(data, ++this.updateSeq);
   }
 
   /** Registry files already parsed, keyed by path+mtime, so the 1s agent poll
@@ -861,6 +1185,8 @@ export class WorktreeWebviewProvider
         return this.loadGitPerf();
       case "setGitPerf":
         return this.setGitPerf(msg.perfKey, msg.value);
+      case "setPollSeconds":
+        return this.setPollSeconds(msg.seconds);
       case "addLinkedPath":
         return this.addLinkedPath(msg.linkPath);
       case "browseLinkedPath":
@@ -1057,12 +1383,30 @@ export class WorktreeWebviewProvider
     await this.loadGitPerf();
   }
 
+  /**
+   * Set the poll rate from its control in Settings → Performance.
+   *
+   * Written to the same `agentWorktrees.statusPollSeconds` setting the Settings
+   * UI edits, and clamped here rather than trusted: the control offers a fixed
+   * list, but a stale payload must not be able to talk us into a rate that means
+   * a git spawn per tick. Nothing needs restarting - the rate is read per tick.
+   */
+  private async setPollSeconds(seconds?: number): Promise<void> {
+    const ms = pollIntervalMs(seconds);
+    await vscode.workspace
+      .getConfiguration()
+      .update(POLL_SECONDS_SETTING, ms / 1_000, vscode.ConfigurationTarget.Global);
+    diag(`statusPoll: unwatched worktrees re-stat every ${ms / 1_000}s`);
+    this.repostSettings();
+  }
+
   /** Push a payload for the settings view alone: no git, no PR work, just the
    *  cached data with the fields the settings tabs read. */
   private repostSettings(): void {
     const data = this.lastData;
     if (!this.view || !data) return;
     if (this.gitPerf) data.gitPerf = this.withSlowFlag(this.gitPerf);
+    data.statusPollSeconds = this.pollMs() / 1_000;
     this.lastPosted = ""; // the user clicked; always show the result
     this.postData(data, this.updateSeq);
   }
@@ -1441,6 +1785,65 @@ export class WorktreeWebviewProvider
     }
   }
 
+  /**
+   * Follow the Git extension's own working-tree signal.
+   *
+   * The panel runs no file watcher of its own, deliberately (see
+   * [refresh coalescing](../docs/refresh-coalescing.md)), which left one visible
+   * gap: with no agent on any card, nothing triggers a refresh at all. A change
+   * the user staged, made or discarded in the Source Control view sitting right
+   * above the panel kept its old count until they clicked Refresh: the panel
+   * disagreeing with the view directly above it.
+   *
+   * The built-in Git extension is already watching every repository it has open
+   * and already debounces its own status runs, so `Repository.state.onDidChange`
+   * is that signal for free: no second watcher, and it fires for exactly the
+   * repositories the Source Control view is showing counts for. Each event
+   * re-stats the worktree it names (see onRepoStateChange), coalesced the same
+   * 500ms as every other discrete trigger.
+   *
+   * The map this builds is also what splits the poll's two tiers: a card in here
+   * has a change event of its own and does not need polling, a card that is not
+   * does. Deriving the tier from the live subscriptions rather than a second
+   * record is what makes the Source Control scope button work without knowing
+   * about any of this - scoping closes every other repository (see
+   * applyScopeScm), those entries come out via onDidCloseRepository, and their
+   * cards fall back onto the poll on their own.
+   *
+   * This is safe from the feedback loop that made a `**\/*` watcher untenable:
+   * our git runs are read-only and set `GIT_OPTIONAL_LOCKS=0`, so they never
+   * rewrite `.git/index` and cannot be what the extension is reporting.
+   */
+  private async ensureRepoStateWatch(): Promise<void> {
+    const api = await this.gitApi();
+    if (!api) return;
+    const watch = (repo: GitApiRepository) => {
+      const key = normalize(repo.rootUri.fsPath);
+      if (this.repoStateWatch.has(key)) return;
+      const event = repo.state?.onDidChange;
+      if (!event) return;
+      this.repoStateWatch.set(
+        key,
+        event(() => this.onRepoStateChange(key))
+      );
+    };
+    // Repositories already open, plus every one discovered later. On a fresh
+    // window the extension is often still scanning, so this loop finds nothing
+    // and the open event does the work; when we resolve after the scan it is the
+    // other way round.
+    for (const repo of api.repositories) watch(repo);
+    if (this.repoWatchSet) return;
+    this.repoWatchSet = true;
+    this.context.subscriptions.push(
+      api.onDidOpenRepository((repo) => watch(repo)),
+      api.onDidCloseRepository((repo) => {
+        const key = normalize(repo.rootUri.fsPath);
+        this.repoStateWatch.get(key)?.dispose();
+        this.repoStateWatch.delete(key);
+      })
+    );
+  }
+
   /** Subscribe (once) to repo open/close so the panel re-renders when the
    *  Source Control scope changes underneath us. */
   private async ensureScmWatch(): Promise<void> {
@@ -1681,10 +2084,86 @@ export class WorktreeWebviewProvider
     await this.refresh();
   }
 
+  /**
+   * The terminal an agent is running in, or undefined when it is not in this
+   * window.
+   *
+   * The id we launched Claude with is only a hint. It is what the terminal's env
+   * marker and this map are keyed by, but the row comes from the session
+   * registry, and a session can report an id that is not the one in its argv:
+   * `claude -w` registers a *child* process under a fresh id (measured on
+   * 2.1.220 - see processTree.ts). For those rows the id lookup can only miss,
+   * which is what made Reveal claim the terminal was in another window while the
+   * user was looking at it, and made Stop kill nothing at all.
+   *
+   * So when the id misses, ask the OS instead: the session's registry pid runs
+   * somewhere beneath exactly one terminal's shell, and only in this window.
+   * The answer is cached under the registry's id, so the process listing is paid
+   * once per session rather than once per click.
+   */
+  private async resolveTerminal(
+    sessionId: string
+  ): Promise<vscode.Terminal | undefined> {
+    const known = this.terminals.get(sessionId);
+    if (known) return known;
+    const pid = await this.claudePidFor(sessionId);
+    if (pid === undefined) return undefined;
+    const parents = await parentMapSnapshot();
+    if (!parents.size) return undefined; // no process listing: id lookup is all we have
+    for (const terminal of vscode.window.terminals) {
+      const shell = await terminal.processId;
+      if (shell === undefined) continue;
+      if (!isDescendantOf(pid, shell, parents)) continue;
+      diag(`terminal for session ${sessionId} resolved by pid ${pid} under shell ${shell}`);
+      // One id per terminal, and it is the registry's. The launch id this
+      // terminal was first filed under matches no row (that is what made the
+      // lookup miss), and leaving both in would keep activeSessionId returning
+      // the one nothing is keyed by, so the row for the terminal the user is
+      // looking at would still never highlight.
+      for (const [id, term] of this.terminals) {
+        if (term !== terminal) continue;
+        this.terminals.delete(id);
+        // The name caches are keyed the same way, and forgetTerminal only reaches
+        // ids still in this map, so they go now or they never do.
+        this.appliedTerminalNames.delete(id);
+        this.desiredTerminalNames.delete(id);
+      }
+      this.terminals.set(sessionId, terminal);
+      return terminal;
+    }
+    return undefined;
+  }
+
+  /**
+   * The pid behind a row, once confirmed to still be the Claude it claims to be.
+   *
+   * The registry's pid is only as good as the file it came from, and a session
+   * that died without cleaning up (SIGKILL, crash, power loss) leaves one the OS
+   * is free to reuse. The liveness probe is a bare existence check, so a recycled
+   * pid reads as a live agent. Everything downstream of this either kills the
+   * process or caches a terminal against it, so both need the identity, not just
+   * the number. This is the guard `killClaudeInDir` has always applied before
+   * killing by cwd; the pid paths were the ones missing it.
+   */
+  private async claudePidFor(sessionId: string): Promise<number | undefined> {
+    const pid = (await this.readAgents()).find(
+      (s) => s.sessionId === sessionId
+    )?.pid;
+    if (pid === undefined) return undefined;
+    const cmd = await readCommandLine(pid);
+    if (namesClaude(cmd)) return pid;
+    diag(
+      `session ${sessionId}: pid ${pid} is not a claude process (${
+        cmd || "no command line"
+      }); leaving it alone`
+    );
+    return undefined;
+  }
+
   /** Reveal the terminal backing an agent (if this window launched it). */
-  private focusAgent(sessionId?: string): void {
+  private async focusAgent(sessionId?: string): Promise<void> {
     if (!sessionId) return;
-    const terminal = this.terminals.get(sessionId);
+    const terminal = await this.resolveTerminal(sessionId);
     if (terminal) {
       terminal.show();
       return;
@@ -1706,34 +2185,35 @@ export class WorktreeWebviewProvider
 
   /**
    * Stop a session by every means we have, so it dies even if our in-memory
-   * terminal handle was lost (e.g. the extension host reloaded since launch):
-   *  - on Windows, tree-kill the pid Claude's session registry records for the
-   *    session. The registry file is written by the Claude process about
-   *    itself, so the pid is exact even for a `claude -w` child whose argv no
-   *    longer carries our session id, and it is reload-proof;
-   *  - elsewhere, dispose the terminal (which SIGHUPs the pty's foreground
-   *    process group) with `pkill -f <session id>` as the reload-proof backup;
-   *  - the registry's liveness probe retires the row once the pid is gone.
+   * terminal handle was lost (an extension-host reload since launch) and even if
+   * its id is not the one we launched it with (a `claude -w` child).
+   *
+   * The registry pid is the primary handle on every platform now. It is written
+   * by the Claude process about itself, so it names the exact process behind the
+   * row - which `pkill -f <session id>` does not, since a `-w` child's argv
+   * carries the id we passed to its *parent*, not its own. Killing by that id
+   * silently matched nothing, which is what made the Stop button appear dead.
+   *
+   * Order matters: tree-kill the pid first, then dispose the terminal, so the
+   * teardown cannot race the kill. Disposing also SIGHUPs the pty's foreground
+   * process group on POSIX, which reaches the parent `claude -w` process the
+   * registry knows nothing about. The registry's liveness probe retires the row
+   * once the pid is gone.
    */
   private async stopSession(sessionId: string): Promise<void> {
     if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) return;
-    if (process.platform === "win32") {
-      // Windows has no `pkill -f`, and no process-group teardown: disposing the
-      // terminal kills the shell but can leave the `claude -w` child running,
-      // holding the worktree directory open. The session registry names that
-      // exact process (each session writes `sessions/<pid>.json` about itself),
-      // so tree-kill it by pid *before* disposing the terminal, and await so
-      // the teardown never races the kill.
-      const pid = (await this.readAgents()).find(
-        (s) => s.sessionId === sessionId
-      )?.pid;
-      if (pid !== undefined) await this.killTreeByPid(pid);
-      this.terminals.get(sessionId)?.dispose();
-    } else {
-      // Disposing the terminal SIGHUPs the pty's foreground process group, which
-      // reaches the `claude -w` child too. pkill -f is the reload-proof backup:
-      // it matches the session id in the process's full command line.
-      this.terminals.get(sessionId)?.dispose();
+    // Resolve before killing: resolution reads the registry for this session's
+    // pid, and a dead session has no file left to read it from.
+    const terminal = await this.resolveTerminal(sessionId);
+    // Confirmed to still be Claude, so a registry file left behind by a crashed
+    // session cannot aim a force-kill at whatever now owns that pid.
+    const pid = await this.claudePidFor(sessionId);
+    if (pid !== undefined) await this.killTreeByPid(pid);
+    terminal?.dispose();
+    if (pid === undefined && process.platform !== "win32") {
+      // Nothing in the registry to kill (it exited between the row being
+      // rendered and this click, or its file is unreadable): fall back to the id
+      // match, which still reaches an agent we launched ourselves.
       cp.execFile("pkill", ["-f", sessionId], () => {
         /* no match / pkill missing -> nothing to kill */
       });
@@ -1786,16 +2266,39 @@ export class WorktreeWebviewProvider
   }
 
   /**
-   * Windows force-kill of a process and its child tree by pid
-   * (`taskkill /PID <pid> /T /F`). The pid comes from Claude's session
+   * Kill the process behind a row, and its children, by pid.
+   *
+   * Windows uses `taskkill /PID <pid> /T /F`: the pid comes from Claude's session
    * registry, so no process-table scan is needed — this replaces a PowerShell
    * `Get-CimInstance Win32_Process` sweep that enumerated every process and
-   * paid PowerShell's multi-second cold start on each stop. Best-effort: an
-   * already-dead pid or a missing taskkill is a no-op. Resolves once the kill
-   * has run (or failed) so callers can order a terminal dispose after it.
+   * paid PowerShell's multi-second cold start on each stop.
+   *
+   * POSIX sends SIGTERM to the pid itself - one process, not a group, with the
+   * terminal dispose that follows doing the rest via SIGHUP - letting Claude shut
+   * down and remove its own registry file. This used to be a no-op here, on the assumption that
+   * disposing the terminal was enough; it is not for a row whose terminal we
+   * could not identify, which was every `claude -w` agent (see stopSession).
+   * SIGTERM rather than SIGKILL: the process being asked to stop is one that
+   * cleans up after itself (a worktree lock, its registry entry), and the caller
+   * disposes the terminal straight after, which SIGHUPs anything still standing.
+   *
+   * Callers must pass a pid confirmed to be Claude (see claudePidFor): this will
+   * force-kill a whole tree on Windows, and a recycled pid from a stale registry
+   * file would otherwise take an unrelated process with it.
+   *
+   * Best-effort throughout: an already-dead pid or a missing taskkill is a no-op.
+   * Resolves once the kill has run (or failed) so callers can order a terminal
+   * dispose after it.
    */
   private killTreeByPid(pid: number): Promise<void> {
-    if (process.platform !== "win32") return Promise.resolve();
+    if (process.platform !== "win32") {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        /* already gone, or not ours to kill */
+      }
+      return Promise.resolve();
+    }
     return new Promise<void>((resolve) => {
       try {
         cp.execFile(
@@ -2936,6 +3439,9 @@ export class WorktreeWebviewProvider
 /** Minimal slice of the built-in Git extension API we depend on. */
 interface GitApiRepository {
   readonly rootUri: vscode.Uri;
+  /** Fires when the repository's working tree, index or HEAD moves. The
+   *  extension's own watcher, which is why the panel needs none. */
+  readonly state?: { readonly onDidChange?: vscode.Event<unknown> };
 }
 interface GitApi {
   readonly repositories: GitApiRepository[];

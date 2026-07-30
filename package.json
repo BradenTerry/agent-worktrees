@@ -100,6 +100,13 @@
           "type": "boolean",
           "default": false,
           "description": "Log every external call (each git command and GitHub API request, with its duration and result) to the \"Agent Worktrees\" output channel. Turn this on to diagnose slow or failing git/GitHub activity, then open View: Output and pick \"Agent Worktrees\". Off by default."
+        },
+        "agentWorktrees.statusPollSeconds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 2,
+          "maximum": 60,
+          "markdownDescription": "How often, in seconds, to re-run `git status` for a worktree that has an agent working in it *and* is not open in the Source Control view. Worktrees that are open there are not polled at all: they refresh on the Git extension's own change event. Lower is fresher, higher spawns less git, which matters most on Windows where every process spawn is expensive."
         }
       }
     }

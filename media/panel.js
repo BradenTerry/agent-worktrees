@@ -1379,6 +1379,42 @@
     );
   }
 
+  /**
+   * The poll rate, as a row shaped like the accelerator rows above it.
+   *
+   * A fixed list rather than a free number: the useful range is small, and every
+   * option here is a rate the extension will accept, so the control cannot ask
+   * for one that gets clamped back underneath the user.
+   */
+  function pollRow(seconds) {
+    const opts = [2, 5, 10, 30, 60]
+      .map(
+        (s) =>
+          '<option value="' +
+          s +
+          '"' +
+          (s === seconds ? " selected" : "") +
+          ">" +
+          (s === 60 ? "1 minute" : s + " seconds") +
+          "</option>"
+      )
+      .join("");
+    return (
+      '<li class="perf-row">' +
+      '<label class="perf-toggle">' +
+      '<span class="perf-name">Recheck every</span>' +
+      '<select id="poll-seconds" class="perf-select" aria-label="Status poll interval">' +
+      opts +
+      "</select>" +
+      "</label>" +
+      '<span class="perf-detail dim">' +
+      "Applies to worktrees not open in Source Control; open ones refresh on " +
+      "their own" +
+      "</span>" +
+      "</li>"
+    );
+  }
+
   function performanceSection(data) {
     const perf = data && data.gitPerf;
     if (!perf) {
@@ -1437,14 +1473,15 @@
           ? "Unavailable: git has no built-in monitor for this platform"
           : ""
       ) +
+      pollRow(data.statusPollSeconds || 10) +
       "</ul>";
 
     const lead = perf.statusWasSlow
       ? "A <code>git status</code> in this window took over two seconds, which is " +
         "git walking your working tree. These two settings are its own fix."
-      : "The panel runs <code>git status</code> for every worktree. These two git " +
-        "settings let it skip work it has already done, which on a large " +
-        "repository is the difference between an instant refresh and a slow one.";
+      : "The panel runs <code>git status</code> to keep each card's counts current. " +
+        "These two git settings let it skip work it has already done, which on a " +
+        "large repository is the difference between an instant refresh and a slow one.";
 
     return (
       '<section class="gh-section">' +
@@ -1455,11 +1492,13 @@
       lead +
       "</p>" +
       rows +
-      '<p class="gh-help dim">Each switch writes one of this repository\'s own git ' +
+      '<p class="gh-help dim">The two switches write this repository\'s own git ' +
       "settings (<code>core.untrackedCache</code>, <code>core.fsmonitor</code>): " +
       "nothing global, nothing committed, and turning one off puts it back the way " +
       "it was. The same as <code>git config</code> in this repository, which is " +
-      "still there if you prefer it.</p>" +
+      "still there if you prefer it. The interval is the panel's own setting " +
+      "(<code>agentWorktrees.statusPollSeconds</code>) and applies to every " +
+      "repository.</p>" +
       "</section>"
     );
   }
@@ -2498,6 +2537,8 @@
       send("toggleScm", { value: !!e.target.checked });
     } else if (e.target && e.target.id === "debug-trace") {
       send("toggleTrace", { value: !!e.target.checked });
+    } else if (e.target && e.target.id === "poll-seconds") {
+      send("setPollSeconds", { seconds: Number(e.target.value) });
     } else if (e.target && e.target.getAttribute("data-perf")) {
       // Each git accelerator has its own switch, so one can be turned off without
       // touching the other. The extension re-reads the repo's config and posts

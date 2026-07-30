@@ -12,7 +12,7 @@ single view.
 ## The short version
 
 - **See every worktree at once**, with changed files, `+`/`-` lines and
-  ahead/behind counts.
+  ahead/behind counts, kept in step with the Source Control view as you work.
 - **Start a Claude agent in any worktree in one click**, or create a worktree and
   an agent together.
 - **Watch each agent's status live**: active, waiting, or idle.
@@ -26,10 +26,14 @@ single view.
 
 - Launch a Claude CLI session in any worktree, each in its own terminal.
 - **Agent & Worktree** creates a fresh worktree with `claude -w` and starts an
-  agent in it, in one step.
-- Reveal or stop any session from the panel. Reveal works in the window that
-  started the agent; another window can still see and stop it, and tells you when
-  the terminal lives elsewhere.
+  agent in it, in one step. Its card appears on its own, with the agent on it -
+  no refresh click.
+- Reveal or stop any session from the panel, including agents you started by hand
+  in a terminal and the ones Agent & Worktree creates. A row finds its terminal by
+  looking at which one the process is actually running in, so Reveal no longer
+  claims a terminal you are looking at belongs to another window, and Stop reaches
+  the agent instead of missing it. A session in a different VS Code window still
+  says so, since its terminal genuinely is not here.
 - The agent whose terminal is open is highlighted, so switching between worktrees
   never leaves you typing to the wrong agent.
 - Terminal tabs are titled by Claude Code itself, so each tab tracks that
@@ -185,7 +189,8 @@ first one. Each card now carries two buttons instead.
   yourself are never touched.
 - **Source Control scoping**, so VS Code's SCM view follows the worktree you pick.
 - **A Performance tab** that reports whether git's own `status` accelerators are
-  on for this repository, with a switch to turn each one on or back off.
+  on for this repository, with a switch to turn each one on or back off, and an
+  interval for how often the panel rechecks worktrees on its own.
 - **Buttons that show their work**: slow actions show a spinner in place of their
   icon.
 
@@ -223,6 +228,13 @@ and turning one off puts it back the way it was. A switch you cannot move tells
 you why on its own row: a filesystem that fails git's suitability check, a git too
 old for the built-in monitor (pre-2.37), a platform git has no monitor for, or a
 monitor you already run yourself, which the panel reports and leaves alone.
+
+The same tab has a **Recheck every** interval, which is how often the panel
+re-runs `git status` for a worktree an agent is working in. It only applies to
+worktrees that are *not* open in the Source Control view: those refresh the
+moment VS Code's own git support notices a change, and are never polled. Raise
+the interval if the panel is costing you more than the freshness is worth, which
+is most likely on Windows or a very large repository.
 
 ## Privacy
 

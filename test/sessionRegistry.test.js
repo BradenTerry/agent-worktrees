@@ -330,6 +330,66 @@ test("once the card exists the subagent moves onto it", () => {
   );
 });
 
+test("a session in a worktree with no card is reported, not just placed on the repo root", () => {
+  // `claude -w` creates its worktree inside the repo and runs there, after the
+  // panel last ran `git worktree list`. The cwd still MATCHES the repo root's
+  // card, so nothing looked stale: the agent's row showed up on the main
+  // worktree and the new worktree had no card until the user hit refresh.
+  const fresh = path.join(REPO, ".claude", "worktrees", "bright-garden");
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: fresh, status: "active", startedAt: 1, lastActivity: 2 }],
+    [REPO]
+  );
+  assert.deepStrictEqual(idx.unplaced, [fresh], "the cue to re-gather");
+  assert.deepStrictEqual(
+    idx.agents.get(REPO).map((a) => a.sessionId),
+    ["s1"],
+    "still visible in the meantime, on the nearest card there is"
+  );
+});
+
+test("once the card exists the session moves onto it and stops asking for a gather", () => {
+  const fresh = path.join(REPO, ".claude", "worktrees", "bright-garden");
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: fresh, status: "active", startedAt: 1, lastActivity: 2 }],
+    [REPO, fresh]
+  );
+  assert.deepStrictEqual(idx.unplaced, []);
+  assert.strictEqual(idx.agents.get(REPO), undefined, "not on the main worktree");
+  assert.deepStrictEqual(
+    idx.agents.get(normalize(fresh)).map((a) => a.sessionId),
+    ["s1"]
+  );
+});
+
+test("a session whose cwd matches no card at all is reported too", () => {
+  // A worktree created outside the repo tree matches nothing, so the row is
+  // dropped entirely, and that must still ask for the gather that gives it a card.
+  const outside = normalize(path.join(os.tmpdir(), "awt-elsewhere"));
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: outside, status: "active", startedAt: 1, lastActivity: 2 }],
+    [REPO]
+  );
+  assert.deepStrictEqual(idx.unplaced, [outside]);
+  assert.strictEqual(idx.agents.size, 0);
+});
+
+test("a session in a subdirectory of a card lands on it, and settles after one gather", () => {
+  // `claude` started in `repo/src` is not itself a card and never will be. It is
+  // reported once (the caller remembers the path and stops re-gathering), and
+  // the row belongs on the worktree's card, not nowhere.
+  const sub = path.join(FEATURE, "src");
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: sub, status: "active", startedAt: 1, lastActivity: 2 }],
+    [REPO, FEATURE]
+  );
+  assert.deepStrictEqual(idx.unplaced, [sub]);
+  assert.deepStrictEqual(
+    idx.agents.get(normalize(FEATURE)).map((a) => a.sessionId),
+    ["s1"]
+  );
+});
+
 // --- the read cache ----------------------------------------------------------
 //
 // The agent poll calls readRegistry on every tick, and Claude rewrites a
