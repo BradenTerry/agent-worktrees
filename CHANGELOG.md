@@ -2,6 +2,33 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.0.1
+
+### Bug fixes
+
+- **A worktree created by `claude -w` gets its own card**, instead of the agent's
+  row appearing on the card one level up until you clicked Refresh.
+- **A card's change count keeps moving while its agent works** - a long turn
+  writes to the session file rarely, so the panel now re-checks any card with an
+  active agent, and picks up your own edits from saves, file creates, deletes and
+  renames, and the Git extension's own repository events.
+- **Reveal and Stop find a `claude -w` agent's terminal** - that session runs
+  under an id its command line never mentions, so Reveal claimed the terminal was
+  in another window and Stop killed nothing. Both now work from the pid in
+  Claude's registry.
+- **Stop will not kill a process that is no longer Claude** - a session that died
+  without cleaning up leaves a pid the system is free to hand to something else.
+  The pid is checked before anything is killed or cached against it.
+
+### Performance
+
+- **The panel polls only the worktrees nothing else is watching.** A worktree
+  whose repository the Git extension has open now refreshes on that repository's
+  own events, with a 30 second backstop; the rest keep a timer, now configurable
+  under Settings -> Performance -> Recheck every (2 to 60 seconds, default 10).
+  A repository changing also re-checks just that worktree rather than every card
+  on the panel.
+
 ## 4.0.0
 
 ### Features
