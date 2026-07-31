@@ -961,8 +961,8 @@
       '<span class="branch">' +
       esc(wt.name) +
       "</span>" +
-      ghLink +
       editBranchBtn +
+      ghLink +
       '<span class="badges">' +
       badges.join("") +
       "</span>" +
