@@ -184,6 +184,11 @@ export interface WorktreeData {
   /** Session id of the agent whose terminal is currently active in the
    *  terminal panel, so the webview can highlight who the user is talking to. */
   activeSessionId?: string;
+  /** `https://github.com/<owner>/<repo>` when origin is a github.com remote,
+   *  which is what puts the GitHub link for a branch on each card. Absent for a
+   *  repo with no origin or a non-GitHub one, and needs no token: it is a web
+   *  URL, not an API call. */
+  repoUrl?: string;
 }
 
 export function normalize(p: string): string {

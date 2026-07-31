@@ -146,6 +146,28 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* GitHub mark beside a card's name, linking that branch to its tree on GitHub.
+   Sized and colored like the icon actions next to it so the header row reads as
+   one set of controls, and it is a link rather than a button. */
+.ghlink {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  color: var(--vscode-descriptionForeground);
+  text-decoration: none;
+}
+.ghlink:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+}
+.ghlink svg {
+  width: 13px;
+  height: 13px;
+}
 .badges {
   margin-left: auto;
   display: flex;

@@ -82,6 +82,10 @@ agent needs you specifically.
 
 ## Pull requests
 
+Every card links its branch straight to GitHub: click the GitHub mark next to the
+worktree name to open that branch in the browser. No token needed, and no setup
+beyond having a GitHub remote.
+
 Connect a GitHub token and each worktree card grows a PR rollup.
 
 - Title, state, CI checks, reviews and comment count.

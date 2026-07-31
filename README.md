@@ -82,6 +82,11 @@ its running agents in one view.
 
 **GitHub and branches**
 
+- **A branch on GitHub from its card**: a GitHub mark beside the worktree name
+  links to `<origin>/tree/<branch>`. Origin is resolved once per window at the
+  repo root (every worktree of a repo shares it) and needs no token, so the link
+  is there whether or not the PR integration is on. Absent for a non-GitHub
+  origin and for a detached worktree, which has no branch page.
 - **PR status** on a card when a stored token resolves a PR for the branch: title,
   lifecycle state, CI rollup, review decision, comment counts, plus `Out of date`
   and `Auto-merge` pills (`src/github.ts`, `src/prs.ts`).
