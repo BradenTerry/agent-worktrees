@@ -17,6 +17,7 @@ import {
 } from "./worktreeData";
 import {
   countWaitingAgents,
+  repoSettingsKey,
   supportsAgentCliTitle,
   worktreeDirFor,
 } from "./worktreeUtils";
@@ -656,7 +657,11 @@ export class WorktreeWebviewProvider
       .getConfiguration()
       .get<boolean>(TRACE_SETTING, false);
     data.statusPollSeconds = this.pollMs() / 1_000;
-    if (data.repoRoot) data.linkedPaths = this.getLinkedPaths(data.repoRoot);
+    // Keyed by the primary worktree, not by data.repoRoot: in a window with a
+    // linked worktree open the repo root *is* that worktree, so reading by it
+    // would miss the list every writer stored under the primary's path.
+    const linkKey = repoSettingsKey(data.repoRoot, data.worktrees);
+    if (linkKey) data.linkedPaths = this.getLinkedPaths(linkKey);
     // Whatever Settings → Performance last learned. Never read here: it is git
     // calls for a tab that is usually closed, so it is fetched on demand
     // (loadGitPerf) and carried on every payload after that.

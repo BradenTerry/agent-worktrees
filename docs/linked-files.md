@@ -35,8 +35,13 @@ The ignore list comes from `git ls-files --others --ignored --exclude-standard
 
 ## Where the list lives, and when it applies
 
-- In the extension's `globalState` keyed by repo root, **not** the repo's
-  `.vscode/settings.json`, so each repository keeps its own.
+- In the extension's `globalState` keyed by the repository's **primary worktree**
+  path, **not** the repo's `.vscode/settings.json`, so each repository keeps its
+  own. The key is deliberately not `git rev-parse --show-toplevel`: in a window
+  with a linked worktree open that reports the worktree, so the same repository
+  would answer to a different key per window and a worktree's panel would show an
+  empty list (`repoSettingsKey` in `worktreeUtils.ts` resolves both to the
+  primary).
 - Linking runs after both creation paths: **New Worktree** and the branches view's
   **Create worktree & start agent**.
 - **Link existing worktrees** applies the whole list to worktrees that already

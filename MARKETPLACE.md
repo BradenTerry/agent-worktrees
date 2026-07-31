@@ -127,7 +127,8 @@ your build or tests depend on is simply missing, and they fail.
 <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png" alt="Settings, Linked Files tab: a list of gitignored paths symlinked into every worktree, with Add from .gitignore and Link existing worktrees buttons" width="380">
 
 - List those paths once per repository; every worktree the panel creates gets
-  them symlinked in.
+  them symlinked in. The list belongs to the repository, so it reads the same
+  whether you opened the main worktree or one of its worktrees.
 - **Add from .gitignore** shows everything git ignores so you can tick what you
   need. Whole ignored folders like `node_modules` collapse to one row.
 - Links point at your main worktree's copy, so editing once updates everywhere.

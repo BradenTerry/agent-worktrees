@@ -5,6 +5,7 @@ const path = require("node:path");
 const {
   countWaitingAgents,
   normalizePath,
+  repoSettingsKey,
   supportsAgentCliTitle,
   worktreeDirFor,
 } = require("../out/worktreeUtils.js");
@@ -90,4 +91,34 @@ test("supportsAgentCliTitle handles insider and malformed versions", () => {
   assert.strictEqual(supportsAgentCliTitle("", true), false);
   assert.strictEqual(supportsAgentCliTitle("nonsense", true), false);
   assert.strictEqual(supportsAgentCliTitle("1", true), false);
+});
+
+// Per-repo settings (the linked-files list) are stored under the primary
+// worktree's path. In a window with a linked worktree open, the repo root is
+// that worktree, so keying by it would read an entry nothing ever wrote and the
+// panel would show an empty list for a repo that has files configured.
+test("repoSettingsKey keys off the primary worktree, not the open folder", () => {
+  const primary = path.join(path.sep, "repo");
+  const linked = path.join(primary, ".claude", "worktrees", "feature");
+  const worktrees = [
+    { path: linked, isPrimary: false },
+    { path: primary, isPrimary: true },
+  ];
+  // Panel opened in the linked worktree: repoRoot is the worktree itself.
+  assert.strictEqual(repoSettingsKey(linked, worktrees), primary);
+  // Panel opened in the primary worktree: same key, so both windows agree.
+  assert.strictEqual(repoSettingsKey(primary, worktrees), primary);
+});
+
+test("repoSettingsKey falls back to the repo root without a primary", () => {
+  const root = path.join(path.sep, "repo");
+  // `git worktree list` failed, so the gather has no worktrees to name a
+  // primary from; the open folder's root is the best (and, for a plain
+  // single-worktree repo, correct) key.
+  assert.strictEqual(repoSettingsKey(root, []), root);
+  assert.strictEqual(
+    repoSettingsKey(root, [{ path: root, isPrimary: false }]),
+    root
+  );
+  assert.strictEqual(repoSettingsKey(undefined, []), undefined);
 });

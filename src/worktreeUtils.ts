@@ -62,6 +62,28 @@ export function supportsAgentCliTitle(
   return major > 1 || (major === 1 && minor >= 117);
 }
 
+/**
+ * The path a repository's per-repo settings are stored under: its primary
+ * worktree.
+ *
+ * `git rev-parse --show-toplevel` reports the *open* folder's top level, which
+ * in a linked worktree is that worktree, not the repository's primary one. So
+ * the repo root is a per-window value, and keying settings by it gives one
+ * window's list a different key from the next. Every writer of the linked-files
+ * list already keys by the primary worktree (`git worktree list`), so readers
+ * must do the same or a worktree window reads an entry that was never written.
+ *
+ * Falls back to `repoRoot` when the worktree list is unavailable (a failed
+ * `git worktree list` leaves it empty), which is the primary worktree's own
+ * path whenever the open folder is the primary one.
+ */
+export function repoSettingsKey(
+  repoRoot: string | undefined,
+  worktrees: ReadonlyArray<{ path: string; isPrimary: boolean }>
+): string | undefined {
+  return worktrees.find((wt) => wt.isPrimary)?.path ?? repoRoot;
+}
+
 /** Canonical absolute path: resolved, with any trailing slash removed. */
 export function normalizePath(p: string): string {
   const resolved = path.resolve(p).replace(/[\\/]+$/, "");
