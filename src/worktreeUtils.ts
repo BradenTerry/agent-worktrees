@@ -84,6 +84,29 @@ export function repoSettingsKey(
   return worktrees.find((wt) => wt.isPrimary)?.path ?? repoRoot;
 }
 
+/**
+ * The worktrees a linked-files sweep still has to visit: everything except the
+ * primary (which holds the real files the links point at) and the ones this
+ * window has already linked.
+ *
+ * Deliberately not "the ones the panel created": a worktree can arrive from
+ * `claude -w`, from a subagent isolating itself, or from `git worktree add` in a
+ * terminal, and those are exactly the ones that used to be left without the
+ * files. Membership is by canonical path, so `git worktree list` and a stored
+ * key compare equal on Windows too.
+ */
+export function worktreesNeedingLinks(
+  primary: string,
+  worktreePaths: readonly string[],
+  linked: ReadonlySet<string>
+): string[] {
+  const primaryKey = normalizePath(primary);
+  return worktreePaths.filter((p) => {
+    const key = normalizePath(p);
+    return key !== primaryKey && !linked.has(key);
+  });
+}
+
 /** Canonical absolute path: resolved, with any trailing slash removed. */
 export function normalizePath(p: string): string {
   const resolved = path.resolve(p).replace(/[\\/]+$/, "");

@@ -20,6 +20,7 @@ import {
   repoSettingsKey,
   supportsAgentCliTitle,
   worktreeDirFor,
+  worktreesNeedingLinks,
 } from "./worktreeUtils";
 import {
   linkPathsIntoWorktree,
@@ -325,6 +326,11 @@ export class WorktreeWebviewProvider
   /** Epoch ms each worktree's git status was last read, so a burst of agent
    *  transitions doesn't re-spawn git for the same worktree; see statusPoll.ts. */
   private readonly statusAt = new Map<string, number>();
+  /** Worktrees this window has already applied the linked-files list to, so the
+   *  sweep costs one attempt per worktree rather than one per refresh. Dropped
+   *  when a worktree goes, so a new one created at the same path is linked
+   *  again rather than mistaken for the one it replaced. */
+  private readonly linkedWorktrees = new Set<string>();
   /** Subagent rows in the last agent refresh. Only a change is traced: the poll
    *  runs every second, and a row's whole life can be three of those, so a line
    *  per tick would bury the transitions that matter. */
@@ -649,6 +655,9 @@ export class WorktreeWebviewProvider
       if (!live.has(key)) this.statusAt.delete(key);
     }
     for (const key of live) this.statusAt.set(key, gatheredAt);
+    for (const key of this.linkedWorktrees) {
+      if (!live.has(key)) this.linkedWorktrees.delete(key);
+    }
     this.judgeRegather(data, live, pending);
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
@@ -661,7 +670,12 @@ export class WorktreeWebviewProvider
     // linked worktree open the repo root *is* that worktree, so reading by it
     // would miss the list every writer stored under the primary's path.
     const linkKey = repoSettingsKey(data.repoRoot, data.worktrees);
-    if (linkKey) data.linkedPaths = this.getLinkedPaths(linkKey);
+    if (linkKey) {
+      data.linkedPaths = this.getLinkedPaths(linkKey);
+      // Not awaited: linking is filesystem work for worktrees the user is not
+      // waiting on, and it must never hold up the render.
+      void this.linkUnlinkedWorktrees(linkKey, data.worktrees);
+    }
     // Whatever Settings → Performance last learned. Never read here: it is git
     // calls for a tab that is usually closed, so it is fetched on demand
     // (loadGitPerf) and carried on every payload after that.
@@ -1745,6 +1759,60 @@ export class WorktreeWebviewProvider
       );
     }
     await this.refresh();
+  }
+
+  /**
+   * Apply the linked-files list to every worktree this window has not linked
+   * yet, off the back of a gather that has already listed them.
+   *
+   * The panel's own creation paths link a worktree the moment they make it, but
+   * they are not the only way one appears, and the ones they miss are ordinary:
+   *
+   *  - **New Agent & Worktree** hands creation to `claude -w`, so the worktree
+   *    is made inside Claude and this extension only learns of it later, from
+   *    the session registry;
+   *  - an agent isolating a subagent creates one the same way;
+   *  - `git worktree add` in a terminal, or a worktree another window made.
+   *
+   * None of those run `applyLinksToNewWorktree`, so the files simply never
+   * arrived - the setting promises "every worktree" and delivered only the two
+   * the panel created itself.
+   *
+   * One attempt per worktree per window, claimed before the await so two
+   * overlapping refreshes cannot both link the same one. The attempt is
+   * idempotent anyway: a correct link is left alone, and a real file is never
+   * replaced. Failures go to the diagnostics log rather than a warning popup -
+   * this is background work at a moment the user did not ask for it, and a
+   * popup per worktree discovered would be noise. The paths the user *does* ask
+   * for (adding one, or Link existing worktrees) still report failures.
+   */
+  private async linkUnlinkedWorktrees(
+    primary: string,
+    worktrees: readonly WorktreeVM[]
+  ): Promise<void> {
+    const paths = this.getLinkedPaths(primary);
+    if (!paths.length) return;
+    const todo = worktreesNeedingLinks(
+      primary,
+      worktrees.map((wt) => wt.path),
+      this.linkedWorktrees
+    );
+    // Claimed up front, not per iteration: a refresh that lands while this one
+    // is still working through the list would otherwise pick up everything it
+    // has not reached yet and link it a second time, concurrently.
+    for (const dir of todo) this.linkedWorktrees.add(normalize(dir));
+    for (const dir of todo) {
+      try {
+        const outcomes = await linkPathsIntoWorktree(primary, dir, paths);
+        const linked = outcomes.filter((o) => o.status === "linked");
+        if (linked.length) diag(`links: applied ${linked.length} to ${dir}`);
+        for (const f of linkFailures(outcomes)) {
+          diag(`links: ${dir}: ${f.path}: ${f.message ?? f.status}`);
+        }
+      } catch (err) {
+        diag(`links: ${dir} failed: ${(err as Error).message}`);
+      }
+    }
   }
 
   /**

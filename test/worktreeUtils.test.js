@@ -8,6 +8,7 @@ const {
   repoSettingsKey,
   supportsAgentCliTitle,
   worktreeDirFor,
+  worktreesNeedingLinks,
 } = require("../out/worktreeUtils.js");
 
 test("worktreeDirFor nests under the primary's .claude/worktrees", () => {
@@ -121,4 +122,44 @@ test("repoSettingsKey falls back to the repo root without a primary", () => {
     root
   );
   assert.strictEqual(repoSettingsKey(undefined, []), undefined);
+});
+
+// The linked-files sweep. A worktree can appear without the panel having made
+// it - New Agent & Worktree hands creation to `claude -w`, a subagent isolates
+// itself in one, `git worktree add` runs in a terminal - and those are exactly
+// the ones that used to be left without the files.
+test("worktreesNeedingLinks picks up worktrees the panel did not create", () => {
+  const primary = path.join(path.sep, "repo");
+  const base = path.join(primary, ".claude", "worktrees");
+  const fromPanel = path.join(base, "feature");
+  const fromClaude = path.join(base, "claude-made");
+  const todo = worktreesNeedingLinks(
+    primary,
+    [primary, fromPanel, fromClaude],
+    new Set([normalizePath(fromPanel)])
+  );
+  // The primary holds the real files, and fromPanel was linked at creation.
+  assert.deepStrictEqual(todo, [fromClaude]);
+});
+
+test("worktreesNeedingLinks compares paths canonically", () => {
+  const primary = path.join(path.sep, "repo");
+  const wt = path.join(primary, ".claude", "worktrees", "feature");
+  // A trailing separator (or any other non-canonical spelling) must not make
+  // the primary look like a worktree needing links, nor hide an already-linked
+  // one and link it a second time.
+  assert.deepStrictEqual(
+    worktreesNeedingLinks(primary + path.sep, [primary, wt], new Set()),
+    [wt]
+  );
+  assert.deepStrictEqual(
+    worktreesNeedingLinks(primary, [wt + path.sep], new Set([normalizePath(wt)])),
+    []
+  );
+});
+
+test("worktreesNeedingLinks is empty for a repo with only its primary", () => {
+  const primary = path.join(path.sep, "repo");
+  assert.deepStrictEqual(worktreesNeedingLinks(primary, [primary], new Set()), []);
+  assert.deepStrictEqual(worktreesNeedingLinks(primary, [], new Set()), []);
 });
