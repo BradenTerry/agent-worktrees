@@ -1,5 +1,8 @@
 :root {
   --gap: 8px;
+  /* Gutter between worktree cards. Wider than the padding inside a card, so the
+     break between two worktrees reads as a break and not as another row. */
+  --card-gap: 14px;
 }
 
 * {
@@ -91,21 +94,34 @@ body {
   line-height: 1.5;
 }
 
+/* One worktree, one card. Three things separate a card from the next, because
+   no single one of them survives every theme: the gutter between cards (bigger
+   than the padding inside them, so the break reads as a break), a tint that
+   lifts the card off the page (many themes set editorWidget-background within a
+   shade or two of the panel background, leaving the border doing all the work),
+   and an edge in neutral gray rather than the theme's panel-border token, which
+   is as low as 12% white in the default dark theme. Translucent gray keeps all
+   of it working in light and dark without a second hardcoded color. */
 .card {
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  border: 1px solid rgba(127, 127, 127, 0.42);
   border-radius: 6px;
   padding: 8px 10px;
-  margin-bottom: var(--gap);
-  background: var(--vscode-editorWidget-background, transparent);
-}
-/* Alternating row tint so adjacent rows read as distinct. A translucent gray
-   layered over the base widget background, so it works in light and dark themes
-   without a second hardcoded color. */
-.card:nth-child(even) {
+  margin-bottom: var(--card-gap);
   background-color: var(--vscode-editorWidget-background, transparent);
   background-image: linear-gradient(
-    rgba(127, 127, 127, 0.16),
-    rgba(127, 127, 127, 0.16)
+    rgba(127, 127, 127, 0.07),
+    rgba(127, 127, 127, 0.07)
+  );
+}
+/* Alternating tint so two adjacent cards are never the same shade, which is
+   what tells them apart where the boundary is off screen. Kept gentle: the
+   border and the gutter carry the separation, and a heavier tint turns the card
+   gray enough in a light theme that the blocks inside it (agents bar, PR rollup)
+   read as lighter than the card they sit on. */
+.card:nth-child(even) {
+  background-image: linear-gradient(
+    rgba(127, 127, 127, 0.14),
+    rgba(127, 127, 127, 0.14)
   );
 }
 .card.open {
@@ -145,6 +161,28 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* GitHub mark beside a card's name, linking that branch to its tree on GitHub.
+   Sized and colored like the icon actions next to it so the header row reads as
+   one set of controls, and it is a link rather than a button. */
+.ghlink {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  color: var(--vscode-descriptionForeground);
+  text-decoration: none;
+}
+.ghlink:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+}
+.ghlink svg {
+  width: 13px;
+  height: 13px;
 }
 .badges {
   margin-left: auto;
@@ -1818,7 +1856,9 @@ button.busy {
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
   background: var(--vscode-editorWidget-background, transparent);
 }
-/* Alternating row tint, matching the worktree cards (see .card:nth-child). */
+/* Alternating row tint. Lighter than the worktree cards' (see .card): these
+   rows are short and this list is a wide editor tab, so they do not need the
+   cards' heavier edge to stay apart. */
 .brow:nth-child(even) {
   background-color: var(--vscode-editorWidget-background, transparent);
   background-image: linear-gradient(

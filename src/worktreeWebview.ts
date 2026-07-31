@@ -662,6 +662,16 @@ export class WorktreeWebviewProvider
     data.scmEnabled = this.isScmEnabled();
     if (data.scmEnabled) await this.annotateScmActive(data);
     await this.annotateDebug(data);
+    // The GitHub link each card carries for its branch. Resolved at the repo
+    // root because every worktree of a repo shares one origin, cached by
+    // remoteFor so this is a single `git remote get-url` per window, and kept
+    // out of the PR block below: a web link needs no token and no integration.
+    const origin = data.repoRoot
+      ? await this.remoteFor(data.repoRoot)
+      : undefined;
+    if (origin) {
+      data.repoUrl = `https://github.com/${origin.owner}/${origin.repo}`;
+    }
     data.traceEnabled = vscode.workspace
       .getConfiguration()
       .get<boolean>(TRACE_SETTING, false);

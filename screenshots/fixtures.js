@@ -66,6 +66,10 @@ function overviewData() {
   return {
     repoRoot: REPO,
     repoName: "acme-web",
+    // A github.com origin, which is what puts the GitHub link for a branch on
+    // each card. Set here so the listing images show the panel a user with a
+    // GitHub remote actually gets.
+    repoUrl: "https://github.com/acme/acme-web",
     hooksInstalled: true,
     prEnabled: true,
     // The Source Control scope button defaults to on in the extension, so the
