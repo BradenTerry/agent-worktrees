@@ -2,6 +2,32 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.0.2
+
+### Features
+
+- **Debug a launch configuration that asks you something.** A config using
+  `${input:...}` now prompts from the worktree's own `inputs` - a text box, a list
+  to pick from, or a command that supplies the value - instead of failing or
+  asking with your main checkout's definition. A compound asks once for an input
+  its configurations share, a `preLaunchTask` gets its own inputs too, and nothing
+  you type is written to the log.
+- **Open a branch on GitHub from its card.** The GitHub mark beside the worktree
+  name opens that branch in the browser. No token and no setup beyond having a
+  GitHub remote.
+- **Worktree cards are easier to tell apart** - a wider gutter, a stronger edge
+  and a tint on every card, so where one worktree ends and the next begins reads
+  at a glance in light and dark themes.
+- **Linked files reach every worktree**, not just the two the panel creates
+  itself: the ones `claude -w` makes, a subagent's isolated worktree, and any
+  `git worktree add` you run in a terminal.
+
+### Bug fixes
+
+- **Settings -> Linked Files lists the paths you configured.** With a linked
+  worktree as the open folder it read the list under a key nothing writes, so the
+  tab looked empty for a repo that had files set up.
+
 ## 4.0.1
 
 ### Bug fixes
