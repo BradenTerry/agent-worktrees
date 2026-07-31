@@ -6,7 +6,12 @@ const {
   inputRefs,
   applyInputValues,
 } = require("../out/debugInputs.js");
-const { parseLaunchJson, prepareConfig } = require("../out/debugTargets.js");
+const {
+  parseLaunchJson,
+  prepareConfig,
+  taggedFromInput,
+  FROM_INPUT_KEY,
+} = require("../out/debugTargets.js");
 const { parseTaskInputs } = require("../out/debugTasks.js");
 
 const WT = "/repo/.claude/worktrees/feature";
@@ -174,6 +179,21 @@ test("does not mutate the parsed configuration", () => {
   const config = { name: "Run", args: ["${input:env}"] };
   applyInputValues(config, { env: "prod" });
   assert.deepEqual(config.args, ["${input:env}"]);
+});
+
+test("a session is only claimed as input-fed when it is tagged as one", () => {
+  assert.equal(taggedFromInput({ [FROM_INPUT_KEY]: true }), true);
+  for (const config of [
+    undefined,
+    null,
+    {},
+    { name: "Run" },
+    { [FROM_INPUT_KEY]: false },
+    { [FROM_INPUT_KEY]: "true" },
+    "a string",
+  ]) {
+    assert.equal(taggedFromInput(config), false);
+  }
 });
 
 test("a value carrying folder variables is rewritten to the worktree", () => {

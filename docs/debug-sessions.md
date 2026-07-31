@@ -60,8 +60,10 @@ they can be named per worktree and stopped, which is what the session rows are f
   which worktree a session belongs to when several are running.
 - The worktree path is recorded on the configuration itself
   (`agentWorktreesPath`), plus `agentWorktreesNoDebug` for a run started without
-  debugging. `DebugSession.configuration` keeps unknown properties verbatim, which
-  is how a running session is mapped back to its card.
+  debugging and `agentWorktreesFromInput` for one filled in from a prompt, which
+  is how stopping it stays out of the log too. `DebugSession.configuration` keeps
+  unknown properties verbatim, which is how a running session is mapped back to
+  its card.
 
 The `folder` argument passed to `startDebugging` is the workspace folder that *is*
 the worktree when there is one, else the first folder. Since the folder variables
@@ -108,8 +110,16 @@ configuration with no `${input:...}` left in it.
   tasks.json `inputs` - a separate namespace from launch.json's, as in VS Code.
   The panel runs that task itself, so an unsubstituted reference would otherwise
   reach a shell verbatim.
-- A `password` input's value stays out of the diagnostics log. A pre-launch task
-  fed by one traces its label rather than the command line the value is in.
+- **An input-fed launch is not logged at all.** What the user typed ends up in the
+  configuration's name, program and arguments, and the diagnostics log is the
+  thing that gets pasted into bug reports - a `password` input exists precisely
+  because its value should not be lying around. So a configuration that
+  referenced an input is not traced when it starts, when it fails, or when it is
+  stopped, and neither is a pre-launch task an input fed. The prompts themselves
+  log nothing either. What still gets logged carries only launch.json and
+  tasks.json content: the id that was not declared, a task label, a command name.
+  The cost is that a failed input-fed launch leaves no trace line, so it is
+  diagnosed from VS Code's own error and the panel's warning.
 
 ## preLaunchTask, or: the reason this is not one API call
 

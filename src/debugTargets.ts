@@ -57,6 +57,10 @@ export interface DebugTarget {
 export const WORKTREE_KEY = "agentWorktreesPath";
 /** Config key marking a session started with "Run without debugging". */
 export const NO_DEBUG_KEY = "agentWorktreesNoDebug";
+/** Config key marking a session whose configuration was filled in from an
+ *  `${input:...}` answer. Nothing about such a session is logged: its name and
+ *  arguments hold what the user typed. */
+export const FROM_INPUT_KEY = "agentWorktreesFromInput";
 
 const EMPTY: LaunchFile = { configurations: [], compounds: [], inputs: [] };
 
@@ -247,4 +251,11 @@ export function taggedWorktree(config: unknown): string | undefined {
 export function taggedNoDebug(config: unknown): boolean {
   if (!config || typeof config !== "object") return false;
   return (config as Record<string, unknown>)[NO_DEBUG_KEY] === true;
+}
+
+/** Whether a running session was configured from an input answer, and so must
+ *  stay out of the log. */
+export function taggedFromInput(config: unknown): boolean {
+  if (!config || typeof config !== "object") return false;
+  return (config as Record<string, unknown>)[FROM_INPUT_KEY] === true;
 }

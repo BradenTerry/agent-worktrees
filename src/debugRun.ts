@@ -21,6 +21,7 @@ import { normalizePath } from "./worktreeUtils";
 import {
   DebugConfigLike,
   DebugTarget,
+  FROM_INPUT_KEY,
   LaunchFile,
   debugTargets,
   launchTasksOf,
@@ -28,6 +29,7 @@ import {
   prepareConfig,
   resolveTarget,
   substituteFolderVars,
+  taggedFromInput,
   taggedNoDebug,
   taggedWorktree,
 } from "./debugTargets";
@@ -164,16 +166,6 @@ async function pickTarget(
 }
 
 /**
- * Resolved input values, plus whether any of them came from a `password` input.
- * What the user typed there must not reach the diagnostics log, and a task's
- * command line is otherwise traced verbatim.
- */
-interface InputValues {
-  values: Record<string, string>;
-  secret: boolean;
-}
-
-/**
  * Ask for a `pickString` input. `createQuickPick` rather than `showQuickPick`
  * because the declaration's `default` has to come up selected without reordering
  * the options the author listed.
@@ -279,9 +271,8 @@ async function resolveInputValues(
   worktreePath: string,
   worktreeName: string,
   source: string
-): Promise<InputValues | undefined> {
+): Promise<Record<string, string> | undefined> {
   const values: Record<string, string> = {};
-  let secret = false;
   const basename = path.basename(worktreePath);
   for (const id of refs) {
     const declared = defs.find((d) => d.id === id);
@@ -296,14 +287,10 @@ async function resolveInputValues(
     // The declaration's own paths mean the worktree too.
     const def = substituteFolderVars(declared, worktreePath, basename) as InputDef;
     const value = await promptInput(def, `Debug in ${worktreeName}`);
-    if (value === undefined) {
-      trace(`debug: input "${id}" dismissed, not launching`);
-      return undefined;
-    }
+    if (value === undefined) return undefined;
     values[id] = value;
-    if (def.type === "promptString" && def.password === true) secret = true;
   }
-  return { values, secret };
+  return values;
 }
 
 /**
@@ -324,8 +311,15 @@ function folderFor(worktreePath: string): vscode.WorkspaceFolder | undefined {
 /** A pre-launch task whose input prompt was dismissed: abandon the launch. */
 const CANCELLED = "cancelled" as const;
 
-/** A task to run, plus whether a `password` input fed it - see InputValues. */
-type ResolvedTask = TaskSpec & { secret?: boolean };
+/**
+ * A task to run, and whether an `${input:...}` fed it.
+ *
+ * Nothing the user answered a prompt with is written to the diagnostics log: that
+ * log gets pasted into bug reports, and a `password` input exists precisely
+ * because its value should not be lying around. A task whose command line holds
+ * an answer is therefore not traced.
+ */
+type ResolvedTask = TaskSpec & { fromInput?: boolean };
 
 /**
  * Resolve a `preLaunchTask` label against the worktree's own tasks.json, falling
@@ -388,18 +382,15 @@ async function withTaskInputs(
 ): Promise<ResolvedTask | typeof CANCELLED> {
   const refs = inputRefs([spec.command, spec.args, spec.cwd]);
   if (!refs.length) return spec;
-  const resolved = await resolveInputValues(
+  const values = await resolveInputValues(
     refs,
     parseTaskInputs(tasksText),
     worktreePath,
     worktreeName,
     TASKS_REL
   );
-  if (!resolved) return CANCELLED;
-  return {
-    ...(applyInputValues(spec, resolved.values) as TaskSpec),
-    secret: resolved.secret,
-  };
+  if (!values) return CANCELLED;
+  return { ...(applyInputValues(spec, values) as TaskSpec), fromInput: true };
 }
 
 /**
@@ -420,13 +411,12 @@ async function runLaunchTask(spec: ResolvedTask): Promise<boolean> {
     panel: vscode.TaskPanelKind.Dedicated,
     clear: true,
   };
-  // A password input's value is in this command line, so trace the label alone
-  // when one fed it.
-  trace(
-    spec.secret
-      ? `debug: preLaunchTask "${spec.label}" in ${spec.cwd}`
-      : `debug: preLaunchTask ${spec.command} ${spec.args.join(" ")} in ${spec.cwd}`
-  );
+  // Not traced when an input fed it: the command line holds what was typed.
+  if (!spec.fromInput) {
+    trace(
+      `debug: preLaunchTask ${spec.command} ${spec.args.join(" ")} in ${spec.cwd}`
+    );
+  }
 
   let execution: vscode.TaskExecution;
   try {
@@ -555,7 +545,7 @@ export async function startWorktreeDebug(
       LAUNCH_REL
     );
     if (!resolved) return 0;
-    values = resolved.values;
+    values = resolved;
   }
 
   const folder = folderFor(worktreePath);
@@ -572,17 +562,27 @@ export async function startWorktreeDebug(
       basename,
       choice.noDebug
     );
-    trace(
-      `debug: start ${prepared.name} in ${worktreePath}` +
-        (choice.noDebug ? " (no debug)" : "")
-    );
+    // A configuration filled in from a prompt stays out of the log entirely: its
+    // name, program and arguments hold what the user typed. The tag travels with
+    // the session so stopping it is not logged either.
+    const fromInput = inputRefs(raw).length > 0;
+    if (fromInput) {
+      prepared[FROM_INPUT_KEY] = true;
+    } else {
+      trace(
+        `debug: start ${prepared.name} in ${worktreePath}` +
+          (choice.noDebug ? " (no debug)" : "")
+      );
+    }
     let ok = false;
     try {
       ok = await vscode.debug.startDebugging(folder, prepared, {
         noDebug: choice.noDebug,
       });
     } catch (e) {
-      diag(`debug: startDebugging threw for ${prepared.name}: ${String(e)}`);
+      if (!fromInput) {
+        diag(`debug: startDebugging threw for ${prepared.name}: ${String(e)}`);
+      }
     }
     if (ok) {
       started++;
@@ -590,7 +590,7 @@ export async function startWorktreeDebug(
       // startDebugging resolves false when the adapter refuses (a missing
       // program, an uninstalled debug extension). VS Code has already shown its
       // own error, so only say which configuration it was.
-      diag(`debug: ${prepared.name} did not start`);
+      if (!fromInput) diag(`debug: ${prepared.name} did not start`);
       vscode.window.showWarningMessage(
         `Could not start "${config.name}" in ${worktreeName}.`
       );
@@ -612,7 +612,13 @@ export async function startWorktreeDebug(
 export class DebugSessionTracker implements vscode.Disposable {
   private readonly live = new Map<
     string,
-    { session: vscode.DebugSession; worktree: string; vm: DebugSessionVM }
+    {
+      session: vscode.DebugSession;
+      worktree: string;
+      vm: DebugSessionVM;
+      /** Configured from an input answer, so it is never named in the log. */
+      fromInput: boolean;
+    }
   >();
   private readonly emitter = new vscode.EventEmitter<void>();
   /** Fires when a tracked session starts or ends, so the panel can re-render. */
@@ -627,6 +633,7 @@ export class DebugSessionTracker implements vscode.Disposable {
         this.live.set(session.id, {
           session,
           worktree: normalizePath(worktree),
+          fromInput: taggedFromInput(session.configuration),
           vm: {
             id: session.id,
             label: session.name,
@@ -663,7 +670,7 @@ export class DebugSessionTracker implements vscode.Disposable {
   async stop(id: string): Promise<void> {
     const entry = this.live.get(id);
     if (!entry) return;
-    trace(`debug: stop ${entry.vm.label}`);
+    if (!entry.fromInput) trace(`debug: stop ${entry.vm.label}`);
     await vscode.debug.stopDebugging(entry.session);
   }
 
