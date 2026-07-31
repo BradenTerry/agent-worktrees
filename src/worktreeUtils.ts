@@ -62,6 +62,51 @@ export function supportsAgentCliTitle(
   return major > 1 || (major === 1 && minor >= 117);
 }
 
+/**
+ * The path a repository's per-repo settings are stored under: its primary
+ * worktree.
+ *
+ * `git rev-parse --show-toplevel` reports the *open* folder's top level, which
+ * in a linked worktree is that worktree, not the repository's primary one. So
+ * the repo root is a per-window value, and keying settings by it gives one
+ * window's list a different key from the next. Every writer of the linked-files
+ * list already keys by the primary worktree (`git worktree list`), so readers
+ * must do the same or a worktree window reads an entry that was never written.
+ *
+ * Falls back to `repoRoot` when the worktree list is unavailable (a failed
+ * `git worktree list` leaves it empty), which is the primary worktree's own
+ * path whenever the open folder is the primary one.
+ */
+export function repoSettingsKey(
+  repoRoot: string | undefined,
+  worktrees: ReadonlyArray<{ path: string; isPrimary: boolean }>
+): string | undefined {
+  return worktrees.find((wt) => wt.isPrimary)?.path ?? repoRoot;
+}
+
+/**
+ * The worktrees a linked-files sweep still has to visit: everything except the
+ * primary (which holds the real files the links point at) and the ones this
+ * window has already linked.
+ *
+ * Deliberately not "the ones the panel created": a worktree can arrive from
+ * `claude -w`, from a subagent isolating itself, or from `git worktree add` in a
+ * terminal, and those are exactly the ones that used to be left without the
+ * files. Membership is by canonical path, so `git worktree list` and a stored
+ * key compare equal on Windows too.
+ */
+export function worktreesNeedingLinks(
+  primary: string,
+  worktreePaths: readonly string[],
+  linked: ReadonlySet<string>
+): string[] {
+  const primaryKey = normalizePath(primary);
+  return worktreePaths.filter((p) => {
+    const key = normalizePath(p);
+    return key !== primaryKey && !linked.has(key);
+  });
+}
+
 /** Canonical absolute path: resolved, with any trailing slash removed. */
 export function normalizePath(p: string): string {
   const resolved = path.resolve(p).replace(/[\\/]+$/, "");

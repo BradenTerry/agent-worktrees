@@ -5,8 +5,10 @@ const path = require("node:path");
 const {
   countWaitingAgents,
   normalizePath,
+  repoSettingsKey,
   supportsAgentCliTitle,
   worktreeDirFor,
+  worktreesNeedingLinks,
 } = require("../out/worktreeUtils.js");
 
 test("worktreeDirFor nests under the primary's .claude/worktrees", () => {
@@ -90,4 +92,74 @@ test("supportsAgentCliTitle handles insider and malformed versions", () => {
   assert.strictEqual(supportsAgentCliTitle("", true), false);
   assert.strictEqual(supportsAgentCliTitle("nonsense", true), false);
   assert.strictEqual(supportsAgentCliTitle("1", true), false);
+});
+
+// Per-repo settings (the linked-files list) are stored under the primary
+// worktree's path. In a window with a linked worktree open, the repo root is
+// that worktree, so keying by it would read an entry nothing ever wrote and the
+// panel would show an empty list for a repo that has files configured.
+test("repoSettingsKey keys off the primary worktree, not the open folder", () => {
+  const primary = path.join(path.sep, "repo");
+  const linked = path.join(primary, ".claude", "worktrees", "feature");
+  const worktrees = [
+    { path: linked, isPrimary: false },
+    { path: primary, isPrimary: true },
+  ];
+  // Panel opened in the linked worktree: repoRoot is the worktree itself.
+  assert.strictEqual(repoSettingsKey(linked, worktrees), primary);
+  // Panel opened in the primary worktree: same key, so both windows agree.
+  assert.strictEqual(repoSettingsKey(primary, worktrees), primary);
+});
+
+test("repoSettingsKey falls back to the repo root without a primary", () => {
+  const root = path.join(path.sep, "repo");
+  // `git worktree list` failed, so the gather has no worktrees to name a
+  // primary from; the open folder's root is the best (and, for a plain
+  // single-worktree repo, correct) key.
+  assert.strictEqual(repoSettingsKey(root, []), root);
+  assert.strictEqual(
+    repoSettingsKey(root, [{ path: root, isPrimary: false }]),
+    root
+  );
+  assert.strictEqual(repoSettingsKey(undefined, []), undefined);
+});
+
+// The linked-files sweep. A worktree can appear without the panel having made
+// it - New Agent & Worktree hands creation to `claude -w`, a subagent isolates
+// itself in one, `git worktree add` runs in a terminal - and those are exactly
+// the ones that used to be left without the files.
+test("worktreesNeedingLinks picks up worktrees the panel did not create", () => {
+  const primary = path.join(path.sep, "repo");
+  const base = path.join(primary, ".claude", "worktrees");
+  const fromPanel = path.join(base, "feature");
+  const fromClaude = path.join(base, "claude-made");
+  const todo = worktreesNeedingLinks(
+    primary,
+    [primary, fromPanel, fromClaude],
+    new Set([normalizePath(fromPanel)])
+  );
+  // The primary holds the real files, and fromPanel was linked at creation.
+  assert.deepStrictEqual(todo, [fromClaude]);
+});
+
+test("worktreesNeedingLinks compares paths canonically", () => {
+  const primary = path.join(path.sep, "repo");
+  const wt = path.join(primary, ".claude", "worktrees", "feature");
+  // A trailing separator (or any other non-canonical spelling) must not make
+  // the primary look like a worktree needing links, nor hide an already-linked
+  // one and link it a second time.
+  assert.deepStrictEqual(
+    worktreesNeedingLinks(primary + path.sep, [primary, wt], new Set()),
+    [wt]
+  );
+  assert.deepStrictEqual(
+    worktreesNeedingLinks(primary, [wt + path.sep], new Set([normalizePath(wt)])),
+    []
+  );
+});
+
+test("worktreesNeedingLinks is empty for a repo with only its primary", () => {
+  const primary = path.join(path.sep, "repo");
+  assert.deepStrictEqual(worktreesNeedingLinks(primary, [primary], new Set()), []);
+  assert.deepStrictEqual(worktreesNeedingLinks(primary, [], new Set()), []);
 });

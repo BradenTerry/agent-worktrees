@@ -51,10 +51,10 @@ its running agents in one view.
   variables rewritten to the worktree.
 - **Stale lock cleanup** for the locks `claude -w` leaves behind when a session
   crashes. Only locks naming a claude pid that is no longer running are cleared.
-- **[Linked files](docs/linked-files.md)** symlinked into every worktree the panel
-  creates, so gitignored local config (`.env`, `appsettings.*.json`, certs) is not
-  missing from a fresh checkout. Windows falls back to junctions and hard links so
-  it works unelevated.
+- **[Linked files](docs/linked-files.md)** symlinked into every worktree, the ones
+  `claude -w` creates included, so gitignored local config (`.env`,
+  `appsettings.*.json`, certs) is not missing from a fresh checkout. Windows falls
+  back to junctions and hard links so it works unelevated.
 
 **Agents**
 

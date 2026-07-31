@@ -35,12 +35,33 @@ The ignore list comes from `git ls-files --others --ignored --exclude-standard
 
 ## Where the list lives, and when it applies
 
-- In the extension's `globalState` keyed by repo root, **not** the repo's
-  `.vscode/settings.json`, so each repository keeps its own.
-- Linking runs after both creation paths: **New Worktree** and the branches view's
-  **Create worktree & start agent**.
+- In the extension's `globalState` keyed by the repository's **primary worktree**
+  path, **not** the repo's `.vscode/settings.json`, so each repository keeps its
+  own. The key is deliberately not `git rev-parse --show-toplevel`: in a window
+  with a linked worktree open that reports the worktree, so the same repository
+  would answer to a different key per window and a worktree's panel would show an
+  empty list (`repoSettingsKey` in `worktreeUtils.ts` resolves both to the
+  primary).
+- Linking runs after both of the extension's own creation paths: **New Worktree**
+  and the branches view's **Create worktree & start agent**.
+- Those are not the only ways a worktree appears, so a sweep off the back of each
+  gather (`linkUnlinkedWorktrees`) links any worktree this window has not linked
+  yet. It is what covers **New Agent & Worktree**, which hands creation to
+  `claude -w` and so never runs the extension's creation code at all, plus a
+  worktree an agent isolates a subagent in, a `git worktree add` in a terminal,
+  and one another window created. Without it the setting promised "every
+  worktree" and delivered only the two the panel made itself.
+  - One attempt per worktree per window, claimed before the linking starts so
+    two overlapping refreshes can't both take the same worktree, and dropped when
+    a worktree goes so a new one at the same path is linked rather than mistaken
+    for its predecessor. The attempt is idempotent regardless.
+  - It is not awaited (the render never waits on filesystem work) and reports to
+    the diagnostics log rather than a warning popup: it runs at a moment the user
+    didn't ask for it, and a popup per worktree would be noise. The paths the user
+    does ask for still warn.
 - **Link existing worktrees** applies the whole list to worktrees that already
-  exist.
+  exist. With the sweep in place this is mainly a "do it now, and tell me what
+  happened" button.
 
 ## Safety rules
 
