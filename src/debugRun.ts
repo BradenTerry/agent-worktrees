@@ -580,9 +580,14 @@ export async function startWorktreeDebug(
         noDebug: choice.noDebug,
       });
     } catch (e) {
-      if (!fromInput) {
-        diag(`debug: startDebugging threw for ${prepared.name}: ${String(e)}`);
-      }
+      // An input-fed configuration is not named, and neither is the adapter's
+      // message, which can quote the arguments the answer went into. A failure
+      // still has to be visible in the log, so it is marked without either.
+      diag(
+        fromInput
+          ? "debug: startDebugging threw for a configuration using ${input:...}"
+          : `debug: startDebugging threw for ${prepared.name}: ${String(e)}`
+      );
     }
     if (ok) {
       started++;
@@ -590,7 +595,11 @@ export async function startWorktreeDebug(
       // startDebugging resolves false when the adapter refuses (a missing
       // program, an uninstalled debug extension). VS Code has already shown its
       // own error, so only say which configuration it was.
-      if (!fromInput) diag(`debug: ${prepared.name} did not start`);
+      diag(
+        fromInput
+          ? "debug: a configuration using ${input:...} did not start"
+          : `debug: ${prepared.name} did not start`
+      );
       vscode.window.showWarningMessage(
         `Could not start "${config.name}" in ${worktreeName}.`
       );

@@ -110,16 +110,17 @@ configuration with no `${input:...}` left in it.
   tasks.json `inputs` - a separate namespace from launch.json's, as in VS Code.
   The panel runs that task itself, so an unsubstituted reference would otherwise
   reach a shell verbatim.
-- **An input-fed launch is not logged at all.** What the user typed ends up in the
-  configuration's name, program and arguments, and the diagnostics log is the
-  thing that gets pasted into bug reports - a `password` input exists precisely
-  because its value should not be lying around. So a configuration that
-  referenced an input is not traced when it starts, when it fails, or when it is
-  stopped, and neither is a pre-launch task an input fed. The prompts themselves
-  log nothing either. What still gets logged carries only launch.json and
-  tasks.json content: the id that was not declared, a task label, a command name.
-  The cost is that a failed input-fed launch leaves no trace line, so it is
-  diagnosed from VS Code's own error and the panel's warning.
+- **Nothing an input was answered with reaches the diagnostics log.** What the
+  user typed ends up in the configuration's name, program and arguments, and that
+  log is the thing that gets pasted into bug reports - a `password` input exists
+  precisely because its value should not be lying around. So a configuration that
+  referenced an input is not traced when it starts or when it is stopped, and
+  neither is a pre-launch task an input fed. The prompts themselves log nothing
+  either. What still gets logged carries only launch.json and tasks.json content:
+  the id that was not declared, a task label, a command name. A launch that
+  **fails** is still marked, by a line naming neither the configuration nor the
+  adapter's message (which can quote the arguments the answer went into), so
+  "nothing happened" is never silent in the log.
 
 ## preLaunchTask, or: the reason this is not one API call
 
