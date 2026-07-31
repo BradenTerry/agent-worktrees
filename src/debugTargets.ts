@@ -10,6 +10,7 @@
  * the one debug entry point that does take a target.
  */
 
+import { InputDef, parseInputs } from "./debugInputs";
 import { parseJsonc } from "./jsonc";
 
 /**
@@ -35,6 +36,9 @@ export interface Compound {
 export interface LaunchFile {
   configurations: DebugConfigLike[];
   compounds: Compound[];
+  /** `${input:...}` declarations, which VS Code would resolve against the
+   *  primary folder's launch.json rather than this one. See ./debugInputs. */
+  inputs: InputDef[];
 }
 
 /** One entry in the panel's target quick pick. */
@@ -54,7 +58,7 @@ export const WORKTREE_KEY = "agentWorktreesPath";
 /** Config key marking a session started with "Run without debugging". */
 export const NO_DEBUG_KEY = "agentWorktreesNoDebug";
 
-const EMPTY: LaunchFile = { configurations: [], compounds: [] };
+const EMPTY: LaunchFile = { configurations: [], compounds: [], inputs: [] };
 
 /**
  * Parse a launch.json body. Never throws: a malformed or unexpected file yields
@@ -103,7 +107,7 @@ export function parseLaunchJson(text: string): LaunchFile {
         .filter((c) => c.configurations.length > 0)
     : [];
 
-  return { configurations, compounds };
+  return { configurations, compounds, inputs: parseInputs(parsed) };
 }
 
 /** Quick-pick entries for a parsed launch file: configurations, then compounds. */
@@ -149,18 +153,30 @@ export function resolveTarget(
 const FOLDER_VARS = /\$\{(workspaceFolder|workspaceRoot)\}/g;
 const FOLDER_BASENAME_VARS = /\$\{workspaceFolderBasename\}/g;
 
-/** Deep-replace the folder variables in every string of a config value. */
-function substitute(value: unknown, dir: string, base: string): unknown {
+/**
+ * Deep-replace the folder variables in every string of a value.
+ *
+ * Used on a configuration, and on an input declaration before it is prompted for:
+ * a `default` or a command input's `args` carries `${workspaceFolder}` as often as
+ * `program` does, and it has to mean the worktree there too.
+ */
+export function substituteFolderVars(
+  value: unknown,
+  dir: string,
+  base: string
+): unknown {
   if (typeof value === "string") {
     return value
       .replace(FOLDER_VARS, dir)
       .replace(FOLDER_BASENAME_VARS, base);
   }
-  if (Array.isArray(value)) return value.map((v) => substitute(v, dir, base));
+  if (Array.isArray(value)) {
+    return value.map((v) => substituteFolderVars(v, dir, base));
+  }
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = substitute(v, dir, base);
+      out[k] = substituteFolderVars(v, dir, base);
     }
     return out;
   }
@@ -193,7 +209,7 @@ export function prepareConfig(
   folderBasename: string,
   noDebug = false
 ): DebugConfigLike {
-  const out = substitute(
+  const out = substituteFolderVars(
     config,
     worktreePath,
     folderBasename

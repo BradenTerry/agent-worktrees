@@ -49,9 +49,10 @@ they can be named per worktree and stopped, which is what the session rows are f
 
 - `${workspaceFolder}`, `${workspaceRoot}` and `${workspaceFolderBasename}` are
   replaced with the worktree, walking nested objects and arrays (an `args` entry
-  or an `env` value carries paths as often as `program` does). **Every other
-  `${...}` variable is left for VS Code**, so `${config:...}` and `${env:...}`
-  still resolve, against the primary folder.
+  or an `env` value carries paths as often as `program` does). `${input:...}` is
+  resolved by the panel too, for the reasons below. **Every other `${...}`
+  variable is left for VS Code**, so `${config:...}` and `${env:...}` still
+  resolve, against the primary folder.
 - `cwd` defaults to the worktree. Without it an adapter whose cwd defaults to the
   workspace folder would run the worktree's program from the primary checkout. A
   config that sets `cwd` itself is left alone.
@@ -65,6 +66,50 @@ they can be named per worktree and stopped, which is what the session rows are f
 The `folder` argument passed to `startDebugging` is the workspace folder that *is*
 the worktree when there is one, else the first folder. Since the folder variables
 are already substituted, it only decides where the remaining variables resolve.
+
+## Input variables
+
+A configuration can be parameterized with `${input:<id>}`, declared in a
+top-level `inputs` array of **the same file**. VS Code resolves those against the
+workspace folder's launch.json, which for a worktree means one of two wrong
+answers:
+
+- an id the primary checkout does not declare fails the launch outright, even
+  though the worktree that owns the configuration declares it;
+- an id it happens to declare is prompted with the *primary* file's definition,
+  which can be a different question with different options.
+
+So `src/debugInputs.ts` (VS Code-free, unit-tested in `test/debugInputs.test.js`)
+resolves them from the worktree's own file, and `startDebugging` is handed a
+configuration with no `${input:...}` left in it.
+
+- All three types work. `promptString` is an input box (`password` honored),
+  `pickString` a quick pick where the declared `default` comes up selected
+  without reordering the author's options, and `command` runs a VS Code command
+  and takes its result as the value.
+- A `command` input's `args` are the inputs to that command, and they get the
+  same folder rewriting as the configuration - so a command that lists candidates
+  lists the **worktree's**. A `default` or `description` is rewritten the same way.
+- References are collected deep and in order (`program`, `args`, `env`, nested
+  objects), so the prompts follow the configuration as written and each id is
+  asked once.
+- Input values are substituted **before** the folder variables, so an answer
+  containing `${workspaceFolder}` still points at the worktree.
+- A **compound** resolves every member's inputs up front, before the first
+  pre-launch task runs. An id two members share is asked once, where VS Code asks
+  per member, and dismissing a prompt has cost nothing yet.
+- An **undeclared** id refuses the launch, with a warning naming the id.
+  Substituting nothing would start a program with a hole in its arguments. A
+  dismissed prompt abandons the launch silently, as VS Code does.
+- A `command` input whose command throws warns and abandons the launch; one that
+  returns no string is treated as dismissed, since that is how a command's own
+  picker reports a cancel.
+- `${input:...}` in the **pre-launch task** resolves too, from the worktree's
+  tasks.json `inputs` - a separate namespace from launch.json's, as in VS Code.
+  The panel runs that task itself, so an unsubstituted reference would otherwise
+  reach a shell verbatim.
+- A `password` input's value stays out of the diagnostics log. A pre-launch task
+  fed by one traces its label rather than the command line the value is in.
 
 ## preLaunchTask, or: the reason this is not one API call
 
