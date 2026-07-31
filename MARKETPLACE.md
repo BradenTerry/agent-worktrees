@@ -151,6 +151,10 @@ first. The panel adds a **Debug** button to each card instead.
 - **Run with or without the debugger**: accept a configuration to debug it, or
   click the play icon on its row to run it without breakpoints.
 - **Compounds work too**, starting their configurations in order.
+- **Configurations that ask you something still work.** An `${input:...}`
+  variable prompts from the worktree's own `inputs`, whether that is a text box,
+  a list to pick from, or a command that supplies the value, and a compound asks
+  once for an input its configurations share.
 - **The program runs in the worktree.** `${workspaceFolder}` and the working
   directory point at that checkout, not your main one.
 - **The build runs there too.** A configuration's `preLaunchTask` is run against

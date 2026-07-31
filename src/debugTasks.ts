@@ -12,6 +12,7 @@
  * and run with the worktree as cwd before the session starts.
  */
 
+import { InputDef, parseInputs } from "./debugInputs";
 import { parseJsonc } from "./jsonc";
 
 /** A tasks.json entry, as far as this feature reads it. */
@@ -56,6 +57,15 @@ export function parseTasksJson(text: string): RawTask[] {
   return tasks.filter(
     (t): t is RawTask => !!t && typeof t === "object" && !Array.isArray(t)
   );
+}
+
+/**
+ * The `inputs` a tasks.json declares. A task's `${input:...}` references its own
+ * file's inputs, not launch.json's, so the two are resolved from separate lists
+ * even when an id appears in both.
+ */
+export function parseTaskInputs(text: string): InputDef[] {
+  return parseInputs(parseJsonc(text));
 }
 
 /**

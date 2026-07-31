@@ -48,7 +48,8 @@ its running agents in one view.
   `.vscode/launch.json` targets, with or without the debugger, and rows underneath
   stop the sessions it started. The Run and Debug view itself cannot be retargeted
   by an extension, so the panel drives `debug.startDebugging` with the folder
-  variables rewritten to the worktree.
+  variables rewritten to the worktree and its `${input:...}` variables resolved
+  from the worktree's own declarations.
 - **Stale lock cleanup** for the locks `claude -w` leaves behind when a session
   crashes. Only locks naming a claude pid that is no longer running are cleared.
 - **[Linked files](docs/linked-files.md)** symlinked into every worktree, the ones
