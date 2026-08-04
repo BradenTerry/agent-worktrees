@@ -8,6 +8,7 @@ const path = require("node:path");
 const {
   listWorktrees,
   getStatus,
+  hasUncommittedChanges,
   findRepoRoot,
   listBranches,
   deleteBranch,
@@ -186,6 +187,41 @@ test("getStatus reports line diff for tracked changes, zero when clean", async (
   st = await getStatus(r);
   assert.ok(st.dirty >= 1, "untracked file is dirty");
   assert.strictEqual(st.insertions, 0, "untracked files are not in git diff HEAD");
+});
+
+test("hasUncommittedChanges agrees with getStatus, ignoring ignored files", async () => {
+  const r = path.join(dir, "dirty-probe");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "one\n");
+  fs.writeFileSync(path.join(r, ".gitignore"), "junk/\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+
+  assert.strictEqual(await hasUncommittedChanges(r), false, "clean worktree");
+
+  // An ignored file is not a change the user would lose knowingly.
+  fs.mkdirSync(path.join(r, "junk"));
+  fs.writeFileSync(path.join(r, "junk", "out.log"), "x\n");
+  assert.strictEqual(await hasUncommittedChanges(r), false, "ignored only");
+
+  fs.writeFileSync(path.join(r, "b.txt"), "new\n");
+  assert.strictEqual(await hasUncommittedChanges(r), true, "untracked file");
+
+  git(r, ["clean", "-fd", "b.txt"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "one\ntwo\n");
+  assert.strictEqual(await hasUncommittedChanges(r), true, "tracked change");
+
+  git(r, ["add", "a.txt"]);
+  assert.strictEqual(await hasUncommittedChanges(r), true, "staged change");
+
+  // Not a repo at all: reported clean rather than throwing.
+  assert.strictEqual(
+    await hasUncommittedChanges(path.join(dir, "does-not-exist")),
+    false
+  );
 });
 
 test("listBranches annotates worktree association and remote-only branches", async () => {

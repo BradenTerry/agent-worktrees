@@ -42,8 +42,10 @@ import {
   defaultBranchName,
   unpushedCommitCount,
   getStatus,
+  hasUncommittedChanges,
   fetchRemotes,
   listWorktrees,
+  Worktree,
   mapLimit,
   getRemoteInfo,
   RemoteInfo,
@@ -2831,39 +2833,51 @@ export class WorktreeWebviewProvider
    * worktree is force-removed because the modal already said the directory and
    * any uncommitted changes go away, and the branch delete forces past "not
    * fully merged" when the modal already disclosed the unpushed commits.
+   *
+   * That disclosure is gathered concurrently, and the worktree list is read once
+   * for both the primary lookup and the target's own entry. Gathered one after
+   * another it was five or six git spawns plus a registry read between the click
+   * and the dialog — cheap on macOS/Linux, but on Windows a spawn costs enough
+   * (and a `git status` over a large worktree far more) that the dialog visibly
+   * lagged the click.
    */
   private async removeWorktreeAction(fsPath?: string): Promise<void> {
     if (!fsPath) return;
-    const primary = await this.primaryWorktree();
-    if (!primary) return;
+    const cwd = this.repoCwd();
+    if (!cwd) return;
 
     const target = normalize(fsPath);
-    const worktree = (await listWorktrees(primary)).find(
-      (w) => normalize(w.path) === target
-    );
+    let worktrees: Worktree[];
+    try {
+      worktrees = await listWorktrees(cwd);
+    } catch {
+      return;
+    }
+    const primary = worktrees.find((w) => w.isPrimary)?.path;
+    if (!primary) return;
+    const worktree = worktrees.find((w) => normalize(w.path) === target);
     const branch =
       worktree && !worktree.detached ? worktree.branch : undefined;
-    let dirty = false;
-    if (branch) {
-      try {
-        dirty = (await getStatus(fsPath)).dirty > 0;
-      } catch {
-        /* directory unreadable: treat as clean */
-      }
-    }
+
+    // The unpushed count is asked for whenever there is a branch at all, before
+    // we know whether it is the default one, so it can run alongside the lookup
+    // that decides that. It is discarded below when the branch turns out not to
+    // be deletable — one concurrent git call, rather than another serial one.
+    const [dirty, defaultBranch, branchUnpushed, sessions] = await Promise.all([
+      branch ? hasUncommittedChanges(fsPath) : Promise.resolve(false),
+      defaultBranchName(primary),
+      branch ? unpushedCommitCount(primary, branch) : Promise.resolve(0),
+      this.readAgents().then((registry) => this.indexAgents(registry, [target])),
+    ]);
+
     // The default branch is never offered for deletion.
     const deletableBranch =
-      branch && branch !== (await defaultBranchName(primary))
-        ? branch
-        : undefined;
-    const unpushed = deletableBranch
-      ? await unpushedCommitCount(primary, deletableBranch)
-      : 0;
+      branch && branch !== defaultBranch ? branch : undefined;
+    const unpushed = deletableBranch ? branchUnpushed : 0;
 
     // Every agent whose worktree is this path, or nested under it.
     const inScope = (key: string) =>
       key === target || key.startsWith(target + path.sep);
-    const sessions = await this.indexAgents(await this.readAgents(), [target]);
     const agents: AgentVM[] = [];
     for (const [key, list] of sessions.agents) {
       if (inScope(key)) agents.push(...list);
