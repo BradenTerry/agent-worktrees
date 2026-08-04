@@ -164,6 +164,30 @@ mean a git spawn per tick.
   parsed configs, so starting a session always re-reads the file and can't launch
   a stale copy.
 
+## Cost control before a confirmation dialog
+
+The same spawn arithmetic decides how quickly a modal appears, and here the user
+is watching. Removing a worktree discloses everything the removal touches in one
+modal, so the click has to answer: which worktree is this and which branch is on
+it, is it dirty, is that branch the default one, how many of its commits are
+unpushed, and which agents (and foreign subagents) are working in it.
+
+Asked one at a time that is five or six git spawns plus a registry read before
+anything renders. On macOS and Linux the lag hides under the window animation;
+on Windows, where a spawn is dear and `git status` over a large worktree dearer,
+it reads as the button not having worked. So `removeWorktreeAction`:
+
+- reads `git worktree list` **once**, for both the primary-worktree lookup and
+  the target's own entry (it used to run the same command twice);
+- runs the rest concurrently — dirty check, default-branch name, unpushed count,
+  agent index — leaving the wait at the slowest single call rather than the sum.
+  The unpushed count starts before we know whether the branch is the default one
+  and is dropped if it turns out not to be deletable: one concurrent git call is
+  cheaper than a serial round trip to find out;
+- asks for the dirty state with `hasUncommittedChanges`, not `getStatus`. The
+  modal needs a boolean, and `getStatus` would follow up with
+  `git diff --numstat HEAD` for line counts nothing here prints.
+
 ## Settings → Performance: git's own accelerators
 
 Everything above is this extension spending less. The largest remaining cost is

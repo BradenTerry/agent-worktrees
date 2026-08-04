@@ -531,6 +531,31 @@ async function getDiffStat(
 }
 
 /**
+ * Whether a worktree has any uncommitted change (staged, unstaged, unmerged or
+ * untracked; ignored files don't count). This is `getStatus().dirty > 0` without
+ * the parts a caller that only wants the boolean pays for: no `--branch` header
+ * and, above all, no follow-up `git diff --numstat HEAD` for the line counts. It
+ * backs the "Discards uncommitted changes" line in the remove-worktree
+ * confirmation, where one git spawn instead of two is what the user feels on
+ * Windows. False when the directory is unreadable or not a repo.
+ */
+export async function hasUncommittedChanges(cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await git(["status", "--porcelain=v2", "--no-renames"], {
+      cwd,
+    });
+    for (const raw of stdout.split("\n")) {
+      const line = raw.trimEnd();
+      // 1/2 = changed tracked, u = unmerged, ? = untracked, ! = ignored.
+      if (line !== "" && line[0] !== "#" && line[0] !== "!") return true;
+    }
+  } catch {
+    /* unreadable or not a repo: treat as clean */
+  }
+  return false;
+}
+
+/**
  * Create a new worktree at `dir`. When `branch` does not already exist it is
  * created from `base` (default HEAD); otherwise the existing branch is checked
  * out. Returns nothing on success and throws with git's stderr on failure.
