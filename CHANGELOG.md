@@ -2,6 +2,17 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.0.3
+
+### Performance
+
+- **The Remove Worktree confirmation opens when you click it.** Everything the
+  dialog discloses - the branch on the worktree, uncommitted changes, unpushed
+  commits, the agents working in there - was read one git call after another, so
+  on Windows, where each of those costs real time, the button looked like it had
+  not worked. Those reads now run together, and the dialog no longer waits on
+  line counts it never shows.
+
 ## 4.0.2
 
 ### Features
