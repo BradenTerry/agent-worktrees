@@ -194,7 +194,7 @@ page resets to the first whenever a filter or sort changes.
 
 A branch's open (or draft) PR rollup is rendered as a hint on its row when one
 exists. Merged/closed PRs are not loaded, which is why deleting a squash-merged
-branch falls back to git's "not fully merged" prompt (one extra confirmation).
+branch relies on its own unpushed count rather than the `merged` flag.
 
 ## Creating a worktree from a branch
 
@@ -239,15 +239,28 @@ inspects `listWorktrees` first:
 
 Then the unpushed-commit path:
 
-- `unpushedCommitCount` counts commits not on the branch's upstream, or with no
-  upstream, not on the default branch.
-- When non-zero and the PR is not flagged merged, the count is surfaced in a confirm
-  (a second modal in the linked-worktree path) and the delete is forced on consent.
+- `branchDeleteSafety` counts commits not on the branch's upstream, or with no
+  upstream, not on the default branch. It returns that count plus `measured`,
+  which is true only when a base resolved and git answered. An unknown count also
+  reports zero - the safe number to *display* - so the two have to be
+  distinguishable before anything acts on a zero.
+- When the count is non-zero and the PR is not flagged merged, it is surfaced in a
+  confirm (a second modal in the linked-worktree path) and the delete is forced on
+  consent.
 - A branch carrying a known-merged PR passes a `merged` flag to skip the "not fully
   merged" prompt. Since the branches view fetches open PRs only, a squash-merged
-  branch usually arrives without that flag and hits the fallback instead.
-- `git.deleteBranch` runs `git branch -d`/`-D`; an unmerged refusal falls back to an
-  explicit force prompt. Both views refresh afterward so the row drops.
+  branch usually arrives without that flag and is force-deleted on the strength of
+  its own count instead (a squash leaves the original commits in no base, so they
+  count as unpushed and are disclosed).
+- `git.deleteBranch` runs `git branch -d`/`-D`. `-d` accepts a branch merged into
+  HEAD or into that branch's *own* upstream - it never considers the default
+  branch - so it refuses branches this code measured as losing nothing: a branch
+  whose commits are all in `origin/main` but whose upstream was pruned when the
+  remote branch was deleted after the merge, while the local default branch sits
+  unpulled in the repo root. That refusal is forced through silently when
+  `measured` says the zero is real; the explicit force prompt is kept for the
+  unmeasured case, where the count is genuinely unknown. Both views refresh
+  afterward so the row drops.
 
 ### Bulk "Delete gone"
 

@@ -1109,16 +1109,39 @@ async function aheadBehind(
   return { ahead: 0, behind: 0 };
 }
 
+/** What a local branch would cost to delete, as measured against its push
+ *  target. See `branchDeleteSafety`. */
+export interface BranchDeleteSafety {
+  /** Commits on the branch that are not contained in `base`. */
+  unpushed: number;
+  /** The ref the count was taken against (upstream, or the default branch),
+   *  undefined when neither could be resolved. */
+  base?: string;
+  /** True only when a base resolved AND git answered, i.e. `unpushed` is a real
+   *  measurement. False means "unknown", which happens to also report 0 — the
+   *  safe display value, but never a licence to force-delete. */
+  measured: boolean;
+}
+
 /**
- * Count of a local branch's commits that are not on its push target: its
- * upstream when configured, otherwise the repo's default branch. Used to warn
- * before deleting a branch whose work would be lost. Zero on error or when the
- * branch is fully contained in its base.
+ * Measure what deleting a local branch would lose: its commits that are not on
+ * its push target (its upstream when configured, otherwise the repo's default
+ * branch). `measured` separates a real "nothing to lose" answer from the
+ * unknown-so-assume-zero fallback, because the two justify very different
+ * things — only a measured zero proves a `git branch -D` discards nothing.
+ *
+ * A measured zero does NOT mean `git branch -d` will succeed. Git's `-d` accepts
+ * a branch merged into HEAD, or into that branch's own upstream; it does not
+ * consider the default branch. So a branch whose upstream was pruned away (the
+ * remote branch was deleted after merge) but whose commits are all in
+ * origin/main measures as zero here and is still refused by `-d` whenever the
+ * local default branch has not been pulled. Callers use `measured` to force past
+ * that refusal instead of asking the user to confirm a loss that cannot happen.
  */
-export async function unpushedCommitCount(
+export async function branchDeleteSafety(
   repoRoot: string,
   name: string
-): Promise<number> {
+): Promise<BranchDeleteSafety> {
   let base: string | undefined;
   try {
     const { stdout } = await git(
@@ -1129,16 +1152,30 @@ export async function unpushedCommitCount(
   } catch {
     base = await resolveDefaultBranchRef(repoRoot);
   }
-  if (!base) return 0;
+  if (!base) return { unpushed: 0, measured: false };
   try {
     const { stdout } = await git(
       ["rev-list", "--count", `${base}..${name}`],
       { cwd: repoRoot }
     );
-    return Number(stdout.trim()) || 0;
+    const n = Number(stdout.trim());
+    if (!Number.isFinite(n)) return { unpushed: 0, base, measured: false };
+    return { unpushed: n, base, measured: true };
   } catch {
-    return 0;
+    return { unpushed: 0, base, measured: false };
   }
+}
+
+/**
+ * Count of a local branch's commits that are not on its push target. Zero on
+ * error or when the branch is fully contained in its base — see
+ * `branchDeleteSafety` when that difference matters.
+ */
+export async function unpushedCommitCount(
+  repoRoot: string,
+  name: string
+): Promise<number> {
+  return (await branchDeleteSafety(repoRoot, name)).unpushed;
 }
 
 /** Run `fn` over `items` with at most `limit` in flight at once, preserving

@@ -42,7 +42,11 @@ its running agents in one view.
 - **Delete Worktree** behind one modal that discloses everything upfront: agents
   to be stopped, uncommitted changes to be discarded, the branch left behind and
   its unpushed commits. Offers **Remove** or **Remove and Delete Branch**, then
-  needs no follow-up prompts.
+  needs no follow-up prompts. When `git worktree remove` exits non-zero it has
+  usually still unregistered the worktree (it does not roll back a partial
+  removal), so the provider re-reads `git worktree list` before reporting: a
+  worktree git dropped but whose files it could not delete is reported as exactly
+  that, not as a failed removal the panel then contradicts by dropping the card.
 - **[Run and Debug](docs/debug-sessions.md)** per worktree: a Debug button (only on
   cards whose worktree has launch configurations) picks one of its
   `.vscode/launch.json` targets, with or without the debugger, and rows underneath
