@@ -2977,6 +2977,11 @@ export class WorktreeWebviewProvider
     }
 
     if (choice === "Remove and Delete Branch" && deletableBranch) {
+      // Refresh before the branch delete, not just after: the worktree is gone
+      // now, and the delete can stop on a prompt or an error. Leaving the card
+      // up for as long as a modal is open leaves a card for a worktree that no
+      // longer exists, which the status poll then re-reads.
+      await this.refresh();
       await this.deleteOrphanedBranch(primary, deletableBranch, safety);
     }
     await this.refresh();

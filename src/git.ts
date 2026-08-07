@@ -1,5 +1,6 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { dirname, isAbsolute } from "path";
 
 const execFileAsync = promisify(execFile);
 
@@ -66,6 +67,21 @@ function emitTrace(msg: string): void {
 const GIT_TIMEOUT_MS = 60_000;
 
 /**
+ * The `GIT_CEILING_DIRECTORIES` value that confines git's repository discovery
+ * to `cwd` itself: its parent, which git then refuses to walk up into. Undefined
+ * when there is nothing to confine (no cwd, a relative one, or a filesystem
+ * root, where a ceiling would only stop discovery working at all).
+ *
+ * Git resolves symlinks in both the ceiling entries and the directory it is
+ * walking, so a path through a symlinked component (macOS `/tmp`) still matches.
+ */
+function ceilingFor(cwd: string | undefined): string | undefined {
+  if (!cwd || !isAbsolute(cwd)) return undefined;
+  const parent = dirname(cwd);
+  return parent && parent !== cwd ? parent : undefined;
+}
+
+/**
  * Run git with an argument array and no shell.
  *
  * Using execFile instead of a shell `exec` avoids spawning a cmd.exe/sh wrapper
@@ -80,14 +96,27 @@ const GIT_TIMEOUT_MS = 60_000;
  * otherwise cause on Windows; `maxBuffer` is raised so a large `for-each-ref`
  * or diff output never truncates; `timeout` keeps a wedged call from hanging the
  * view forever.
+ *
+ * `atRoot` declares that `cwd` is a worktree root rather than "somewhere in a
+ * repository", and confines git's discovery to it. Without that, git walks up
+ * from a cwd that is not (or is no longer) a worktree until it finds a
+ * repository — and since worktrees live at `<primary>/.claude/worktrees/<branch>`,
+ * the repository it finds is the primary worktree. A status for a worktree that
+ * has just been removed then comes back as the *primary's* numbers, which the
+ * panel renders on that card: two cards showing identical change counts. Set it
+ * for every call scoped to one worktree, never for a call whose cwd is an
+ * arbitrary folder inside a repository (the open folder can be a subdirectory,
+ * where walking up is the whole point).
  */
 function git(
   args: string[],
-  opts: { cwd?: string; timeout?: number } = {}
+  opts: { cwd?: string; timeout?: number; atRoot?: boolean } = {}
 ): Promise<{ stdout: string; stderr: string }> {
+  const { atRoot, ...execOpts } = opts;
+  const ceiling = atRoot ? ceilingFor(opts.cwd) : undefined;
   const run = execFileAsync("git", args, {
     timeout: GIT_TIMEOUT_MS,
-    ...opts,
+    ...execOpts,
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
     // GIT_OPTIONAL_LOCKS=0 stops read-only commands (notably `git status`) from
@@ -95,7 +124,11 @@ function git(
     // cache. As a polling tool we must not churn the index: it fights the user's
     // own git and, if anything ever watches `.git`, an index write would loop
     // straight back into another status spawn.
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    env: {
+      ...process.env,
+      GIT_OPTIONAL_LOCKS: "0",
+      ...(ceiling ? { GIT_CEILING_DIRECTORIES: ceiling } : {}),
+    },
   });
   // When tracing is off, traceSink is null and we add zero overhead.
   if (!traceSink) return run;
@@ -458,7 +491,7 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
     const startedAt = Date.now();
     const { stdout } = await git(
       ["status", "--porcelain=v2", "--branch", "--no-renames"],
-      { cwd }
+      { cwd, atRoot: true }
     );
     const took = Date.now() - startedAt;
     if (took >= SLOW_STATUS_MS && !hintedSlowStatus) {
@@ -516,7 +549,10 @@ async function getDiffStat(
   let insertions = 0;
   let deletions = 0;
   try {
-    const { stdout } = await git(["diff", "--numstat", "HEAD"], { cwd });
+    const { stdout } = await git(["diff", "--numstat", "HEAD"], {
+      cwd,
+      atRoot: true,
+    });
     for (const line of stdout.split("\n")) {
       const m = line.match(/^(\d+)\t(\d+)\t/);
       if (m) {
@@ -543,6 +579,7 @@ export async function hasUncommittedChanges(cwd: string): Promise<boolean> {
   try {
     const { stdout } = await git(["status", "--porcelain=v2", "--no-renames"], {
       cwd,
+      atRoot: true,
     });
     for (const raw of stdout.split("\n")) {
       const line = raw.trimEnd();
@@ -628,7 +665,7 @@ export async function listWorktreeFiles(
 ): Promise<{ files: string[]; truncated: boolean }> {
   const { stdout } = await git(
     ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-    { cwd: worktreePath }
+    { cwd: worktreePath, atRoot: true }
   );
   return parseWorktreeFiles(stdout);
 }
@@ -1252,7 +1289,7 @@ export async function switchWorktreeBranch(
     ? ["switch", "-c", branch]
     : ["switch", branch];
   try {
-    await git(args, { cwd: worktreePath });
+    await git(args, { cwd: worktreePath, atRoot: true });
   } catch (err) {
     const msg = String((err as { stderr?: string }).stderr ?? err);
     throw new Error(msg.trim());
@@ -1449,7 +1486,7 @@ export async function releaseStaleClaudeLocks(
  */
 export async function detachWorktreeHead(worktreePath: string): Promise<void> {
   try {
-    await git(["checkout", "--detach"], { cwd: worktreePath });
+    await git(["checkout", "--detach"], { cwd: worktreePath, atRoot: true });
   } catch (err) {
     const msg = String((err as { stderr?: string }).stderr ?? err);
     throw new Error(msg.trim());

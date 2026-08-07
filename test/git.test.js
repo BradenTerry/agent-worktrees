@@ -463,6 +463,47 @@ test("branchDeleteSafety measures real unpushed commits", async () => {
   assert.strictEqual(safety.base, "origin/main");
 });
 
+test("getStatus never reports the parent repo's numbers for a stale worktree path", async () => {
+  // Worktrees live at <primary>/.claude/worktrees/<branch>, so a path that is no
+  // longer a worktree is still *inside* the primary worktree. Git's discovery
+  // walks up from a cwd that is not a repository, which used to hand back the
+  // primary's counts - rendered on the removed worktree's card, identical to the
+  // primary card above it.
+  const r = path.join(dir, "stale-status");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hello\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  // Uncommitted work in the primary, so a leak is unmistakable.
+  fs.writeFileSync(path.join(r, "a.txt"), "changed\n");
+  fs.writeFileSync(path.join(r, "untracked.txt"), "x\n");
+
+  const wt = path.join(r, ".claude", "worktrees", "feat");
+  git(r, ["worktree", "add", "-b", "feat", wt]);
+  const live = await getStatus(wt);
+  assert.strictEqual(live.branch, "feat", "a live worktree still reports itself");
+  assert.strictEqual(live.dirty, 0);
+
+  const primary = await getStatus(r);
+  assert.ok(primary.dirty > 0 && primary.insertions > 0, "primary has changes");
+
+  // Removed, but the directory survives - what a removal git could not finish
+  // deleting leaves behind.
+  git(r, ["worktree", "remove", wt]);
+  fs.mkdirSync(wt, { recursive: true });
+  fs.writeFileSync(path.join(wt, "held.txt"), "x\n");
+
+  const stale = await getStatus(wt);
+  assert.strictEqual(stale.dirty, 0, "no counts borrowed from the parent repo");
+  assert.strictEqual(stale.insertions, 0);
+  assert.strictEqual(stale.deletions, 0);
+  assert.strictEqual(stale.branch, undefined, "and no branch to mistake for a switch");
+  assert.strictEqual(await hasUncommittedChanges(wt), false);
+});
+
 test("setGitTracer records each git call (command, result, timing)", async () => {
   const lines = [];
   setGitTracer((m) => lines.push(m));
