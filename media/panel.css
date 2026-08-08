@@ -2866,7 +2866,11 @@ button.busy {
 }
 .card .agent-chips {
   order: 2;
-  flex: 0 0 100%;
+  /* The indent comes out of the basis, not on top of it: a full-width item with
+     a left margin is wider than the line it wraps to, and the agent list is a
+     scroll region (max-height + overflow-y), which turns those few pixels into a
+     horizontal scrollbar under the rows. */
+  flex: 0 0 calc(100% - 14px);
   display: flex;
   align-items: center;
   gap: 5px;

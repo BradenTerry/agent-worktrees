@@ -39,6 +39,11 @@ All notable changes to the Agent Worktrees extension are documented here.
 
 ### Fixes
 
+- **No horizontal scrollbar under a card's agents.** The counters that wrap under
+  an agent's summary were a full-width row plus their indent, so they were a
+  couple of pixels wider than the list they sit in - and that list is a bounded
+  scroll region, which turns any overflow on either axis into a scrollbar. The
+  indent now comes out of the row's width instead of being added to it.
 - **A hand-edited status order cannot hide agents.** The setting is completed
   rather than rejected on every read: statuses in the order given, each counted
   once, then any the value left out appended. A list naming two of the three would
