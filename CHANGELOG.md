@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.4.1
+
+### Changes
+
+- **The Worktrees / Agents switch is now a tab strip** under the panel header,
+  labelled in words, with expand/collapse all beside it.
+- **Minor bug fixes and improvements.**
+
 ## 4.4.0
 
 ### Features

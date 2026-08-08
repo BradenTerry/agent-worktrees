@@ -45,9 +45,9 @@ and its running agents in one view.
 
 ### All of them in one list
 
-Two buttons in the toolbar switch the panel between the worktree cards and an
-agents view: every agent in the repository as one list, whatever worktree it is
-in, with the waiting ones at the top.
+Two tabs at the foot of the panel header, **Worktrees** and **Agents**, switch
+between the worktree cards and an agents view: every agent in the repository as
+one list, whatever worktree it is in, with the waiting ones at the top.
 
 Each row names the branch it is working on, so two agents with similar summaries
 are still easy to tell apart, and keeps everything the card row has - click to

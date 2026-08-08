@@ -88,9 +88,10 @@ its running agents in one view.
   cannot push the others off screen, and a number badge on the Activity Bar icon
   counting **waiting** agents, so a blocked agent surfaces while the panel is
   hidden.
-- **[Agents view](docs/agents-view.md)**: a toolbar switch swaps the cards for
-  every agent in the repository as one flat list, each row carrying the branch it
-  is working on. Both views render from the same payload, so switching is a
+- **[Agents view](docs/agents-view.md)**: a tab strip under the panel header
+  (Worktrees / Agents) swaps the cards for every agent in the repository as one
+  flat list, each row carrying the branch it is working on. Both views render
+  from the same payload, so switching is a
   webview-local re-render with no round trip. Rows are grouped by status in the
   order set under **Settings → Preferences**
   (`agentWorktrees.agentStatusOrder`, waiting first by default), normalized on

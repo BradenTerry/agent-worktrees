@@ -132,6 +132,19 @@ Pushing directly (or admin-merging a red PR) skips the only full-matrix gate, so
 an OS-specific or extension-host regression can reach a release untested. If a PR
 must be admin-merged past branch protection, get its CI green first.
 
+### Changelog entries
+
+Keep them **brief**, and scale them to the release. A minor or major release
+earns the detail the older entries carry; a **patch** usually does not. For a
+patch, a single line under a **Changes** heading is a perfectly good entry, and
+
+```
+- **Minor bug fixes and improvements.**
+```
+
+is an acceptable one when nothing in it needs the user to do or know anything
+different. Don't pad a patch out to match the shape of a feature release.
+
 Releases are owner-only. `release.yml` has a `guard` job that fails unless
 `github.actor` is the repository owner, and its `publish` job targets the
 protected `release` environment (approval required, restricted to `main` and `v*`
