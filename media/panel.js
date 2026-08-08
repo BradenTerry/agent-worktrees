@@ -1144,6 +1144,11 @@
           '<span class="chevron">' +
           icons.chevron +
           "</span>" +
+          // The name and everything that qualifies it, as inline content rather
+          // than as flex items: a branch name too long for the line wraps, and
+          // the terminal glyph and badges follow the last word instead of
+          // floating beside a two-line block.
+          '<span class="head-main">' +
           '<span class="branch">' +
           esc(wt.name) +
           "</span>" +
@@ -1155,21 +1160,25 @@
           '<span class="badges">' +
           badges.join("") +
           "</span>" +
-          // The two actions pinned to the header, against the right edge: the
-          // branch on GitHub, and Delete. Delete stays last, as it is in the
-          // comfortable header — destructive actions sit at the end of a run,
-          // and the confirmation modal is what actually guards a near-miss.
+          "</span>" +
+          // The actions pinned to the header, held against the right edge and
+          // kept on the name's first line however far the name wraps. Delete
+          // stays last, as it is in the comfortable header — destructive actions
+          // sit at the end of a run, and the confirmation modal is what actually
+          // guards a near-miss.
+          '<span class="head-actions">' +
+          searchBtn +
+          findFileBtn +
+          debugBtn +
           ghLink +
           deleteBtn +
+          "</span>" +
           "</div>" +
           (meta ? '<div class="card-meta">' + meta + "</div>" : "") +
           prLine(wt.pr, true) +
           '<div class="card-body">' +
           '<div class="card-actions">' +
           scmScopeBtn(wt.path, wt.scmActive, true) +
-          searchBtn +
-          findFileBtn +
-          debugBtn +
           editBranchBtn +
           refreshBtn +
           openWindowBtn +

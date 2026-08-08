@@ -2054,8 +2054,12 @@ button.busy {
   top: 0;
   z-index: 2;
   display: flex;
-  align-items: center;
-  gap: 5px;
+  /* Top-aligned, not centred: the name can run to two lines and the chevron and
+     the actions belong beside its first one. Wrapping is the escape hatch for a
+     panel too narrow to hold both (see .head-main's floor). */
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px 5px;
   min-width: 0;
   padding: 4px 5px 4px 3px;
   border-radius: 5px 5px 0 0;
@@ -2080,15 +2084,56 @@ button.busy {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
 }
-.card.compact .branch {
-  font-size: 12px;
+/* The name block: inline content, so a long branch name wraps to a second line
+   and the glyphs that qualify it trail the last word rather than sitting beside
+   the block. Takes the width the actions do not. */
+.card.compact .head-main {
+  /* Basis 0, not auto: on auto the block asks for the whole name unwrapped,
+     which a long one cannot get, and it takes a row of its own — leaving the
+     chevron stranded on the row above. From zero it takes what the actions
+     leave and wraps inside that. */
+  flex: 1 1 0;
+  /* A floor, though: squeezed below about nine characters the name starts
+     breaking through the middle of a segment ("feat/check / out- / redesign"),
+     which is worse than the alternative. Refusing to shrink past it is what
+     makes the actions wrap to their own row on a very narrow panel. */
+  min-width: 9em;
+  line-height: 1.35;
 }
-/* Badges follow the name instead of being pushed to the far edge; they take the
-   auto margin so Delete stays against the right edge whether or not the worktree
-   has badges to show. */
+.card.compact .branch {
+  display: inline;
+  font-size: 12px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  /* break-word, not anywhere: a branch name breaks between its segments before
+     it breaks through the middle of a word. */
+  overflow-wrap: break-word;
+}
+/* Inline with the name, so they trail its last word and wrap with it. */
+.card.compact .head-main .agents-bar-terminal,
 .card.compact .badges {
-  margin-left: 0;
-  margin-right: auto;
+  vertical-align: -2px;
+  margin-left: 5px;
+}
+.card.compact .badges {
+  display: inline-flex;
+}
+/* Search, find file, Debug, the branch on GitHub and Delete. Pinned to the first
+   line of the name and to the right edge, so they hold one place on the card
+   whatever the name does. */
+.card.compact .head-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Holds the right edge on the name's line, and still holds it on the row
+     below when the panel is too narrow to keep them together. */
+  margin-left: auto;
+}
+.card.compact .head-actions .act {
+  flex: 0 0 auto;
+  padding: 2px 5px;
 }
 .card.compact .badge {
   font-size: 11px;
@@ -2102,19 +2147,17 @@ button.busy {
 .card.compact .card-head.terminal-open .agents-bar-terminal {
   display: inline-flex;
 }
-/* The two actions pinned to the header, against the right edge: the branch on
-   GitHub (a link, sized to match rather than framed like a button) and Delete.
-   The comfortable header sets Delete off with a divider because it sits in a run
-   of five buttons; here there is one neighbour and the branch name is well clear
-   of both, so the gap does that on its own. */
+/* The branch on GitHub: a link, sized to match its neighbours rather than framed
+   like a button. */
 .card.compact .card-head .ghlink {
   width: 22px;
   height: 20px;
 }
+/* The comfortable header sets Delete off with a divider because it sits in a run
+   of five similar buttons; here a small extra gap is enough, and the
+   confirmation modal is what actually guards a near-miss. */
 .card.compact .card-head .act.danger {
-  flex: 0 0 auto;
-  margin-left: 2px;
-  padding: 2px 5px;
+  margin-left: 4px;
 }
 .card.compact .card-head .act.danger::before {
   content: none;
