@@ -2,6 +2,67 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.2.0
+
+### Features
+
+- **Worktree cards are built to be scanned.** Every card is two lines at rest and
+  four worktrees fit in the height one used to take, with nothing dropped: the
+  branch, the agent and subagent counts, the status dots and the git totals all
+  still there. The PR rollup stays one framed block, with reviews and checks on a
+  shared line split by a rule so the two sets of checkmarks never blur together.
+  The panel used to ship a second, roomier density behind a toolbar toggle; it was
+  removed rather than maintained twice.
+- **A card's name stays put while you scroll.** The header pins itself above its
+  own agent rows, so the row you are about to click always has the name of its
+  worktree directly above it - no more revealing a terminal from the card below
+  the one you meant.
+- **Clicking the name opens a card, not the whole line.** A vertical rule marks
+  where the toggle stops, and the buttons past it are their own targets, so a
+  click that lands between them no longer folds the card you were reaching into.
+  The hover highlight shows exactly what the click will hit, and a horizontal rule
+  draws where the fold is.
+- **The name line stays a name line.** Past that rule sit the Source Control scope
+  pill and a caret menu holding everything a worktree can do: switch branch,
+  refresh, search it, find a file in it, run or debug it, open it in a new window,
+  view the branch on GitHub, delete it. Branch names get the width back instead of
+  a row of icons, and long ones wrap instead of being clipped.
+- **The outlined card is the one you are typing into**, rather than the one that
+  happens to be your open folder - so with several agents running, the card your
+  terminal belongs to is findable at a glance, collapsed or not.
+- **A repo-wide agent summary under the repository name**: how many agents, how
+  many live subagents, and how many are active, waiting or idle across every
+  worktree, so "is anything waiting on me" is one glance instead of a scroll.
+- **The agent list scrolls instead of folding**, so a worktree running a dozen
+  agents no longer pushes every card below it off screen.
+- **Glyphs instead of pills** for the states most worktrees are not in: your
+  primary working directory gets a house beside its name, and a locked or detached
+  worktree gets a padlock or a broken chain beside its agent counts. The row those
+  words needed is gone.
+- **The worktree's own directory, labelled, inside the card.** Cards are titled by
+  their branch, which is what you scan for; the folder it lives in is a `Worktree`
+  line in the body with the full path on hover.
+
+### Bug fixes
+
+- **A debug row is named after its configuration, not the worktree it repeats.**
+  The worktree suffix is still on the session itself, where VS Code's Call Stack
+  and session list need it to tell several worktrees' runs apart, but on a card
+  the row sat under the name it was restating.
+- **No GitHub link for a branch that was never pushed.** A branch with no upstream
+  has no tree page, so the entry offered a link that could only 404.
+
+### Documentation
+
+- **The Marketplace listing is a list you would read**, cut by roughly a third,
+  with the same features and screenshots as short entries rather than paragraphs
+  about each one.
+- **The listing's screenshots are pinned to the release they ship with.** They
+  were absolute URLs pointing at `main`, so a published listing kept resolving
+  against whatever main became: landing a UI change without cutting a release
+  would advertise a panel nobody could install yet. The release now rewrites them
+  to its own tag on the way into the package.
+
 ## 4.0.3
 
 ### Performance
