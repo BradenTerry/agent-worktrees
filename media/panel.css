@@ -462,12 +462,16 @@ body {
 }
 
 .agents {
+  /* The gap is a variable because the divider below is drawn inside it: the two
+     have to move together, and the compact card view overrides the gap. */
+  --agent-gap: 7px;
   margin: 4px 0 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--agent-gap);
 }
 .agent-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -475,6 +479,23 @@ body {
   border-radius: 4px;
   cursor: pointer;
   background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.06));
+}
+/* One agent's block is its row plus the subagent rows under it, and with only a
+   gap between them a list of agents read as one run. The hairline goes above
+   every agent but the first, so it always lands between two agents and never
+   between an agent and its own subagents. Drawn in the gap rather than as a
+   border on the row, which would sit inside the row's rounded fill. */
+.agents > .agent-row:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--agent-gap) * -0.5);
+  height: 1px;
+  /* The same theme-agnostic hairline the card body's fold rule uses, rather than
+     --vscode-panel-border: that token is near-invisible in several themes, and a
+     separator you have to look for does not separate anything. */
+  background: rgba(127, 127, 127, 0.45);
 }
 .agent-row:hover {
   background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.2));
@@ -2521,9 +2542,9 @@ button.busy {
 }
 
 .card .agents {
+  --agent-gap: 9px;
   margin: 0;
   padding: 0 6px 0 19px;
-  gap: 1px;
 }
 .card .agent-row {
   gap: 6px;
