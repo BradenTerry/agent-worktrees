@@ -1051,7 +1051,7 @@
         !!activeSessionId && agents.some((a) => a.sessionId === activeSessionId);
       const countStat =
         agents.length || subTotal
-          ? '<span class="head-count" title="' +
+          ? '<span class="meta-count" title="' +
             agents.length +
             " agent" +
             (agents.length === 1 ? "" : "s") +
@@ -1062,10 +1062,32 @@
           : "";
       const git = gitLine(wt.git, wt.path, wt.scmActive, true);
 
+      // The meta line carries two unrelated readings of the same worktree - what
+      // the working tree looks like, and what is running in it - so they sit as
+      // two groups with a rule between them rather than one undifferentiated run
+      // of glyphs. Either side can be absent (a clean worktree with no agents,
+      // an agent working on a worktree with nothing to report), and the rule is
+      // only drawn when both are there.
+      // The rule is a border on the group itself rather than an element between
+      // the two, so a narrow panel that wraps the line can never leave it
+      // dangling at the end of the git segments with nothing after it.
+      const agentGroup = countStat + subStat + stats;
+      const meta =
+        git +
+        (agentGroup
+          ? '<span class="meta-stats' +
+            (git ? " ruled" : "") +
+            '">' +
+            // Shown (via CSS) only while this worktree holds the active terminal.
+            '<span class="agents-bar-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
+            icons.terminal +
+            "</span>" +
+            agentGroup +
+            "</span>"
+          : "");
+
       return shell(
-        '<div class="card-head' +
-          (hasActiveTerminal ? " terminal-open" : "") +
-          '" data-toggle="' +
+        '<div class="card-head" data-toggle="' +
           esc(wt.path) +
           '" role="button" tabindex="0" aria-expanded="' +
           (isCollapsed ? "false" : "true") +
@@ -1081,21 +1103,18 @@
           '<span class="badges">' +
           badges.join("") +
           "</span>" +
-          '<span class="head-stats">' +
-          // Shown (via CSS) only while this worktree holds the active terminal.
-          '<span class="agents-bar-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
-          icons.terminal +
-          "</span>" +
-          countStat +
-          subStat +
-          stats +
-          "</span>" +
           // Delete is the one action pinned to the header. It is destructive, so
           // it keeps the divider and extra gap the comfortable header gives it,
           // and the confirmation modal is what actually guards a near-miss.
           deleteBtn +
           "</div>" +
-          (git ? '<div class="card-meta">' + git + "</div>" : "") +
+          (meta
+            ? '<div class="card-meta' +
+              (hasActiveTerminal ? " terminal-open" : "") +
+              '">' +
+              meta +
+              "</div>"
+            : "") +
           prLine(wt.pr, true) +
           '<div class="card-body">' +
           '<div class="card-actions">' +
@@ -2884,12 +2903,13 @@
       if (on) activeRow = row;
     });
     // The card-level marker lives on the Agents bar in the comfortable layout
-    // and on the card header in the compact one; only one of the two exists.
+    // and on the meta line (which carries the agent stats) in the compact one;
+    // only one of the two exists on a card.
     root
-      .querySelectorAll(".agents-bar.terminal-open, .card-head.terminal-open")
+      .querySelectorAll(".agents-bar.terminal-open, .card-meta.terminal-open")
       .forEach((bar) => bar.classList.remove("terminal-open"));
     const card = activeRow && activeRow.closest(".card");
-    const bar = card && card.querySelector(".agents-bar, .card-head");
+    const bar = card && card.querySelector(".agents-bar, .card-meta");
     if (bar) bar.classList.add("terminal-open");
   }
 

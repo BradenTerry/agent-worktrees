@@ -2083,10 +2083,12 @@ button.busy {
 .card.compact .branch {
   font-size: 12px;
 }
-/* Badges follow the name instead of being pushed to the far edge; the status
-   summary takes the auto margin, so it always sits against the right edge. */
+/* Badges follow the name instead of being pushed to the far edge; they take the
+   auto margin so Delete stays against the right edge whether or not the worktree
+   has badges to show. */
 .card.compact .badges {
   margin-left: 0;
+  margin-right: auto;
 }
 .card.compact .badge {
   font-size: 11px;
@@ -2094,69 +2096,29 @@ button.busy {
   letter-spacing: 0;
   text-transform: none;
 }
-.card.compact .head-stats {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 7px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--vscode-foreground);
-}
-/* Agent count for the worktree, next to the status dots that break it down. */
-.card.compact .head-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  opacity: 0.9;
-}
-.card.compact .head-count svg {
-  width: 13px;
-  height: 13px;
-}
-.card.compact .head-stats .stat {
-  gap: 3px;
-}
 /* Same rule as the Agents bar: the terminal glyph only where it is true. */
-.card.compact .card-head.terminal-open .agents-bar-terminal {
+.card.compact .card-meta.terminal-open .agents-bar-terminal {
   display: inline-flex;
-}
-/* A very narrow sidebar (the webview is exactly as wide as the view). The
-   branch name is what tells two cards apart, so it wins the space back from the
-   agent total - which the status dots beside it already break down. */
-@media (max-width: 340px) {
-  .card.compact .head-count {
-    display: none;
-  }
-  .card.compact .head-stats {
-    gap: 5px;
-  }
 }
 /* Delete: the one action pinned to the header, so a worktree can be removed
-   without opening it. Destructive, so it keeps the divider and the extra gap the
-   comfortable header gives it rather than sitting flush against the counts. */
+   without opening it. The comfortable header sets it off with a divider because
+   it sits in a run of other buttons; here it is alone against the right edge
+   with the branch name well clear of it, so the gap does that on its own. */
 .card.compact .card-head .act.danger {
   flex: 0 0 auto;
-  position: relative;
-  margin-left: 9px;
+  margin-left: 8px;
   padding: 2px 5px;
 }
 .card.compact .card-head .act.danger::before {
-  content: "";
-  position: absolute;
-  left: -9px;
-  top: 2px;
-  bottom: 2px;
-  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.3));
+  content: none;
 }
 
-/* --- Meta line: git summary and the whole PR rollup, side by side --------- */
+/* --- Meta line: what the working tree looks like, and what is running ----- */
 .card.compact .card-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 4px 8px;
   /* Indented to the header's branch name, so the two read as one block. */
   padding: 0 6px 5px 20px;
 }
@@ -2164,6 +2126,39 @@ button.busy {
   margin-top: 0;
   gap: 8px;
   font-size: 11px;
+}
+/* Agent count, live subagents and the per-status dots. The same summary the
+   Agents bar carries in the comfortable layout, moved next to the diff totals -
+   they answer different questions about the worktree, so a rule separates them
+   rather than leaving one run of glyphs to be parsed as a single group. */
+.card.compact .meta-stats {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-foreground);
+}
+/* The rule, drawn only when there are git segments to its left. On the group
+   itself rather than as an element between the two, so a wrap can never strand
+   it at the end of a line with nothing after it. */
+.card.compact .meta-stats.ruled {
+  padding-left: 9px;
+  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.4));
+}
+.card.compact .meta-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.9;
+}
+.card.compact .meta-count svg {
+  width: 13px;
+  height: 13px;
+}
+.card.compact .meta-stats .stat {
+  gap: 3px;
 }
 /* The PR rollup keeps its frame here: it is one thing about the branch, and the
    border is what says so. Compact buys its rows back by dropping the padding and
