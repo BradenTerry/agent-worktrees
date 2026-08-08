@@ -22,6 +22,7 @@ import {
   DebugConfigLike,
   DebugTarget,
   FROM_INPUT_KEY,
+  taggedBaseName,
   LaunchFile,
   debugTargets,
   launchTasksOf,
@@ -645,7 +646,7 @@ export class DebugSessionTracker implements vscode.Disposable {
           fromInput: taggedFromInput(session.configuration),
           vm: {
             id: session.id,
-            label: session.name,
+            label: taggedBaseName(session.configuration, session.name),
             noDebug: taggedNoDebug(session.configuration),
           },
         });
@@ -679,7 +680,9 @@ export class DebugSessionTracker implements vscode.Disposable {
   async stop(id: string): Promise<void> {
     const entry = this.live.get(id);
     if (!entry) return;
-    if (!entry.fromInput) trace(`debug: stop ${entry.vm.label}`);
+    // The session's own name, not the row's: the log spans every worktree, so it
+    // wants the suffix the card row drops.
+    if (!entry.fromInput) trace(`debug: stop ${entry.session.name}`);
     await vscode.debug.stopDebugging(entry.session);
   }
 

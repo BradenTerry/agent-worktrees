@@ -44,6 +44,42 @@ body {
   font-weight: 600;
   color: var(--vscode-foreground);
 }
+/* Name, tools and the repo-wide agent summary as one block, with the rule under
+   all of it: it separates the header from the cards, not the name from its own
+   summary. */
+.repo-bar {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  margin-bottom: 8px;
+}
+/* Every agent in the repo, in the glyphs a card uses for its own. Same size and
+   spacing as a card's meta stats, so the total and the per-worktree numbers read
+   as the same kind of thing rather than as two different reports. */
+.repo-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 0 4px 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-foreground);
+}
+.repo-stats .meta-count,
+.repo-stats .agents-bar-subagents {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.9;
+}
+.repo-stats .meta-count svg,
+.repo-stats .agents-bar-subagents svg {
+  width: 13px;
+  height: 13px;
+}
+.repo-stats .stat {
+  gap: 3px;
+}
 .repo-head .tools {
   margin-left: auto;
   display: flex;
@@ -124,7 +160,11 @@ body {
     rgba(127, 127, 127, 0.14)
   );
 }
-.card.open {
+/* The worktree whose agent owns the terminal you are typing into. Marked on the
+   card, not just on its header, so it is findable when the card is collapsed and
+   the header is all there is. It used to mark the open workspace folder instead -
+   which is one card, forever, and not news. */
+.card.terminal-open {
   border-color: var(--vscode-focusBorder);
 }
 
@@ -203,16 +243,20 @@ body {
   background: var(--vscode-inputValidation-warningBackground, #6b5300);
   color: var(--vscode-foreground);
 }
-.badge.primary {
-  background: var(--vscode-charts-blue, #3794ff);
-  color: #fff;
-  font-weight: 600;
-  padding: 2px 8px;
+/* The repository's primary working directory, marked on the name rather than
+   labelled beside it. Quiet on purpose: it is true of one card forever, so it is
+   orientation, not news, and it should not compete with the branch name it sits
+   against. Inline, so it travels with the name and sits on its first line when
+   the name wraps. */
+.primary-mark {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-right: 4px;
+  color: var(--vscode-descriptionForeground);
 }
-.card-sep {
-  border: none;
-  border-top: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
-  margin: 8px 0 0;
+.primary-mark svg {
+  width: 13px;
+  height: 13px;
 }
 /* Git diff info row. */
 .meta-row {
@@ -436,18 +480,29 @@ body {
    connection dots stay static. The dot fades while a pseudo-element ring
    expands; both animate only transform/opacity so the (infinite) pulse stays
    on the compositor. The previous box-shadow-spread ring forced a full repaint
-   of every animating dot each frame for as long as any agent was active. */
+   of every animating dot each frame for as long as any agent was active.
+
+   The two summaries - a compact card's meta line, and the repo-wide line under
+   the name - pulse **waiting only**. They are counts rather than rows: a panel
+   with agents working would have a green dot ticking on every card and again at
+   the top, which is motion that says nothing you did not already know. Waiting is
+   the one that wants you to look, and it is the same thing the Activity Bar badge
+   counts. */
 .agent-row .status-dot.active,
 .agent-row .status-dot.waiting,
 .agents-bar .stat.active .status-dot,
-.agents-bar .stat.waiting .status-dot {
+.agents-bar .stat.waiting .status-dot,
+.card.compact .meta-stats .stat.waiting .status-dot,
+.repo-stats .stat.waiting .status-dot {
   position: relative;
   animation: status-fade 1.4s ease-in-out infinite;
 }
 .agent-row .status-dot.active::after,
 .agent-row .status-dot.waiting::after,
 .agents-bar .stat.active .status-dot::after,
-.agents-bar .stat.waiting .status-dot::after {
+.agents-bar .stat.waiting .status-dot::after,
+.card.compact .meta-stats .stat.waiting .status-dot::after,
+.repo-stats .stat.waiting .status-dot::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -1204,18 +1259,56 @@ button.busy {
   padding: 12px;
   overflow-y: auto;
 }
-/* Narrow panels: a vertical tab rail would swallow half the width, so stack the
-   tabs on top as a horizontal row and give the body the full width. */
-@media (max-width: 360px) {
-  .settings-main {
-    flex-direction: column;
-  }
-  .settings-tabs {
-    flex-direction: row;
-    border-right: none;
-    border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
-    padding: 6px 8px;
-  }
+/* The rail is always a rail. It was a horizontal row of tabs under a width
+   threshold, which is where the sidebar actually lives: five tabs do not fit a
+   sidebar's width, so the last of them was clipped off the right edge - a tab
+   you cannot see is a tab you do not know exists. Folding to icons solves the
+   same problem without ever moving the tabs or hiding one. */
+.settings-tabs.collapsed .settings-tab span,
+.settings-tabs.collapsed .settings-nav-fold span {
+  display: none;
+}
+.settings-tabs.collapsed .settings-tab,
+.settings-tabs.collapsed .settings-nav-fold {
+  justify-content: center;
+  padding: 6px;
+}
+/* Pushed to the foot of the rail, away from the tabs, so it never reads as one
+   of them. */
+.settings-nav-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-nav-fold:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+  color: var(--vscode-foreground);
+}
+.settings-nav-fold:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.settings-nav-fold svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  /* Points back at the rail it closes, and turns to point out of it when the
+     rail is already closed. */
+  transform: rotate(180deg);
+  transition: transform 0.12s ease;
+}
+.settings-tabs.collapsed .settings-nav-fold svg {
+  transform: rotate(0deg);
 }
 .gh-section {
   display: flex;
@@ -1404,6 +1497,10 @@ button.busy {
 .gh-actions {
   display: flex;
   align-items: center;
+  /* Wraps rather than running off the edge: with the tab rail open in a sidebar
+     the body is narrow enough that two buttons side by side do not fit, and the
+     second was being clipped instead of moving down. */
+  flex-wrap: wrap;
   gap: 8px;
 }
 .gh-disconnect {
@@ -2055,10 +2152,11 @@ button.busy {
   z-index: 2;
   display: flex;
   /* Top-aligned, not centred: the name can run to two lines and the chevron and
-     the actions belong beside its first one. Wrapping is the escape hatch for a
-     panel too narrow to hold both (see .head-main's floor). */
+     the actions belong beside its first one. Never wrapped: the actions hold one
+     place on the card at every width, so a name long enough to wrap pushes into
+     a narrower column rather than displacing them to a row of their own. */
   align-items: flex-start;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px 5px;
   min-width: 0;
   padding: 4px 5px 4px 3px;
@@ -2093,11 +2191,11 @@ button.busy {
      chevron stranded on the row above. From zero it takes what the actions
      leave and wraps inside that. */
   flex: 1 1 0;
-  /* A floor, though: squeezed below about nine characters the name starts
-     breaking through the middle of a segment ("feat/check / out- / redesign"),
-     which is worse than the alternative. Refusing to shrink past it is what
-     makes the actions wrap to their own row on a very narrow panel. */
-  min-width: 9em;
+  /* No floor: with the header set to nowrap a floor would push the actions past
+     the card's right edge instead of wrapping them, so the name yields first. It
+     wraps between its segments (see .branch) and only breaks through a word when
+     the column is genuinely too narrow to hold one. */
+  min-width: 0;
   line-height: 1.35;
 }
 .card.compact .branch {
@@ -2110,26 +2208,47 @@ button.busy {
      it breaks through the middle of a word. */
   overflow-wrap: break-word;
 }
-/* Inline with the name, so they trail its last word and wrap with it. */
-.card.compact .head-main .agents-bar-terminal,
-.card.compact .badges {
+/* Inline with the name, so it trails its last word and wraps with it. */
+.card.compact .head-main .agents-bar-terminal {
   vertical-align: -2px;
   margin-left: 5px;
 }
-.card.compact .badges {
+/* A flex item leading the actions run, not inline content: the badges centre on
+   the buttons beside them and hold the name's first line however far it wraps. */
+.card.compact .head-actions .badges {
   display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  /* Set off from the run of icon buttons, which sit on a 2px gap. */
+  margin-right: 3px;
 }
-/* Search, find file, Debug, the branch on GitHub and Delete. Pinned to the first
-   line of the name and to the right edge, so they hold one place on the card
-   whatever the name does. */
+/* Everything fixed-height in the header centres on the name's first line box,
+   the same way the agent row's dot and chips do, and for the same reason: the
+   header is flex-start so these stay beside the first line when the name wraps,
+   but flex-start alone aligns their *tops*, which leaves each sitting high by
+   half the difference in height. Heights are the items' own, from the rules
+   named beside them. */
+.card.compact .card-head {
+  /* .head-main's line-height against the card's font size. Not `1.35em`: a
+     custom property's em is re-resolved against whichever child reads it, and
+     the icon buttons here are 11px, so an em would centre each item on a
+     different line box. The token keeps this tracking the editor font size. */
+  --first-line: calc(1.35 * var(--vscode-font-size, 13px));
+}
+.card.compact .card-head > .chevron {
+  margin-top: calc((var(--first-line) - 12px) / 2); /* .chevron svg */
+}
+/* Switch branch, Debug, the branch on GitHub and Delete, plus the badges. Pinned
+   to the first line of the name and to the right edge, so they hold one place on
+   the card whatever the name does. */
 .card.compact .head-actions {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 2px;
-  /* Holds the right edge on the name's line, and still holds it on the row
-     below when the panel is too narrow to keep them together. */
+  /* Holds the right edge on the name's first line, however far the name wraps. */
   margin-left: auto;
+  margin-top: calc((var(--first-line) - 20px) / 2); /* .head-actions .act */
 }
 .card.compact .head-actions .act {
   flex: 0 0 auto;
@@ -2147,11 +2266,18 @@ button.busy {
 .card.compact .card-head.terminal-open .agents-bar-terminal {
   display: inline-flex;
 }
-/* The branch on GitHub: a link, sized to match its neighbours rather than framed
-   like a button. */
-.card.compact .card-head .ghlink {
-  width: 22px;
+/* The branch on GitHub, leading the body's tools row. Framed like the buttons
+   around it - every other control in the row is a framed icon, and an unframed
+   one among them reads as a different kind of thing. Same border and sizing as
+   .act.ghost, which it cannot simply wear: it is an <a>, not a <button>. */
+.card.compact .card-tools .ghlink {
+  width: 24px;
   height: 20px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  border-radius: 3px;
+}
+.card.compact .card-tools .ghlink:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
 }
 /* The comfortable header sets Delete off with a divider because it sits in a run
    of five similar buttons; here a small extra gap is enough, and the
@@ -2162,20 +2288,95 @@ button.busy {
 .card.compact .card-head .act.danger::before {
   content: none;
 }
+/* Below this the actions and a readable name cannot share a line: held together
+   the name is squeezed into a column a character wide, which is worse than
+   moving the actions down. So the pinning above is what happens at every width a
+   sidebar is realistically dragged to, and this is the escape hatch under it.
+   At three buttons the run is about 88px, or 112px on the primary card where the
+   Primary badge rides with it; past the padding, chevron, scope pill and gaps
+   (about 59px) that still leaves the name roughly 7em here, which is about where
+   it stops being able to break between its segments. Keep this in step with the
+   run: it was 300px when the header held six buttons. */
+@media (max-width: 240px) {
+  .card.compact .card-head {
+    flex-wrap: wrap;
+  }
+  .card.compact .head-main {
+    min-width: 9em;
+  }
+}
 
 /* --- Meta line: what the working tree looks like, and what is running ----- */
+/* The ways into the worktree, plus New agent, on a row in the card body directly
+   above the Agents section. Indented to the name like the rows above it, so the
+   card keeps one left edge all the way down. */
+.card.compact .card-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0 6px 4px 19px;
+}
+.card.compact .card-tools .act {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+}
+.card.compact .card-tools .act {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+}
+/* locked and detached, as glyphs on the meta line beside the agent counts. The
+   warning colour is what marks them as exceptions; they carry no text, so the
+   tooltip is the label. Sized to the line's own 11px text rather than to the icon
+   buttons above, which are controls and are allowed to be bigger. */
+.card.compact .meta-flag {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.card.compact .meta-flag svg {
+  width: 13px;
+  height: 13px;
+}
+.card.compact .meta-flag.warn {
+  color: var(--vscode-charts-yellow, #cca700);
+}
 .card.compact .card-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 8px;
-  /* Indented to the header's branch name, so the two read as one block. */
+  /* Indented to the header's branch name, so the two read as one block. Refresh
+     is what lines up with the name here, not the git totals - it leads the line,
+     so the totals sit to its right. The left edge of the name, the badges and
+     this button is the column the eye follows down the card. */
   padding: 0 6px 5px 20px;
+}
+/* Refresh, at the head of the line it re-reads. Sized down to the line rather
+   than to the header's run - this is 11px text, and a 20px button beside it
+   would set the row's height instead of the words doing it. */
+.card.compact .card-meta .act {
+  flex: 0 0 auto;
+  padding: 1px 3px;
+  /* Its own gap to the totals, tighter than the line's 8px: it leads them rather
+     than being another item in the run. */
+  margin-right: -3px;
+}
+.card.compact .card-meta .act svg {
+  width: 12px;
+  height: 12px;
 }
 .card.compact .gitline {
   margin-top: 0;
   gap: 8px;
   font-size: 11px;
+  /* Pushed to the right edge, with the agent counts holding the left: two
+     readings of the worktree at opposite ends of one line. The auto margin
+     applies per flex line, so a panel too narrow to hold both wraps the totals
+     to a row of their own and keeps them right-aligned there - no measuring, no
+     breakpoint, and it happens per card at whatever width that card actually
+     runs out. */
+  margin-left: auto;
 }
 /* Agent count, live subagents and the per-status dots. The same summary the
    Agents bar carries in the comfortable layout, moved next to the diff totals -
@@ -2184,12 +2385,6 @@ button.busy {
 .card.compact .meta-stats {
   display: inline-flex;
   align-items: center;
-  /* Pushed to the right edge, with the git totals holding the left: two readings
-     of the worktree at opposite ends of one line. The auto margin applies per
-     flex line, so a panel too narrow to hold both wraps the stats to a row of
-     their own and keeps them right-aligned there - no measuring, no breakpoint,
-     and it happens per card at whatever width that card actually runs out. */
-  margin-left: auto;
   flex: 0 0 auto;
   gap: 7px;
   font-size: 11px;
@@ -2283,72 +2478,75 @@ button.busy {
   flex: 0 0 auto;
   padding: 2px 5px;
 }
-/* New agent keeps its label and its filled treatment - it is the primary action
-   and the only one here that is not an icon. Pinned right, so the icon actions
-   can come and go (Debug, the GitHub link) without it moving. */
-.card.compact .card-actions .act.agent {
-  margin-left: auto;
-  padding: 2px 7px;
-  white-space: nowrap;
-}
-/* The scope pill loses its label here (see scmScopeBtn) and sits with the other
-   icon actions, so it is sized like them rather than like a gitline pill. */
-.card.compact .card-actions .scm-scope {
+/* New agent keeps its label - it is the primary action and the only one here
+   that is not an icon - but not its filled treatment. Filled, it was the single
+   saturated block on a card otherwise made of quiet outlines, four times wider
+   than any neighbour and about a third of the row: the loudest thing on a card
+   whose status colours are the part meant to catch the eye. Outlined in the
+   accent, with the accent on the text, it still reads as the primary action and
+   still says what it does without competing with them. The comfortable card
+   keeps the filled button, where there is room for it to be the anchor of its
+   own row. Pinned right, so the icon actions can come and go (Debug, the GitHub
+   link) without it moving. */
+/* The scope pill loses its label here (see scmScopeBtn) and is sized like an
+   icon action rather than like a gitline pill, since it leads the header's run
+   of them. */
+.card.compact .card-head .scm-scope {
   width: 24px;
   height: 20px;
   padding: 0;
   border-radius: 3px;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
 }
-.card.compact .card-actions .scm-scope.active {
+.card.compact .card-head .scm-scope.active {
   color: var(--vscode-button-foreground, #ffffff);
   background: var(--vscode-button-background, #0e639c);
   border-color: transparent;
 }
 
-/* The agent list's own fold, inside an open card. The card's toggle governs the
-   whole body; this governs the one part of it that grows without bound, so a
-   worktree running a dozen agents can be put away without taking its actions and
-   its PR rollup with it. */
-.card.compact .agents-toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: 0 6px 2px 13px;
-  padding: 2px 5px;
-  border-radius: 3px;
+/* A heading over the agent list, not a control: the card's own toggle is the one
+   disclosure it needs. */
+.card.compact .agents-heading {
+  margin: 0 6px 2px 18px;
   font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-  cursor: pointer;
-  user-select: none;
-}
-.card.compact .agents-toggle:hover {
-  color: var(--vscode-foreground);
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
-}
-.card.compact .agents-toggle:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: -1px;
-}
-.card.compact .agents-toggle .chevron {
-  transform: rotate(90deg);
-}
-.card.compact .agent-fold.closed .agents-toggle .chevron {
-  transform: rotate(0deg);
-}
-.card.compact .agents-toggle .chevron svg {
-  width: 11px;
-  height: 11px;
-}
-.card.compact .agents-toggle-label {
   font-weight: 600;
+  color: var(--vscode-descriptionForeground);
 }
-.card.compact .agents-toggle-count {
-  font-variant-numeric: tabular-nums;
+/* New agent, at the far right of the tools row and hard against the Agents
+   section below it. Icon-only here, so it is sized like the controls beside it
+   rather than like a labelled button, and outlined rather than filled: filled,
+   it was the single saturated block on a card otherwise made of quiet
+   outlines. */
+.card.compact .card-tools .act.agent {
+  margin-left: auto;
+  padding: 2px 6px;
+  gap: 2px;
+  white-space: nowrap;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  border: 1px solid var(--vscode-textLink-foreground, #3794ff);
 }
-.card.compact .agent-fold.closed .agents,
-.card.compact .agent-fold.closed .agents-empty {
-  display: none;
+.card.compact .card-tools .act.agent:hover {
+  background: color-mix(
+    in srgb,
+    var(--vscode-textLink-foreground, #3794ff) 15%,
+    transparent
+  );
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.card.compact .card-tools .act.agent .agent-plus {
+  font-size: 12px;
+}
+/* The one part of a card that grows without bound. Bounded and scrolled rather
+   than folded away: a worktree running a dozen agents can no longer push every
+   card below it off screen, and unlike a fold this costs no click and hides
+   nothing that was already on screen. The height is a whole number of rows plus
+   a part of one, so a list that overflows visibly does - a clean cut at the
+   bottom edge reads as the end of the list. */
+.card.compact .agent-list .agents {
+  max-height: 190px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .card.compact .agents {
@@ -2370,6 +2568,11 @@ button.busy {
    the useful half of it was landing outside. Bounded: the extension caps a
    summary at 120 characters (MAX_TITLE), so a row can never run away. */
 .card.compact .agent-label {
+  /* Sized with the rest of the density. Left alone it inherited the body size
+     and came out the largest text on the card - larger than the branch name at
+     12px, in a layout whose whole point is that nothing is bigger than it needs
+     to be. See --row-font on .agent-row: the row's offsets are derived from it. */
+  font-size: var(--row-font);
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
@@ -2380,11 +2583,31 @@ button.busy {
   overflow-wrap: break-word;
   line-height: 1.35;
 }
-/* Aligned to the summary's first line, not centred against the whole block. */
-.card.compact .agent-row .status-dot,
-.card.compact .agent-row .terminal-chip,
+/* Centred on the summary's first line box, not on the whole block: a wrapped
+   summary makes the row taller, and centring against all of it drags these away
+   from the words they qualify. The offsets are computed per item rather than
+   shared, because the three are different heights - one nudge that centres the
+   dot leaves the others off, and the actions are taller than the line box and so
+   need a negative offset. Each height below is the item's own, from the rule
+   named beside it; every child here inherits the row's font size, so the em in
+   --first-line resolves the same for all of them. */
+.card.compact .agent-row {
+  /* The summary's size, and the line box it makes. Declared together because the
+     offsets below are computed from the line box: changing the size without the
+     variable would silently un-centre the dot and the chips. Not an `em` in the
+     line-box calc, for the reason given on .card-head's copy - the children that
+     read it have font sizes of their own. */
+  --row-font: 12px;
+  --first-line: calc(1.35 * var(--row-font));
+}
+.card.compact .agent-row .status-dot {
+  margin-top: calc((var(--first-line) - 8px) / 2); /* .status-dot */
+}
+.card.compact .agent-row .terminal-chip {
+  margin-top: calc((var(--first-line) - 13px) / 2); /* .terminal-chip svg */
+}
 .card.compact .agent-row .row-actions {
-  margin-top: 2px;
+  margin-top: calc((var(--first-line) - 20px) / 2); /* .iconbtn, glyph + padding */
 }
 /* The subagent and skill counters drop to a line of their own beneath the
    summary, which now needs the row's full width. `order` is what puts them

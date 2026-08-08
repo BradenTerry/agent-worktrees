@@ -23,14 +23,16 @@ its running agents in one view.
 
 **Worktrees**
 
-- Every worktree (primary + linked) as a card, with `Primary` / `detached` /
-  `locked` badges and a per-card refresh that re-reads just that worktree.
+- Every worktree (primary + linked) as a card. The primary one is marked with a
+  house beside its name; detached and locked show as glyphs on the card's summary
+  line. Per-card refresh forces that worktree's PR/CI and re-gathers git status
+  (the gather itself covers every card - only the PR call is scoped).
 - **[Compact view](docs/compact-view.md)**, a second card density toggled from the
   toolbar and persisted with the expand state. It folds the header and git summary
-  into two lines and tightens the PR block (which keeps its frame) to three, moves
-  the per-worktree actions inside the card, and makes the header both the expand
-  toggle and a sticky one, so an agent row is never scrolled away from the name of
-  the worktree it belongs to.
+  into two lines and tightens the PR block (which keeps its frame) to three, splits
+  the controls between a run on the name line and a row inside the card, and makes
+  the header both the expand toggle and a sticky one, so an agent row is never
+  scrolled away from the name of the worktree it belongs to.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
   upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file
@@ -81,9 +83,11 @@ its running agents in one view.
   session whose cwd is not itself a card is the cue to re-list worktrees (see
   [Refresh coalescing](docs/refresh-coalescing.md)).
 - Status per agent, read from Claude Code's own session registry (see
-  [Agent status](docs/agent-status.md)). Collapsible lists with per-status counts,
-  and a number badge on the Activity Bar icon counting **waiting** agents, so a
-  blocked agent surfaces while the panel is hidden.
+  [Agent status](docs/agent-status.md)). Per-status counts on each card and once
+  for the whole repo under its name, a bounded scrolling list so a busy worktree
+  cannot push the others off screen, and a number badge on the Activity Bar icon
+  counting **waiting** agents, so a blocked agent surfaces while the panel is
+  hidden.
 - **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
   type, description and elapsed time, read from the files Claude writes for them,
   and land on the card for the worktree they were actually given.
@@ -92,8 +96,8 @@ its running agents in one view.
 
 **GitHub and branches**
 
-- **A branch on GitHub from its card**: a GitHub mark beside the worktree name
-  links to `<origin>/tree/<branch>`. Origin is resolved once per window at the
+- **A branch on GitHub from its card**: a GitHub mark on the card links to
+  `<origin>/tree/<branch>`. Origin is resolved once per window at the
   repo root (every worktree of a repo shares it) and needs no token, so the link
   is there whether or not the PR integration is on. Absent for a non-GitHub
   origin and for a detached worktree, which has no branch page.
@@ -191,6 +195,19 @@ npm run compile     # or: npm run watch
 
 Press `F5` (Run Extension) to launch an Extension Development Host. Open a folder
 that is a git repository (with worktrees) to populate the panel.
+
+Which loop applies depends on what you touched, because `tsc` builds `src/` only
+and never copies `media/`:
+
+| Changed | To see it |
+| --- | --- |
+| `media/panel.js`, `media/panel.css` | **`Developer: Reload Webviews`** in the dev host. No recompile, no relaunch. |
+| `src/**.ts` | Rebuild (`npm run watch` covers it), then reload the dev host window. |
+
+One caveat on the first row: the asset URLs `html()` builds are stable across
+launches, so nothing invalidates them, and a reloaded webview can re-serve a
+cached `panel.js`. A UI change then looks like it did not build when it built
+fine. Restarting the debug session clears it.
 
 ### Tests
 

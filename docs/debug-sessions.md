@@ -57,7 +57,14 @@ they can be named per worktree and stopped, which is what the session rows are f
   workspace folder would run the worktree's program from the primary checkout. A
   config that sets `cwd` itself is left alone.
 - The session is renamed `<config> (<worktree>)`, so VS Code's CALL STACK says
-  which worktree a session belongs to when several are running.
+  which worktree a session belongs to when several are running. Those views are
+  worktree-agnostic; the card row is not, so it drops the suffix and shows the
+  configuration name alone - inside a card, `(<worktree>)` only repeats the
+  branch name in the header above it. The unsuffixed name is carried on the
+  configuration as `agentWorktreesBaseName` rather than parsed back off the end
+  of the session name, which would go wrong for a config whose own name ends in
+  parentheses. A session started before the key existed falls back to its full
+  name. The **log** keeps the suffixed name: it spans every worktree.
 - The worktree path is recorded on the configuration itself
   (`agentWorktreesPath`), plus `agentWorktreesNoDebug` for a run started without
   debugging and `agentWorktreesFromInput` for one filled in from a prompt, which

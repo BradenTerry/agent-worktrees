@@ -84,9 +84,9 @@ agent needs you specifically.
 
 ## Pull requests
 
-Every card links its branch straight to GitHub: click the GitHub mark next to the
-worktree name to open that branch in the browser. No token needed, and no setup
-beyond having a GitHub remote.
+Every card links its branch straight to GitHub: click the GitHub mark on the
+card to open that branch in the browser. No token needed, and no setup beyond
+having a GitHub remote.
 
 Connect a GitHub token and each worktree card grows a PR rollup.
 
@@ -169,8 +169,10 @@ first. The panel adds a **Debug** button to each card instead.
   the worktree, so you debug the change you just made in it rather than whatever
   your main checkout last built. If the build fails, nothing launches.
 - **Stop it from the same card.** Each running session gets a row with a stop
-  button, named after the configuration and the worktree, so with several
-  worktrees running you always stop the right one.
+  button on the card of the worktree it is running in, so with several worktrees
+  running you always stop the right one. The row is named after the
+  configuration; VS Code's own Call Stack and session list add the worktree,
+  since those are the views where it could be any of them.
 
 The button appears only on worktrees that have launch configurations, so a repo
 with no debug setup gets no extra clutter.
@@ -194,10 +196,27 @@ density button folds every card down.
   its own agent rows, so the row you are about to click always has the name of
   its worktree directly above it. No more revealing a terminal from the card
   below the one you meant.
-- **Delete stays in the header**, so a finished worktree goes away without
-  opening it first. The rest of a worktree's buttons - New agent, search, find
-  file, Debug, branch, refresh, new window - move inside the card and appear when
-  you open it.
+- **What acts on a worktree stays on its name line** - switch branch, refresh and
+  Delete, led by the Source Control scope button - so a finished worktree goes
+  away, a branch gets switched or a card gets re-read without expanding it first.
+  The ways *into* a worktree (its branch on GitHub, search, find file, Debug, new
+  window, and **New agent**) are a row inside the card, right above its agents.
+  Four icons on the name line instead of ten keeps the branch name readable
+  instead of wrapping to make room for them.
+- **No pills for things a glyph can say.** Your repository's own working directory
+  gets a small house beside its name; a locked or detached worktree gets a padlock
+  or a broken chain next to its agent counts. The row those words used to need is
+  gone.
+- **The outlined card is the one you are typing into**, not the one that happens
+  to be your open folder - so with several agents running, the card your terminal
+  belongs to is findable at a glance, collapsed or not.
+- **A repo-wide agent summary under the repository name** - how many agents, how
+  many live subagents, and how many are active, waiting or idle across every
+  worktree - so "is anything waiting on me" is one glance, not a scroll.
+- **The agent list scrolls instead of folding.** A worktree running a dozen
+  agents no longer pushes every card below it off screen.
+- **One button opens or shuts every card**, and says which it will do: chevrons
+  pointing apart to expand them all, pointing together to collapse them.
 - **Your choice sticks**, and so does whichever cards you had open. Press the
   button again for the roomier layout.
 
@@ -238,6 +257,8 @@ first one. Each card now carries two buttons instead.
   interval for how often the panel rechecks worktrees on its own.
 - **Buttons that show their work**: slow actions show a spinner in place of their
   icon.
+- **A settings nav that folds to icons**, so the tab rail stops taking a third of
+  a narrow sidebar. Every tab stays where it is either way; the choice sticks.
 
 ## Requirements
 

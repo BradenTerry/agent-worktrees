@@ -33,6 +33,22 @@ test("compact - the same worktrees at compact density", async ({ page }) => {
   await page.locator("#root").screenshot({ path: shot("compact.png"), animations: "disabled" });
 });
 
+test("compact-collapsed - every card shut, at compact density", async ({ page }) => {
+  const data = overviewData();
+  // A locked worktree, so the badge line shows up on one of the four: it is only
+  // drawn for the unusual states, and none of the fixtures carries one.
+  data.worktrees[2].locked = true;
+  await mountPanel(page, { data, state: { density: "compact" } });
+  // Collapsed through the toolbar control rather than by setting the class, so
+  // this shows what the real path produces. The harness seeds every card as
+  // expanded, so the button's first click is the collapsing one.
+  await page.locator("[data-tool='collapseAll']").click();
+  await page.locator("#root").screenshot({
+    path: shot("compact-collapsed.png"),
+    animations: "disabled",
+  });
+});
+
 test("settings - GitHub PR integration", async ({ page }) => {
   const data = overviewData();
   await mountPanel(page, { data, message: { type: "openSettings" } });
