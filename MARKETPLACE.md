@@ -21,6 +21,8 @@ single view.
 - **Run or debug a worktree's launch configuration** without opening it in another
   window, and stop the session from the same card.
 - **Work every branch in the repo** from a dedicated Branches tab.
+- **Switch to a compact view** when the panel gets busy: the same worktrees in
+  about half the height, with their names pinned above their agents.
 
 ## Agents
 
@@ -172,6 +174,28 @@ first. The panel adds a **Debug** button to each card instead.
 
 The button appears only on worktrees that have launch configurations, so a repo
 with no debug setup gets no extra clutter.
+
+## A compact view for when the panel gets busy
+
+Three or four worktrees, each with agents and a pull request, and the panel
+becomes something you scroll rather than something you scan. The toolbar's
+density button folds every card down.
+
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/compact.png" alt="The same four worktrees at compact density: one header line with agent counts and status, one line with git status and the PR rollup, then the agent rows" width="380">
+
+- **The same worktrees in about half the height**, and roughly a quarter of it
+  once you collapse them. Nothing is dropped: the branch, its badges, the agent
+  and subagent counts, the status dots, the git totals and the whole PR rollup
+  are all still there, just on two lines instead of seven.
+- **Worktree names stay put while you scroll.** A card's header pins itself above
+  its own agent rows, so the row you are about to click always has the name of
+  its worktree directly above it. No more revealing a terminal from the card
+  below the one you meant.
+- **New agent is always one click**, right in the header. The rest of a
+  worktree's buttons - search, find file, Debug, branch, refresh, new window,
+  delete - move inside the card and appear when you open it.
+- **Your choice sticks**, and so does whichever cards you had open. Press the
+  button again for the roomier layout.
 
 ## Find files in a worktree without leaving your window
 

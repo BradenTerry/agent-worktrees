@@ -2002,3 +2002,281 @@ button.busy {
 .brow .prline {
   margin-top: 8px;
 }
+
+/* ===========================================================================
+   Compact density
+   ---------------------------------------------------------------------------
+   An alternative worktree-card layout, toggled from the panel toolbar and
+   persisted in the webview state. The comfortable layout above gives each
+   subsystem (header, git summary, actions, PR rollup, agents bar) its own
+   labelled block, which is legible but costs ~7 rows per worktree: on a repo
+   with several worktrees the agents scroll far away from the name of the
+   worktree they belong to, and the card you are looking at is easy to mistake
+   for its neighbour.
+
+   Compact answers that with three things:
+
+     1. Two lines at rest. The header carries the name plus the agent/subagent
+        counts and status dots; a single meta line carries the git summary and
+        the whole PR rollup. Everything else moves inside the card body.
+     2. The header IS the expand toggle (no separate Agents bar) and it is
+        sticky, so it stays pinned above its own agent rows while they scroll.
+        A row is never separated from the worktree name it belongs to.
+     3. Per-worktree actions only exist on an expanded card, behind a rail that
+        ties them - and the agent rows - visually back to that header.
+
+   Everything here is scoped to `.card.compact`, so the comfortable layout is
+   untouched.
+   ========================================================================= */
+
+/* The card's tint, lifted into a variable so the sticky header can repaint the
+   exact shade of the card it belongs to (it scrolls over agent rows, so it
+   cannot be translucent). */
+.card.compact {
+  --card-tint: rgba(127, 127, 127, 0.07);
+  padding: 0;
+  margin-bottom: 6px;
+  background-image: linear-gradient(var(--card-tint), var(--card-tint));
+}
+.card.compact:nth-child(even) {
+  --card-tint: rgba(127, 127, 127, 0.14);
+}
+/* Which card the pointer is in, said on the card itself rather than only on the
+   row under the cursor: the near-miss this density is meant to prevent is
+   clicking the right-looking agent on the wrong worktree. */
+.card.compact:hover:not(.open) {
+  border-color: rgba(127, 127, 127, 0.7);
+}
+
+/* --- Header: name, badges, status summary; also the expand toggle --------- */
+.card.compact .card-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px 5px 4px 3px;
+  border-radius: 5px 5px 0 0;
+  cursor: pointer;
+  user-select: none;
+  /* Opaque: agent rows pass underneath while the header stays pinned. The
+     editor background is the fallback because editorWidget-background is
+     allowed to be unset (and would then be transparent). */
+  background-color: var(
+    --vscode-editorWidget-background,
+    var(--vscode-editor-background)
+  );
+  background-image: linear-gradient(var(--card-tint), var(--card-tint));
+}
+.card.compact .card-head:hover {
+  background-image: linear-gradient(
+    rgba(127, 127, 127, 0.2),
+    rgba(127, 127, 127, 0.2)
+  );
+}
+.card.compact .card-head:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.card.compact .branch {
+  font-size: 12px;
+}
+/* Badges follow the name instead of being pushed to the far edge; the status
+   summary takes the auto margin, so it always sits against the right edge. */
+.card.compact .badges {
+  margin-left: 0;
+}
+.card.compact .badge {
+  font-size: 11px;
+  padding: 0 6px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.card.compact .head-stats {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-foreground);
+}
+/* Agent count for the worktree, next to the status dots that break it down. */
+.card.compact .head-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.9;
+}
+.card.compact .head-count svg {
+  width: 13px;
+  height: 13px;
+}
+.card.compact .head-stats .stat {
+  gap: 3px;
+}
+/* Same rule as the Agents bar: the terminal glyph only where it is true. */
+.card.compact .card-head.terminal-open .agents-bar-terminal {
+  display: inline-flex;
+}
+/* A very narrow sidebar (the webview is exactly as wide as the view). The
+   branch name is what tells two cards apart, so it wins the space back from the
+   agent total - which the status dots beside it already break down. */
+@media (max-width: 340px) {
+  .card.compact .head-count {
+    display: none;
+  }
+  .card.compact .head-stats {
+    gap: 5px;
+  }
+}
+/* New agent, icon-only and always present - the one per-worktree action a
+   collapsed compact card still offers, so starting a session never costs an
+   expand first. */
+.card.compact .head-agent {
+  flex: 0 0 auto;
+  gap: 1px;
+  padding: 2px 5px;
+  color: var(--vscode-foreground);
+}
+.card.compact .head-agent:hover {
+  border-color: var(--vscode-focusBorder);
+}
+
+/* --- Meta line: git summary and the whole PR rollup, side by side --------- */
+.card.compact .card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  /* Indented to the header's branch name, so the two read as one block. */
+  padding: 0 6px 5px 20px;
+}
+.card.compact .gitline {
+  margin-top: 0;
+  gap: 8px;
+  font-size: 11px;
+}
+/* One line, no code-block frame: on a compact card the rollup is meta beside
+   the git summary, not a panel of its own. */
+.prline.compact {
+  display: flex;
+  /* The block layout stacks its rows; the compact rollup is a single run. */
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 11px;
+}
+.prline.compact:hover {
+  border: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prline.compact .pr-state {
+  padding: 1px 6px;
+}
+.prline.compact .pr-flag {
+  padding: 1px 4px;
+}
+.prline.compact .pr-seg svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* --- Body: actions, then the agents, on a rail back to the header --------- */
+.card.compact .card-body {
+  position: relative;
+  padding-bottom: 5px;
+}
+/* The rail runs the height of the expanded body, aligned under the header's
+   chevron: everything to its right belongs to the worktree named above it. */
+.card.compact .card-body::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 0;
+  bottom: 5px;
+  width: 1px;
+  background: rgba(127, 127, 127, 0.32);
+}
+/* Every per-worktree control on one icon row, revealed by expanding the card.
+   Splitting them off the header is what buys the two-line resting state; they
+   are one click away rather than hover-only, so they stay keyboard-reachable
+   and discoverable. */
+.card.compact .card-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0 6px 5px 19px;
+}
+.card.compact .card-actions .actions-gap {
+  margin-left: auto;
+}
+.card.compact .card-actions .act {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+}
+.card.compact .card-actions .ghlink {
+  width: 22px;
+  height: 20px;
+  border: 1px solid transparent;
+}
+/* The scope pill loses its label here (see scmScopeBtn) and sits with the other
+   icon actions, so it is sized like them rather than like a gitline pill. */
+.card.compact .card-actions .scm-scope {
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+}
+.card.compact .card-actions .scm-scope.active {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+  border-color: transparent;
+}
+
+.card.compact .agents {
+  margin: 0;
+  padding: 0 6px 0 19px;
+  gap: 1px;
+}
+.card.compact .agent-row {
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 3px;
+}
+.card.compact .subagent-row {
+  margin-left: 10px;
+  padding: 1px 6px 1px 3px;
+}
+.card.compact .agents-empty {
+  margin: 0;
+  padding: 0 6px 4px 19px;
+}
+.card.compact .debug-rows {
+  margin: 0 6px 4px 19px;
+}
+
+/* Toolbar toggle in its on state, matching the active source-control pill. */
+.tbtn.ghost.active {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+  border-color: transparent;
+}
+.tbtn.ghost.active:hover {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(
+    --vscode-button-hoverBackground,
+    var(--vscode-button-background, #0e639c)
+  );
+}

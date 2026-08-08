@@ -25,6 +25,14 @@ test("pr-status - CI checks and review on the PR row", async ({ page }) => {
   await page.locator(".card").nth(1).screenshot({ path: shot("pr-status.png"), animations: "disabled" });
 });
 
+test("compact - the same worktrees at compact density", async ({ page }) => {
+  const data = overviewData();
+  // The density lives in the webview's persisted state, which the harness seeds
+  // through the same getState() the extension's webview provides.
+  await mountPanel(page, { data, state: { density: "compact" } });
+  await page.locator("#root").screenshot({ path: shot("compact.png"), animations: "disabled" });
+});
+
 test("settings - GitHub PR integration", async ({ page }) => {
   const data = overviewData();
   await mountPanel(page, { data, message: { type: "openSettings" } });

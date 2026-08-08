@@ -25,6 +25,11 @@ its running agents in one view.
 
 - Every worktree (primary + linked) as a card, with `Primary` / `detached` /
   `locked` badges and a per-card refresh that re-reads just that worktree.
+- **[Compact view](docs/compact-view.md)**, a second card density toggled from the
+  toolbar and persisted with the expand state. It folds the header, git summary
+  and PR rollup into two lines, moves the per-worktree actions inside the card,
+  and makes the header both the expand toggle and a sticky one, so an agent row
+  is never scrolled away from the name of the worktree it belongs to.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
   upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file
@@ -159,6 +164,7 @@ The rationale behind the parts that are easy to get wrong twice:
 
 | Doc | Covers |
 | --- | --- |
+| [Compact view](docs/compact-view.md) | The second card density: what it folds together, the sticky header, and how one `card()` builds both |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the two status tiers, the agent-only path, why there is no `**/*` watcher, and the Performance tab |
