@@ -91,8 +91,17 @@ jobs:
           # Plain X.Y.Z only. The Marketplace rejects semver suffixes (-pre.1,
           # -rc.2), so a suffixed tag can never publish; fail it here with the
           # reason instead of deep inside vsce.
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::'$version' is not a plain X.Y.Z version. The Marketplace does not accept semver suffixes; use an odd minor (e.g. 3.9.1) for a pre-release."
+          #
+          # Each part is a number with no leading zero. Multi-digit is fine and
+          # expected - the patch runs on into v4.4.10, v4.4.11 - but a padded
+          # one is not a version, and it fails quietly rather than loudly:
+          # `npm version 4.4.01` does not error, it normalizes to 4.4.1, so a
+          # v4.4.01 tag would build and publish a .vsix claiming an ALREADY
+          # RELEASED version. The parity check is the same story one line down,
+          # where $((08 % 2)) is an invalid octal constant, not an even minor.
+          # Both are caught here, where the message can say which part is wrong.
+          if ! printf '%s' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::'$version' is not a plain X.Y.Z version. Each part must be a number with no leading zero (4.4.10, not 4.4.010), and the Marketplace does not accept semver suffixes; use an odd minor (e.g. 3.9.1) for a pre-release."
             exit 1
           fi
           # The channel is the minor's parity: odd = pre-release, even = regular.

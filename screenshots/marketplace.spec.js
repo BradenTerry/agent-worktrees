@@ -46,6 +46,15 @@ test("agents-view - every agent in one list", async ({ page }) => {
   // Switched through the real toolbar control rather than by seeding the state,
   // so the image shows what a click actually produces.
   await page.locator("[data-tool='view'][data-view='agents']").click();
+  // Pin the last agent in the list so the image carries the pinned group and the
+  // break under it: the row it lifts above the waiting one is the whole point.
+  // force, because the pin is transparent until its row is hovered.
+  await page
+    .locator(".agent-row[data-session='s-lf-1'] .pin-btn")
+    .click({ force: true });
+  // Park the pointer on another row so the image shows the offer as well as the
+  // state: an outlined pin where one could go, the filled one where it is.
+  await page.locator(".agent-row[data-session='s-co-2']").hover();
   await page.locator("#root").screenshot({
     path: shot("agents-view.png"),
     animations: "disabled",

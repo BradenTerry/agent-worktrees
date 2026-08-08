@@ -97,6 +97,55 @@ it is in.
 The sort is stable, so within a status the rows keep the order the cards are in,
 and a row moves only when its status actually changes.
 
+### Pinned agents
+
+A pin on each row lifts that agent above the grouping entirely: pinned rows sort
+first, whatever their status, so the one session you are actually shepherding
+stays at the top while the rest of the list churns around it. The grouping is
+not discarded, only outranked - it still orders the pinned rows among themselves
+and everything below them.
+
+The pin ranks above the status because it is the narrower statement. The status
+order is a standing preference about how the whole list reads; a pin is the user
+naming **one** agent, right now, and an override that its own group order could
+push back down would not be an override.
+
+- The control is a thumbtack at the right of the row, outlined where a pin could
+  go and filled where one is. Deliberately **outside** `.row-actions` (the group
+  holding the stop button), which is transparent until the row is hovered: a
+  pinned row has to say why it is at the top when nothing is pointing at it, and
+  an opacity on the group cannot be undone by a child.
+- **Agents-view rows only.** On a card the row's place is already decided by the
+  worktree it belongs to, so a pin there would be an offer with no effect.
+- A rule with a break in it marks where the pinned run ends. The hairline above
+  every agent already says "next agent", so a slightly darker one in the same
+  place would say nothing; the gap is what separates the groups.
+- Pinning scrolls the list back to the top, unpinning does not. Pinning is a
+  request to keep that row in sight and it has just moved somewhere the user may
+  not be looking; unpinning is done while looking straight at the row, and
+  jumping would only lose their place.
+
+### Where the pins live
+
+In the **webview's own state** (`pinnedAgents`), beside `expanded` and the
+current tab - not in a VS Code setting like the status order. The two look
+similar and are not: the status order is a standing preference about how the
+list reads, while a pin names one live session, by an id that means nothing in
+another window and nothing at all once that session ends.
+
+Which is also why the list has to be swept. Session ids are not reused, so
+without one the stored list would grow for as long as the panel's state
+survives. Every payload drops the pins whose session it no longer lists - but
+only on the **second** payload in a row that misses one. A session's registry
+file is rewritten in place on every status transition, so a single gather can
+miss a session that is still very much running, and one unlucky read must not
+quietly unpin it. The absence count is in memory only: a reload starts it again,
+which at worst delays a dead pin's cleanup by one payload.
+
+Pinning is webview-local like the tab switch itself - it decides how the payload
+the panel already has is ordered, so there is no round trip and no git or GitHub
+work behind it.
+
 ### It is a preference
 
 Which status leads is a matter of taste - someone watching a fan-out cares about

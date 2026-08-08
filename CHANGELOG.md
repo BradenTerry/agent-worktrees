@@ -2,6 +2,15 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.4.30
+
+### Changes
+
+- **Pin an agent in the agents view and it stays at the top**, whatever its
+  status and however busy the rest of the list gets. Click the pin again to let
+  it drop back into its status group; an agent that ends takes its pin with it.
+- **Minor bug fixes and improvements.**
+
 ## 4.4.2
 
 ### Changes
