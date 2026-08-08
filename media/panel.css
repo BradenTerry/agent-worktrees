@@ -2478,36 +2478,25 @@ button.busy {
   font-weight: 600;
   color: var(--vscode-descriptionForeground);
 }
-/* New agent, inline beside the Agents label. Icon-only, and outlined rather than
-   filled: filled, it was the single saturated block on a card otherwise made of
-   quiet outlines, and next to an 11px heading it would be the loudest thing on
-   the card.
-   Sized to the heading, not to the header's button run. It carries the default
-   13px glyph and a 14px plus, which is right beside a 13px name and oversized
-   beside an 11px label - the button stood a third taller than the word it sits
-   next to and read as a control that had wandered in from the header. */
+/* New agent, inline beside the Agents label. Icon-only, and wearing `.act.ghost`
+   like every other icon button on the card - it was filled first (the single
+   saturated block on a card otherwise made of quiet outlines) and then outlined
+   in the accent, which still left it the one differently-coloured control in the
+   panel and read as a different kind of thing from the buttons it sits among.
+   The accent is now spent on one meaning only: the worktree you are typing into.
+
+   Sized to the header's run too - same 13px glyph, same 2px/5px padding, so it
+   comes out the same 19px box as Source Control scope and the actions caret. It
+   is a card-level control like those, and matching them is what makes the run of
+   icon buttons down a card read as one set. Only the plus is trimmed, from 14px
+   to 12px, so it sits with the glyph beside it rather than over it. */
 .card .agents-heading .act.agent {
-  padding: 1px 5px;
-  gap: 1px;
+  padding: 2px 5px;
+  gap: 2px;
   white-space: nowrap;
-  background: transparent;
-  color: var(--vscode-textLink-foreground, #3794ff);
-  border: 1px solid var(--vscode-textLink-foreground, #3794ff);
-}
-.card .agents-heading .act.agent svg {
-  width: 12px;
-  height: 12px;
-}
-.card .agents-heading .act.agent:hover {
-  background: color-mix(
-    in srgb,
-    var(--vscode-textLink-foreground, #3794ff) 15%,
-    transparent
-  );
-  color: var(--vscode-textLink-foreground, #3794ff);
 }
 .card .agents-heading .act.agent .agent-plus {
-  font-size: 11px;
+  font-size: 12px;
 }
 /* The one part of a card that grows without bound. Bounded and scrolled rather
    than folded away: a worktree running a dozen agents can no longer push every

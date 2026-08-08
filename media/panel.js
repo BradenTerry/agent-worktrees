@@ -993,9 +993,12 @@
 
     // Icon-only: it sits among controls that are all icons. The plus and the
     // agent mark together are what say "another one of these", so both survive
-    // the label being dropped.
+    // the label being dropped. Framed like every other icon button on the card
+    // (`ghost iconact`) rather than in the accent: an outline of its own made it
+    // the one differently-coloured control in the panel, and the accent already
+    // means "this is the worktree you are typing into".
     const agentBtn =
-      '<button class="act agent" data-action="agent" data-path="' +
+      '<button class="act ghost iconact agent" data-action="agent" data-path="' +
       esc(wt.path) +
       '" data-tip="Start a Claude session in this worktree" aria-label="New agent">' +
       '<span class="agent-plus">+</span>' +

@@ -211,18 +211,23 @@ the pointer crosses several on the way to the one you want; at 200ms they fired
 in passing, so crossing a card set off a sequence of tips for things you were not
 asking about.
 
-**New agent** is icon-only here, at the far right of the body's tools row, so
-the control that starts one sits against the list of what is already running. It
-keeps both glyphs, the plus and the agent mark, which
-together are what say "another one of these", and it is outlined in the accent
-rather than filled: filled, it was the single saturated block on a card otherwise
-made of quiet outlines. It sits inline beside the Agents heading, so the control
-that starts an agent is next to the list of the ones already running.
+**New agent** is icon-only, inline beside the Agents heading, so the control that
+starts an agent sits against the list of the ones already running. It keeps both
+glyphs, the plus and the agent mark, which together are what say "another one of
+these".
 
-It is sized to that heading rather than to the header's run of buttons: a 12px
-glyph and an 11px plus, in 1px of padding. On the panel's default sizes - a 13px
-glyph and a 14px plus - it stood about a third taller than the 11px word beside
-it and read as a control that had wandered down from the header.
+It wears `.act.ghost`, the same frame as every other icon button on the card. It
+was filled first - the single saturated block on a card otherwise made of quiet
+outlines - and then outlined in the accent, which still left it the one
+differently-coloured control in the panel and read as a different *kind* of thing
+from the buttons around it. The accent is now spent on one meaning only: the
+worktree you are typing into.
+
+It is sized to that run as well: the same 13px glyph and 2px/5px padding, so it
+comes out the same 19px box as the Source Control scope pill and the actions
+caret. It is a card-level control like those, and matching them is what makes the
+icon buttons down a card read as one set rather than as several. The only trim is
+the plus, 14px to 12px, so it sits beside the glyph instead of over it.
 
 The Agents bar carries no count. The meta line above already has the agent total
 beside the live subagents and the per-status dots, where it can be read against
@@ -285,12 +290,11 @@ that nothing is bigger than it needs to be. The size and the line box those
 offsets are computed from are declared together on `.agent-row`, so changing one
 cannot silently un-centre the other.
 
-**New agent** keeps its label but not a filled treatment. Filled, it was the
-single saturated block on a card otherwise made of quiet outlines - 104px against
-25px neighbours, about a third of the action row, and the loudest thing on a card
-whose status colours are the part meant to catch the eye. Outlined in the accent
-with accent text, it still reads as the primary action and still says what it
-does.
+**New agent** lost its filled treatment on the way here. Filled it was the single
+saturated block on a card otherwise made of quiet outlines - 104px against 25px
+neighbours, about a third of the action row, and the loudest thing on a card whose
+status colours are the part meant to catch the eye. It went to an accent outline
+first and then to the plain ghost frame; see above for why the accent went too.
 
 Net effect on the screenshot fixture (four worktrees, everything expanded): about
 1300 device pixels tall, against 2280 for the layout this replaced. Collapsed, the
