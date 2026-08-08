@@ -132,6 +132,16 @@
   let density = savedState.density === "compact" ? "compact" : "comfortable";
   const isCompact = () => density === "compact";
 
+  // Worktree paths whose agent list is folded away inside an open compact card.
+  // Stored as the closed set rather than the open one, so the default is open
+  // and a worktree that gains its first agent shows it without being asked.
+  // Independent of `expanded`: that says whether the card is open at all, this
+  // says whether the rows inside it are, which is what a worktree running a
+  // dozen agents needs when you still want its actions and its PR in reach.
+  const agentsClosed = new Set(
+    Array.isArray(savedState.agentsClosed) ? savedState.agentsClosed : []
+  );
+
   const branchFilters = {
     // Prune on fetch. On by default; persisted so the checkbox stays set.
     prune: savedState.branchPrune !== false,
@@ -168,6 +178,7 @@
     vscode.setState({
       expanded: Array.from(expanded),
       density,
+      agentsClosed: Array.from(agentsClosed),
       branchPrune: branchFilters.prune,
       branchUsers: branchFilters.users.slice(),
       branchLocations: branchFilters.locations.slice(),
@@ -604,6 +615,50 @@
       icons.branch +
       (compact ? "" : '<span class="scm-scope-label">Source Control</span>') +
       "</button>"
+    );
+  }
+
+  /**
+   * The agent list inside an open compact card, behind a fold of its own. The
+   * card's own toggle governs everything in the body — the actions, the debug
+   * rows and these — which is one control too few for a worktree running a dozen
+   * agents: the only way to get the list out of the way was to close the card,
+   * and that takes its actions and its PR with it.
+   *
+   * A slim bar of its own rather than a chevron bolted onto the count in the
+   * meta line: it reads as a disclosure, it sits where the rows it governs
+   * actually start, and it can be tabbed to. The per-status dots are not
+   * repeated on it — the meta line carries them two rows above, and they stay
+   * visible when this is shut.
+   */
+  function agentSection(path, agents, foreign) {
+    const rows = agentRows(agents, foreign);
+    const total = agents.length + (foreign || []).length;
+    // Nothing to fold: the empty-state line is shorter than the bar it would
+    // take to hide it, so it is left uncovered.
+    if (!total) return rows;
+    const closed = agentsClosed.has(path);
+    return (
+      '<div class="agent-fold' +
+      (closed ? " closed" : "") +
+      '">' +
+      '<div class="agents-toggle" data-agents-toggle="' +
+      esc(path) +
+      '" role="button" tabindex="0" aria-expanded="' +
+      (closed ? "false" : "true") +
+      '" data-tip="' +
+      (closed ? "Show" : "Hide") +
+      ' the agents running in this worktree">' +
+      '<span class="chevron">' +
+      icons.chevron +
+      "</span>" +
+      '<span class="agents-toggle-label">Agents</span>' +
+      '<span class="agents-toggle-count">' +
+      total +
+      "</span>" +
+      "</div>" +
+      rows +
+      "</div>"
     );
   }
 
@@ -1121,7 +1176,7 @@
           agentBtn +
           "</div>" +
           debugRows +
-          agentRows(agents, foreign) +
+          agentSection(wt.path, agents, foreign) +
           "</div>"
       );
     }
@@ -1220,6 +1275,29 @@
       "</div>";
     const nextCards = root.querySelector(".cards");
     if (nextCards) nextCards.scrollTop = y;
+  }
+
+  /**
+   * Fold or unfold one compact card's agent list. Like `toggle`, this flips a
+   * class on the DOM it already has rather than re-rendering: the rows are
+   * unchanged, only their visibility, and a re-render would cost the panel its
+   * scroll position on every click.
+   */
+  function toggleAgents(path) {
+    const closed = agentsClosed.has(path);
+    if (closed) agentsClosed.delete(path);
+    else agentsClosed.add(path);
+    persist();
+    const el = root.querySelector(
+      '[data-agents-toggle="' + cssEscape(path) + '"]'
+    );
+    if (!el) return;
+    if (el.parentElement) el.parentElement.classList.toggle("closed", !closed);
+    el.setAttribute("aria-expanded", closed ? "true" : "false");
+    el.setAttribute(
+      "data-tip",
+      (closed ? "Hide" : "Show") + " the agents running in this worktree"
+    );
   }
 
   function toggle(path) {
@@ -2761,6 +2839,14 @@
       });
       return;
     }
+    // A compact card's own agent fold, nested inside the card body. Checked
+    // first: it is not inside [data-toggle], but reading it that way keeps the
+    // two folds' handling next to each other.
+    const agentsBtn = e.target.closest("[data-agents-toggle]");
+    if (agentsBtn) {
+      toggleAgents(agentsBtn.getAttribute("data-agents-toggle"));
+      return;
+    }
     // The expand toggle: the Agents bar in the comfortable layout, the card
     // header itself in the compact one. Both carry data-toggle. Controls inside
     // the header are excluded — the GitHub link is a plain anchor the webview
@@ -2820,8 +2906,14 @@
 
   root.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
+    const agentsBtn = e.target.closest("[data-agents-toggle]");
+    if (agentsBtn) {
+      e.preventDefault();
+      toggleAgents(agentsBtn.getAttribute("data-agents-toggle"));
+      return;
+    }
     // Not when a control inside the header has focus: the compact header holds
-    // the New agent button, and a button fires its own click on Enter/Space.
+    // Delete and the GitHub link, and both fire their own click on Enter/Space.
     const bar = e.target.closest("[data-toggle]");
     if (bar && !e.target.closest("button, a")) {
       e.preventDefault();

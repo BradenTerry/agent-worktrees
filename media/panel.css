@@ -2263,6 +2263,51 @@ button.busy {
   border-color: transparent;
 }
 
+/* The agent list's own fold, inside an open card. The card's toggle governs the
+   whole body; this governs the one part of it that grows without bound, so a
+   worktree running a dozen agents can be put away without taking its actions and
+   its PR rollup with it. */
+.card.compact .agents-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 6px 2px 13px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  user-select: none;
+}
+.card.compact .agents-toggle:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+.card.compact .agents-toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.card.compact .agents-toggle .chevron {
+  transform: rotate(90deg);
+}
+.card.compact .agent-fold.closed .agents-toggle .chevron {
+  transform: rotate(0deg);
+}
+.card.compact .agents-toggle .chevron svg {
+  width: 11px;
+  height: 11px;
+}
+.card.compact .agents-toggle-label {
+  font-weight: 600;
+}
+.card.compact .agents-toggle-count {
+  font-variant-numeric: tabular-nums;
+}
+.card.compact .agent-fold.closed .agents,
+.card.compact .agent-fold.closed .agents-empty {
+  display: none;
+}
+
 .card.compact .agents {
   margin: 0;
   padding: 0 6px 0 19px;
