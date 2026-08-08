@@ -196,12 +196,21 @@ It used to mark the worktree that happened to be the open workspace folder
 to tell you - where the terminal is changes as you work, and it is the thing you
 can act on by mistake.
 
-Two things have to move with it. `applyActiveTerminal` re-tints in place on a
+One thing has to move with it: `applyActiveTerminal` re-tints in place on a
 terminal switch, without a re-render, so the card has to be in the set of elements
 it toggles - left out, the row highlighted immediately and the outline caught up
-only on the next data push. And the hover rule that greys a card's border carries
-`:not(.terminal-open)`, so hovering the outlined card does not overwrite the one
-border on the panel that means something.
+only on the next data push.
+
+Nothing else touches a card's border now. There used to be a hover rule that
+brightened it, carrying `:not(.terminal-open)` so hovering the outlined card would
+not overwrite the one border on the panel that means something. That rule is gone.
+It was answering a real question - which card the pointer is in, since the
+near-miss this density prevents is clicking the right-looking agent on the wrong
+worktree - but answering it card-wide made a whole card look like a click target
+when only parts of it are, and it fired alongside the control-level hover on every
+single hover. The larger, louder of the two was the one you could not act on.
+Hover now marks what is clickable and nothing else: `.head-toggle`, an agent row,
+a button.
 
 
 The GitHub link is framed like the buttons around it. It was unframed back when

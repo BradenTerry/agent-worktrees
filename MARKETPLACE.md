@@ -142,7 +142,8 @@ Every card is two lines at rest, and one click shuts them all.
   rows, so you never reveal a terminal from the card below the one you meant.
 - **Click the name to open a card, not the whole line.** A vertical rule marks
   where the toggle stops, and the hover highlight shows exactly what the click
-  will hit.
+  will hit. Cards no longer light up as a whole, so what highlights is what is
+  actually clickable.
 - **The name line stays a name line.** Past that rule: the Source Control scope
   pill and a caret menu holding switch branch, refresh, search, find file, run or
   debug, open in a new window, view on GitHub and delete. **New agent** sits

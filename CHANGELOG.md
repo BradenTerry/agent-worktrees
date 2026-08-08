@@ -22,6 +22,10 @@ All notable changes to the Agent Worktrees extension are documented here.
   click that lands between them no longer folds the card you were reaching into.
   The hover highlight shows exactly what the click will hit, and a horizontal rule
   draws where the fold is.
+- **Hover marks what is clickable, and nothing else.** Cards no longer light up
+  as a whole when the pointer is over them, which made all of a card look like a
+  click target when only parts of it are. The name, an agent row and a button each
+  still highlight on their own.
 - **The name line stays a name line.** Past that rule sit the Source Control scope
   pill and a caret menu holding everything a worktree can do: switch branch,
   refresh, search it, find a file in it, run or debug it, open it in a new window,

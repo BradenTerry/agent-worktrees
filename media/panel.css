@@ -1994,17 +1994,18 @@ button.busy {
 .card:nth-child(even) {
   --card-tint: rgba(127, 127, 127, 0.14);
 }
-/* Which card the pointer is in, said on the card itself rather than only on the
-   row under the cursor: the near-miss this density is meant to prevent is
-   clicking the right-looking agent on the wrong worktree.
-   Excluded on the terminal-open card, whose blue outline means something the
-   pointer position does not and must not be overwritten by hovering it. (This
-   guard used to name `.open`, the class that marked the workspace folder; when
-   the outline moved to the terminal, the guard had to move with it or hovering
-   the outlined card would grey its border out.) */
-.card:hover:not(.terminal-open) {
-  border-color: rgba(127, 127, 127, 0.7);
-}
+/* No hover treatment on the card itself. It used to brighten its border to say
+   which card the pointer was in, which is a real question - the near-miss this
+   density prevents is clicking the right-looking agent on the wrong worktree -
+   but answering it card-wide made the whole card look like a click target when
+   only parts of it are. Hover now marks what is actually clickable and nothing
+   else: the header's name half (.head-toggle), an agent row, a button. The
+   question the border was answering is better answered by those, since the thing
+   under the pointer is the thing about to be clicked.
+
+   Nothing replaces it here on purpose. A card-level cue and a control-level one
+   fire together on every hover, and the louder, larger one is the one that is not
+   telling you anything you can act on. */
 
 /* --- Header: name, badges, status summary; also the expand toggle ---------
    The header is two halves. The left one - chevron and name - is the expand
