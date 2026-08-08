@@ -1069,8 +1069,10 @@
       // an agent working on a worktree with nothing to report), and the rule is
       // only drawn when both are there.
       // The rule is a border on the group itself rather than an element between
-      // the two, so a narrow panel that wraps the line can never leave it
-      // dangling at the end of the git segments with nothing after it.
+      // the two, so it is always attached to what it introduces: it cannot be
+      // stranded at the end of the git segments when the line wraps, and it
+      // disappears with the group when the stats drop to a line of their own
+      // (see syncMetaFit).
       const agentGroup = countStat + subStat + stats;
       const meta =
         git +
@@ -1229,6 +1231,45 @@
       "</div>";
     const nextCards = root.querySelector(".cards");
     if (nextCards) nextCards.scrollTop = y;
+    syncMetaFit();
+  }
+
+  /**
+   * Compact meta line: the git totals sit left, the agent stats right, with a
+   * rule between them. When the panel is too narrow to hold both, the stats take
+   * a line of their own and the rule goes with them — a rule with nothing to its
+   * left is a stray mark, not a separator.
+   *
+   * CSS cannot ask "did this item wrap", and a media query would have to guess
+   * one width for every card, when what actually decides it is how much each
+   * worktree has to say (a clean worktree with one agent fits where a busy one
+   * does not). So it is measured per card. The measurement always runs with the
+   * class off, so the stacked state can never feed back into the answer and
+   * leave two widths oscillating.
+   */
+  function syncMetaFit() {
+    metaFitQueued = false;
+    const metas = root.querySelectorAll(".card.compact .card-meta");
+    if (!metas.length) return;
+    metas.forEach((m) => m.classList.remove("stacked"));
+    // Second pass, so every class is off before the first layout read.
+    metas.forEach((m) => {
+      const git = m.querySelector(".gitline");
+      const stats = m.querySelector(".meta-stats");
+      if (!git || !stats) return;
+      // Below the git block entirely, rather than merely lower than its top:
+      // a gitline that wrapped internally is taller than the stats beside it,
+      // which are centred against it and so start lower on the same line.
+      if (stats.offsetTop >= git.offsetTop + git.offsetHeight)
+        m.classList.add("stacked");
+    });
+  }
+
+  let metaFitQueued = false;
+  function queueMetaFit() {
+    if (metaFitQueued) return;
+    metaFitQueued = true;
+    requestAnimationFrame(syncMetaFit);
   }
 
   function toggle(path) {
@@ -2974,6 +3015,13 @@
   });
   // Scrolling moves the anchor out from under a fixed tooltip; just drop it.
   root.addEventListener("scroll", hideTip, true);
+
+  // Dragging the sidebar edge is the one thing that changes whether a compact
+  // card's meta line still fits on one row. Coalesced into a frame, so a drag
+  // costs one measurement per paint rather than one per resize event.
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(queueMetaFit).observe(root);
+  }
 
   // Mount. The branches editor tab requests its own data; the sidebar asks for
   // a refresh in case it mounted after the first push.

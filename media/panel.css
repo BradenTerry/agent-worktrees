@@ -2139,6 +2139,9 @@ button.busy {
 .card.compact .meta-stats {
   display: inline-flex;
   align-items: center;
+  /* Pushed to the right edge, with the git totals holding the left: two
+     readings of the worktree at opposite ends of the line, the rule between. */
+  margin-left: auto;
   flex: 0 0 auto;
   gap: 7px;
   font-size: 11px;
@@ -2151,6 +2154,17 @@ button.busy {
 .card.compact .meta-stats.ruled {
   padding-left: 9px;
   border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.4));
+}
+/* Too narrow for both: the stats take the whole next row (still right-aligned,
+   so the column they read down does not move) and the rule goes with them. Set
+   by syncMetaFit, which measures the unstacked line - CSS cannot detect a wrap,
+   and the width where it happens depends on how much this worktree has to say. */
+.card.compact .card-meta.stacked .meta-stats {
+  flex: 0 0 100%;
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+  justify-content: flex-end;
 }
 .card.compact .meta-count {
   display: inline-flex;
