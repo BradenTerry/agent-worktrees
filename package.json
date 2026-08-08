@@ -101,6 +101,22 @@
           "default": false,
           "description": "Log every external call (each git command and GitHub API request, with its duration and result) to the \"Agent Worktrees\" output channel. Turn this on to diagnose slow or failing git/GitHub activity, then open View: Output and pick \"Agent Worktrees\". Off by default."
         },
+        "agentWorktrees.agentStatusOrder": {
+          "type": "array",
+          "default": ["waiting", "active", "idle"],
+          "items": {
+            "type": "string",
+            "enum": ["waiting", "active", "idle"],
+            "enumDescriptions": [
+              "Needs you: a permission prompt or a question",
+              "Processing a prompt, or running a tool or shell command",
+              "Started, or finished responding and awaiting you"
+            ]
+          },
+          "uniqueItems": true,
+          "maxItems": 3,
+          "markdownDescription": "Which order the **agents view** groups its rows in. Waiting first by default, so the agent that needs you is at the top whatever worktree it is in. Edit it here or in Settings → Preferences in the panel. A partial or unrecognized list is completed with the missing statuses rather than hiding those agents."
+        },
         "agentWorktrees.statusPollSeconds": {
           "type": "number",
           "default": 10,

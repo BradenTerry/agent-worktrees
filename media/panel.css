@@ -80,8 +80,17 @@ body {
 .repo-stats .stat {
   gap: 3px;
 }
+/* The repository name gives up width to the tools rather than pushing them off
+   the row: the view switch added a control to a line that was already full. */
+.repo-head > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .repo-head .tools {
   margin-left: auto;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -114,6 +123,16 @@ body {
 }
 .tbtn.icon {
   padding: 3px 5px;
+}
+/* A toolbar button that is off but still hoverable, so its tooltip can say why
+   (a real `disabled` button dispatches no mouse events). Looks like a disabled
+   button - same dimming as `button:disabled` - and refuses the hover lift. */
+.tbtn.disabled,
+.tbtn.ghost.disabled:hover {
+  opacity: 0.45;
+  cursor: default;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
 }
 .tbtn svg {
   width: 13px;
@@ -599,6 +618,144 @@ body {
   opacity: 0.6;
 }
 
+/* --- Agents view ----------------------------------------------------------
+   Every agent in the repository as one flat list (agentsList in panel.js),
+   instead of one card per worktree. The rows are the card's own .agent-row and
+   .subagent-row, so only what differs is here: each row carries the branch it
+   is working on, and there is no card around it to indent against. */
+.agents-list {
+  padding: 0 2px 8px;
+}
+.agents-list .agents {
+  /* A touch more air than inside a card: these rows are two lines each, and the
+     hairline between agents is drawn in this gap. */
+  --agent-gap: 9px;
+  margin: 0;
+}
+/* The summary wraps rather than clipping, as it does on a card - it is the one
+   thing on the row you actually read - so the row is measured from its first
+   line and the glyphs beside it are centred on that, not on the whole block. */
+.agents-list .agent-row {
+  --row-font: 12px;
+  --first-line: calc(1.35 * var(--row-font));
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.agents-list .agent-label {
+  font-size: var(--row-font);
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: break-word;
+  line-height: 1.35;
+}
+.agents-list .agent-row .status-dot {
+  margin-top: calc((var(--first-line) - 8px) / 2); /* .status-dot */
+}
+.agents-list .agent-row .terminal-chip {
+  margin-top: calc((var(--first-line) - 13px) / 2); /* .terminal-chip svg */
+}
+.agents-list .agent-row .row-actions {
+  margin-top: calc((var(--first-line) - 20px) / 2); /* .iconbtn */
+}
+/* Second line: the branch on the left, the counters held against the right
+   edge. Indented past the status dot so both hang under the summary. */
+.agents-list .agent-meta {
+  /* The indent comes out of the basis, not on top of it: a full-width item with
+     a margin overflows the row, which pushed the right-aligned counters under
+     the scrollbar. */
+  flex: 0 0 calc(100% - 14px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+  margin: 3px 0 0 14px;
+}
+.agents-list .agent-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+.agents-list .subagent-row {
+  margin-left: 16px;
+  padding: 2px 6px 2px 4px;
+}
+/* What this agent is working on. A flat list drops the card header that used to
+   answer it, so the branch is on the row itself - in full foreground, because
+   it is the half of the row that tells two identical summaries apart. */
+.agent-where {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+.agent-where > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-where svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+/* A worktree with no branch to name: same warning colour the card's flag uses. */
+.agent-where.detached svg {
+  color: var(--vscode-charts-yellow, #cca700);
+}
+.agent-where-primary {
+  display: inline-flex;
+  align-items: center;
+}
+.agent-where-primary svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* The worktrees / agents switch in the toolbar. Two joined buttons, not two
+   loose ones: it is one control with two positions, and the shared outline plus
+   the seam between them is what says so. */
+/* Expand/collapse and the view switch, held against the right edge of the
+   summary line they share with the agent counts. An auto margin applies per flex
+   line, so on a panel too narrow to hold both it wraps to a row of its own and
+   stays right-aligned there. */
+.repo-view-tools {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.view-switch {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  border-radius: 4px;
+  overflow: hidden;
+}
+.view-switch .tbtn.ghost {
+  border: none;
+  border-radius: 0;
+  padding: 3px 6px;
+}
+.view-switch .tbtn.ghost + .tbtn.ghost {
+  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+}
+/* Selected, in VS Code's own list-selection colours rather than the button fill:
+   the panel's accent fill means "this is the worktree you are typing into", and
+   a view switch is not that. */
+.view-switch .tbtn.ghost.active,
+.view-switch .tbtn.ghost.active:hover {
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+  background: var(
+    --vscode-list-activeSelectionBackground,
+    rgba(128, 128, 128, 0.28)
+  );
+}
+
 .actions {
   display: flex;
   align-items: center;
@@ -807,6 +964,28 @@ button.busy {
 }
 .subagent-via::before {
   content: "via ";
+}
+/* The worktree a subagent was handed, in the agents view. There the row hangs
+   off its parent agent rather than off the card for the code it is touching, so
+   this is the only thing on it that says where its edits are landing. */
+.subagent-where {
+  /* Gives up width faster than the task text beside it: on a narrow panel the
+     task is what you are reading, and the branch is still in the row's tooltip. */
+  flex: 0 3 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+.subagent-where svg {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
 }
 .subagent-age {
   flex: 0 0 auto;
@@ -1446,6 +1625,80 @@ button.busy {
 .perf-select:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
+}
+
+/* Settings → Preferences: the agents view's status order, one row per status in
+   the order it is in. Framed like the Performance rows, so the two tabs read as
+   the same kind of list. The rank number is what makes it an order rather than
+   three rows that happen to be stacked. */
+.order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.order-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px 8px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
+}
+.order-rank {
+  flex: 0 0 auto;
+  min-width: 12px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground);
+}
+.order-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.order-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+}
+/* The dots here are a legend, not a live reading: no pulse, so a settings page
+   does not animate at you while you read it. */
+.order-name .status-dot {
+  animation: none;
+}
+.order-name .status-dot::after {
+  display: none;
+}
+.order-detail {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--vscode-descriptionForeground);
+}
+/* Always visible, unlike the stop button on an agent row: these are the only
+   controls in this list, and a row you have to hover to discover is not one. */
+.order-moves {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 1px;
+}
+.order-move:disabled {
+  opacity: 0.35;
+}
+.order-move:disabled:hover {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+}
+.order-actions {
+  display: flex;
+  margin-top: 8px;
 }
 
 .linked-list {

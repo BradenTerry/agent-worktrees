@@ -2,6 +2,48 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.4.0
+
+### Features
+
+- **An agents view: every agent in the repository in one list.** A switch beside
+  the agent summary swaps the worktree cards for a flat list of every agent,
+  whatever worktree it is in, so "what is running, and what needs me" is one
+  glance instead of opening four cards. The rows are the cards' own agent rows -
+  click to reveal a terminal, stop one, read its subagent and skill counts - plus
+  the one thing a flat list has to add: the branch each agent is working on, with
+  the worktree path in its tooltip, a house for the primary worktree and the
+  detached glyph where there is no branch.
+- **Subagents hang under the agent that spawned them.** On a card, a subagent
+  given a worktree of its own sits on that worktree's card, next to the code it is
+  touching; in the agents view there are no cards, so it sits under its parent and
+  names its worktree instead. One whose parent session is not itself listed still
+  gets a row rather than disappearing with the cards.
+- **The status order is yours.** Rows are grouped by status, waiting first out of
+  the box, and a new **Settings → Preferences** tab moves the three statuses up
+  and down: someone watching a fan-out wants active on top, someone triaging wants
+  waiting. Stored as `agentWorktrees.agentStatusOrder`, so it can be edited in
+  `settings.json` and syncs like any other setting. Within a group the rows keep
+  the order the cards are in, so an agent moves only when its own status changes.
+- **Switching views costs nothing.** Both views render from the same payload the
+  panel already has, so the switch is a re-render with no round trip to the
+  extension, no git and no GitHub. Which view you were in is remembered.
+
+### Changes
+
+- **Expand/collapse all moved to the agent summary line**, next to the view
+  switch: both are about how the list below is shown, where the repository name's
+  row is the actions that create and open things. It is disabled rather than
+  hidden in the agents view, whose rows are the leaves, so the switch beside it
+  never moves out from under the pointer that just used it.
+
+### Fixes
+
+- **A hand-edited status order cannot hide agents.** The setting is completed
+  rather than rejected on every read: statuses in the order given, each counted
+  once, then any the value left out appended. A list naming two of the three would
+  otherwise decide the third's agents are not drawn at all.
+
 ## 4.2.0
 
 ### Features

@@ -99,9 +99,23 @@ name column jumped between them.
 
 ### Expand all / collapse all
 
-The toolbar's last control is one button doing both, because the two are never
-both useful: with anything open the only thing left to ask for is closing them,
-and with everything shut, opening them. It names the action it will perform
+One button doing both, because the two are never both useful: with anything open
+the only thing left to ask for is closing them, and with everything shut, opening
+them.
+
+It sits on the agent-summary line rather than in the row of tools beside the
+repository name, immediately left of the [agents-view](agents-view.md) switch:
+both are about how the list below is shown, where the name's row is the actions
+that create and open things. In the agents view it is **disabled rather than
+dropped**: that view's rows are the leaves, so there is nothing to fold, but a
+control that vanishes and comes back would move the switch beside it out from
+under the pointer that just used it.
+
+Off via a class and `aria-disabled`, not the `disabled` attribute. A disabled
+button dispatches no mouse events, which would make the tooltip saying why it is
+off ("Disabled in the agents view: nothing to fold") the one thing you could not
+hover to read. The click handler re-checks the class, and that is what actually
+stops the action. It names the action it will perform
 rather than the state it is in, and swaps glyph with it - two chevrons pointing
 apart to expand, the same two turned to point at each other to collapse. They are
 mirror images because the direction is the entire message.

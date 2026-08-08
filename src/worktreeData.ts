@@ -174,6 +174,9 @@ export interface WorktreeData {
   /** Configured `git status` poll rate in seconds, for the worktrees the Git
    *  extension has no repository open for; shown in Settings → Performance. */
   statusPollSeconds?: number;
+  /** Which order the agents view groups its rows in, normalized so it always
+   *  holds every status exactly once (Settings → Preferences). */
+  agentStatusOrder?: AgentStatus[];
   /** State of git's two `status` accelerators in this repo, for Settings →
    *  Performance. Attached only once that tab has asked for it: reading it is
    *  git calls, and no other view shows it. */

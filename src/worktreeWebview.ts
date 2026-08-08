@@ -7,6 +7,7 @@ import {
   gatherWorktrees,
   gatherBranches,
   normalize,
+  AgentStatus,
   AgentVM,
   SessionIndex,
   SubagentVM,
@@ -78,6 +79,7 @@ import {
 import { TranscriptReader } from "./transcript";
 import { applyScopeScm, isScmActive, ScmModel } from "./scmScope";
 import { DEFAULT_POLL_SECONDS, dueForStatus, pollIntervalMs } from "./statusPoll";
+import { moveAgentStatus, normalizeAgentStatusOrder } from "./agentOrder";
 import {
   DebugSessionTracker,
   hasDebugTargets,
@@ -184,6 +186,12 @@ const SCM_SCOPED_PATH_KEY = "agentWorktrees.scmScopedPath";
 /** Config key for the debug-tracing toggle, surfaced in Settings → Debug. */
 const TRACE_SETTING = "agentWorktrees.trace";
 
+/** Config key for the order the agents view groups its rows in, surfaced in
+ *  Settings → Preferences. A real setting rather than webview state: it is a
+ *  preference about the panel, so it belongs where the user's other ones are
+ *  (and syncs with them). Sanitized on every read - see agentOrder.ts. */
+const AGENT_STATUS_ORDER_SETTING = "agentWorktrees.agentStatusOrder";
+
 /** globalState key for the per-repo lists of files symlinked into new worktrees
  *  (Settings → Linked Files). Value is a map of repo root → relative paths; a
  *  map (not a single array) keeps each repo's list separate while living in the
@@ -215,6 +223,8 @@ interface ActionMessage {
     | "loadGitPerf"
     | "setGitPerf"
     | "setPollSeconds"
+    | "moveAgentStatus"
+    | "resetAgentStatusOrder"
     | "addLinkedPath"
     | "browseLinkedPath"
     | "pickIgnoredPaths"
@@ -244,6 +254,10 @@ interface ActionMessage {
   perfKey?: PerfKey;
   /** New poll rate in seconds, for setPollSeconds. */
   seconds?: number;
+  /** Which agent status to move, for moveAgentStatus. */
+  status?: string;
+  /** Which way to move it: -1 up, +1 down. */
+  delta?: number;
   /** Branch name, for worktreeFromBranch / deleteBranch. */
   branch?: string;
   /** Repo-relative file path, for addLinkedPath / removeLinkedPath. */
@@ -679,6 +693,7 @@ export class WorktreeWebviewProvider
       .getConfiguration()
       .get<boolean>(TRACE_SETTING, false);
     data.statusPollSeconds = this.pollMs() / 1_000;
+    data.agentStatusOrder = this.agentStatusOrder();
     // Keyed by the primary worktree, not by data.repoRoot: in a window with a
     // linked worktree open the repo root *is* that worktree, so reading by it
     // would miss the list every writer stored under the primary's path.
@@ -1219,6 +1234,10 @@ export class WorktreeWebviewProvider
         return this.setGitPerf(msg.perfKey, msg.value);
       case "setPollSeconds":
         return this.setPollSeconds(msg.seconds);
+      case "moveAgentStatus":
+        return this.moveAgentStatus(msg.status, msg.delta);
+      case "resetAgentStatusOrder":
+        return this.writeAgentStatusOrder(undefined);
       case "addLinkedPath":
         return this.addLinkedPath(msg.linkPath);
       case "browseLinkedPath":
@@ -1432,6 +1451,45 @@ export class WorktreeWebviewProvider
     this.repostSettings();
   }
 
+  /** The agents view's group order, as the panel should render it. Read through
+   *  the sanitizer on every use: it is a hand-editable setting, and a value that
+   *  named two of the three statuses would otherwise decide the third's rows are
+   *  not drawn at all. */
+  private agentStatusOrder(): AgentStatus[] {
+    return normalizeAgentStatusOrder(
+      vscode.workspace.getConfiguration().get(AGENT_STATUS_ORDER_SETTING)
+    );
+  }
+
+  /**
+   * Move one status one place in that order, from Settings → Preferences.
+   *
+   * The move is computed here from the stored setting rather than trusting an
+   * order posted by the webview, so two clicks racing (or a stale payload) can
+   * only ever reorder the list the user actually has.
+   */
+  private async moveAgentStatus(status?: string, delta?: number): Promise<void> {
+    const known = normalizeAgentStatusOrder([status]);
+    // normalize appends the rest, so a bad status shows up as "not first".
+    if (!status || known[0] !== status) return;
+    const step = delta === 1 || delta === -1 ? delta : 0;
+    if (!step) return;
+    const next = moveAgentStatus(this.agentStatusOrder(), status, step);
+    await this.writeAgentStatusOrder(next);
+  }
+
+  /** Store an order (or `undefined` to go back to the default), then repaint. */
+  private async writeAgentStatusOrder(order?: AgentStatus[]): Promise<void> {
+    await vscode.workspace
+      .getConfiguration()
+      .update(
+        AGENT_STATUS_ORDER_SETTING,
+        order,
+        vscode.ConfigurationTarget.Global
+      );
+    this.repostSettings();
+  }
+
   /** Push a payload for the settings view alone: no git, no PR work, just the
    *  cached data with the fields the settings tabs read. */
   private repostSettings(): void {
@@ -1439,6 +1497,7 @@ export class WorktreeWebviewProvider
     if (!this.view || !data) return;
     if (this.gitPerf) data.gitPerf = this.withSlowFlag(this.gitPerf);
     data.statusPollSeconds = this.pollMs() / 1_000;
+    data.agentStatusOrder = this.agentStatusOrder();
     this.lastPosted = ""; // the user clicked; always show the result
     this.postData(data, this.updateSeq);
   }

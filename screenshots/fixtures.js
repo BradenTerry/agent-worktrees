@@ -76,6 +76,9 @@ function overviewData() {
     // listing images must show it too; without this the screenshots advertise a
     // panel missing a button every user actually gets.
     scmEnabled: true,
+    // The agents view's group order, as the extension always sends it: the
+    // default, so the listing shows what a new install gets.
+    agentStatusOrder: ["waiting", "active", "idle"],
     // The agent whose terminal is open, shown highlighted in the panel.
     activeSessionId: "s-co-2",
     github: { hasToken: true, connected: true, login: "acme-dev", tokenType: "fine-grained" },

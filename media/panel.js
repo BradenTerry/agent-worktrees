@@ -67,6 +67,11 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 3l3 2 3-2M5 13l3-2 3 2"/></svg>',
     window:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
+    // The worktrees view, in the view switch: the panel's own cards, stacked.
+    // Two rounded bars rather than a folder or a branch glyph — what the switch
+    // picks between is two shapes of list, not two kinds of thing.
+    worktreeStack:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2.6" width="12" height="4.4" rx="1.2"/><rect x="2" y="9" width="12" height="4.4" rx="1.2"/></svg>',
     // Find in Files, scoped to one worktree: VS Code's own magnifier shape so it
     // reads as "search" and not as a filter or a zoom control.
     search:
@@ -88,6 +93,12 @@
     // node, so a subagent reads as belonging to the agent above it.
     subagent:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4 2.5v5.5a2.5 2.5 0 0 0 2.5 2.5H8.7"/><circle cx="11.4" cy="10.5" r="1.9"/></svg>',
+    // Reorder controls in Settings → Preferences. Plain arrows, not the card's
+    // chevrons: these move a row one place, they do not open anything.
+    arrowUp:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5v-9"/><path d="M4.5 7L8 3.5 11.5 7"/></svg>',
+    arrowDown:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9"/><path d="M4.5 9l3.5 3.5L11.5 9"/></svg>',
     gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>',
     pr: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8M12 11V7a2.5 2.5 0 0 0-2.5-2.5H7M9 2.5L7 4.5l2 2"/></svg>',
     branch:
@@ -183,10 +194,18 @@
         ? savedState.branchReviewer
         : "all",
   };
+  // Which list the sidebar is showing. "worktrees" is the panel's own view: one
+  // card per worktree, its agents inside it. "agents" drops the cards and shows
+  // every agent in the repo as one flat list, each row naming the branch it is
+  // working on — the same rows, sorted by what they need from you rather than by
+  // where they live. Persisted, so reopening the panel returns to the last view.
+  let panelView = savedState.panelView === "agents" ? "agents" : "worktrees";
+
   function persist() {
     vscode.setState({
       expanded: Array.from(expanded),
       settingsNavCollapsed,
+      panelView,
       branchPrune: branchFilters.prune,
       branchUsers: branchFilters.users.slice(),
       branchLocations: branchFilters.locations.slice(),
@@ -265,6 +284,30 @@
     return STATUS[a && a.status] ? a.status : "idle";
   }
 
+  // The order the agents view groups by, waiting first. Also the fallback the
+  // normalizer below completes a partial setting with.
+  const DEFAULT_STATUS_ORDER = ["waiting", "active", "idle"];
+
+  /**
+   * The user's group order for the agents view (Settings → Preferences), made
+   * safe to render with. The extension sanitizes the setting too; this repeats it
+   * because the panel must not depend on a payload being well formed to draw
+   * every agent - a list naming two statuses would otherwise silently drop the
+   * third's rows.
+   */
+  function statusOrder(data) {
+    const raw = (data && data.agentStatusOrder) || [];
+    const out = [];
+    for (const s of raw) {
+      if (DEFAULT_STATUS_ORDER.indexOf(s) !== -1 && out.indexOf(s) === -1)
+        out.push(s);
+    }
+    for (const s of DEFAULT_STATUS_ORDER) {
+      if (out.indexOf(s) === -1) out.push(s);
+    }
+    return out;
+  }
+
   /** Compact "how long has this been running" ("18s", "4m", "2h"). */
   function shortAge(t) {
     const sec = Math.max(0, (Date.now() - (t || 0)) / 1000);
@@ -287,8 +330,12 @@
    * that session when the row is on a card the session does not live on. The row
    * clicks through to the owning session's terminal either way: a subagent has
    * no terminal of its own, so the thing to talk to is always its parent.
+   *
+   * `where` names the worktree it was handed, for the agents view: there the row
+   * sits under its own parent rather than on the card for the code it is
+   * touching, so nothing else on it would say where its edits are landing.
    */
-  function subagentRow(s, sessionWaiting, sessionId, via) {
+  function subagentRow(s, sessionWaiting, sessionId, via, where) {
     const type = s.type || "";
     const task = s.task || "";
     const name = task || type || "Subagent";
@@ -315,6 +362,7 @@
           " — " +
           state +
           (via ? ", spawned by " + via : "") +
+          (where ? ", working in " + where : "") +
           ". Click to reveal " +
           (via ? "its agent's" : "the agent's") +
           " terminal."
@@ -330,6 +378,9 @@
       esc(name) +
       "</span>" +
       (via ? '<span class="subagent-via">' + esc(via) + "</span>" : "") +
+      (where
+        ? '<span class="subagent-where">' + icons.branch + esc(where) + "</span>"
+        : "") +
       '<span class="subagent-age" data-since="' +
       Number(s.startedAt || 0) +
       '">' +
@@ -403,6 +454,78 @@
   }
   setInterval(tickAges, 1000);
 
+  /** Last path segment, for naming a worktree by its directory on disk. */
+  function baseName(p) {
+    return (
+      String(p || "")
+        .split(/[\\/]/)
+        .filter(Boolean)
+        .pop() || ""
+    );
+  }
+
+  /**
+   * The counters that hang under an agent's summary: how many subagents it has
+   * in flight (wherever they are working) and how many skills it has used. Built
+   * here rather than inside a row so a card row and an agents-view row carry the
+   * same two chips, counted the same way.
+   */
+  function agentChips(a) {
+    const skills = a.skills || [];
+    const skillChip = skills.length
+      ? '<button class="skill-chip" data-action="showSkills" data-session="' +
+        esc(a.sessionId) +
+        '" title="' +
+        skills.length +
+        " skill" +
+        (skills.length === 1 ? "" : "s") +
+        ' used, click to view">' +
+        icons.skill +
+        skills.length +
+        "</button>"
+      : "";
+    // How many subagents this agent has in flight, wherever they are working. The
+    // ones in this worktree are rows directly underneath, but a fan-out sends
+    // them to worktrees of their own — their rows are on those cards, and without
+    // the count the session driving the whole thing would look idle.
+    const subs = a.subagents || [];
+    const away = subs.filter((x) => x.worktree).length;
+    const subChip = subs.length
+      ? '<span class="subagent-count" data-tip="' +
+        esc(
+          subs.length +
+            " subagent" +
+            (subs.length === 1 ? "" : "s") +
+            " running" +
+            (away
+              ? ", " +
+                away +
+                " of them in " +
+                (away === 1 ? "a worktree" : "worktrees") +
+                " of their own"
+              : "")
+        ) +
+        '">' +
+        icons.subagent +
+        subs.length +
+        "</span>"
+      : "";
+    return subChip + skillChip;
+  }
+
+  /** Stop one agent. Same button on a card row and an agents-view row. */
+  function stopAgentBtn(a) {
+    return (
+      '<span class="row-actions">' +
+      '<button class="iconbtn" data-action="stopAgent" data-session="' +
+      esc(a.sessionId) +
+      '" data-tip="Stop this agent" aria-label="Stop this agent">' +
+      icons.stop +
+      "</button>" +
+      "</span>"
+    );
+  }
+
   function agentRows(agents, foreign) {
     const away = (foreign || []).length;
     if (!agents || !agents.length) {
@@ -423,46 +546,7 @@
           // label in the row is clipped with an ellipsis, so this is how you read
           // the whole thing.
           const fullInfo = a.summary || a.label;
-          const skills = a.skills || [];
-          const skillChip = skills.length
-            ? '<button class="skill-chip" data-action="showSkills" data-session="' +
-              esc(a.sessionId) +
-              '" title="' +
-              skills.length +
-              " skill" +
-              (skills.length === 1 ? "" : "s") +
-              ' used, click to view">' +
-              icons.skill +
-              skills.length +
-              "</button>"
-            : "";
-          // How many subagents this agent has in flight, wherever they are
-          // working. The ones in this worktree are rows directly underneath, but
-          // a fan-out sends them to worktrees of their own — their rows are on
-          // those cards, and without the count the session driving the whole
-          // thing would look idle.
-          const subs = a.subagents || [];
-          const away = subs.filter((x) => x.worktree).length;
-          const subChip = subs.length
-            ? '<span class="subagent-count" data-tip="' +
-              esc(
-                subs.length +
-                  " subagent" +
-                  (subs.length === 1 ? "" : "s") +
-                  " running" +
-                  (away
-                    ? ", " +
-                      away +
-                      " of them in " +
-                      (away === 1 ? "a worktree" : "worktrees") +
-                      " of their own"
-                    : "")
-              ) +
-              '">' +
-              icons.subagent +
-              subs.length +
-              "</span>"
-            : "";
+          const chips = agentChips(a);
           return (
             '<div class="agent-row' +
             (s === "waiting" ? " attention" : "") +
@@ -485,16 +569,8 @@
             "</span>" +
             // The counters go on a line of their own under the summary, which
             // needs the row's full width now that it wraps rather than clipping.
-            (subChip || skillChip
-              ? '<span class="agent-chips">' + subChip + skillChip + "</span>"
-              : "") +
-            '<span class="row-actions">' +
-            '<button class="iconbtn" data-action="stopAgent" data-session="' +
-            esc(a.sessionId) +
-            '" data-tip="Stop this agent" aria-label="Stop this agent">' +
-            icons.stop +
-            "</button>" +
-            "</span>" +
+            (chips ? '<span class="agent-chips">' + chips + "</span>" : "") +
+            stopAgentBtn(a) +
             "</div>" +
             subagentRows(a)
           );
@@ -925,11 +1001,7 @@
     // name is already at the top of the panel, so the line would restate it on
     // the one card that never needed it.
     if (wt.isPrimary) return "";
-    const base =
-      String(wt.path || "")
-        .split(/[\\/]/)
-        .filter(Boolean)
-        .pop() || "";
+    const base = baseName(wt.path);
     if (!base) return "";
     return (
       '<div class="worktree-name" data-tip="' +
@@ -1232,6 +1304,210 @@
 
   }
 
+  // --- Agents view -----------------------------------------------------------
+  // Every agent in the repository as one flat list, instead of one card per
+  // worktree with its agents inside it. The cards answer "what is this worktree
+  // doing"; this answers "what is running, and what does it need from me" — the
+  // question you have when the count in the toolbar says four agents and finding
+  // the one that is waiting means opening four cards.
+  //
+  // Nothing new is fetched for it: the rows are built from the same payload the
+  // cards render, so switching views is a webview-local re-render with no round
+  // trip to the extension.
+
+  // The rows are grouped by status, in the order the user set in Settings →
+  // Preferences (waiting, active, idle out of the box: the agent that needs you
+  // is the reason to open the view). Sorting is stable, so within a status the
+  // rows keep the worktree order the cards are in, and a row moves only when its
+  // status actually changes.
+
+  /** Paths compared for display purposes only: separators and trailing slashes
+   *  normalized, case-insensitive (Windows and macOS both need that). */
+  function samePath(a, b) {
+    const norm = (p) =>
+      String(p || "")
+        .replace(/\\/g, "/")
+        .replace(/\/+$/, "")
+        .toLowerCase();
+    return norm(a) === norm(b);
+  }
+
+  /** What to call a worktree in a row: its branch when it has one (that is what
+   *  `name` carries), else its directory. */
+  function worktreeLabel(data, path) {
+    const wts = (data && data.worktrees) || [];
+    const wt = wts.find((w) => samePath(w.path, path));
+    return (wt && wt.name) || baseName(path);
+  }
+
+  /** Where an agent's work is landing, as a chip on its row: the branch, with
+   *  the worktree path behind it. This is the whole reason a flat list works —
+   *  without it two rows reading "Fix the flaky test" are indistinguishable. */
+  function whereChip(wt) {
+    const name = wt.name || baseName(wt.path);
+    const tip =
+      (wt.detached
+        ? "Detached HEAD"
+        : wt.branch
+        ? "On branch " + wt.branch
+        : "No branch") +
+      " — " +
+      wt.path;
+    return (
+      '<span class="agent-where' +
+      (wt.detached ? " detached" : "") +
+      '" data-tip="' +
+      esc(tip) +
+      '">' +
+      (wt.detached ? icons.detached : icons.branch) +
+      "<span>" +
+      esc(name) +
+      "</span>" +
+      (wt.isPrimary
+        ? '<span class="agent-where-primary" aria-label="Primary working directory">' +
+          icons.home +
+          "</span>"
+        : "") +
+      "</span>"
+    );
+  }
+
+  /** One agent, plus every subagent it is running. On a card the subagents given
+   *  a worktree of their own are rows on THAT card; here the parent is the row
+   *  they hang off wherever they are working, so each carries the worktree it
+   *  was handed instead. */
+  function agentListRow(data, a, wt) {
+    const s = statusOf(a);
+    const chips = agentChips(a);
+    const subs = (a.subagents || [])
+      .map((sub) =>
+        subagentRow(
+          sub,
+          s === "waiting",
+          a.sessionId,
+          "",
+          sub.worktree ? worktreeLabel(data, sub.worktree) : ""
+        )
+      )
+      .join("");
+    return (
+      '<div class="agent-row' +
+      (s === "waiting" ? " attention" : "") +
+      (a.sessionId === activeSessionId ? " terminal-open" : "") +
+      '" data-action="focusAgent" data-session="' +
+      esc(a.sessionId) +
+      '" role="button" tabindex="0" title="Click to reveal terminal">' +
+      '<span class="status-dot ' +
+      s +
+      '"></span>' +
+      '<span class="agent-label" data-tip="' +
+      esc(a.summary || a.label) +
+      '">' +
+      esc(a.label) +
+      "</span>" +
+      '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
+      icons.terminal +
+      "</span>" +
+      stopAgentBtn(a) +
+      // The branch and the counters share the row's second line: the summary
+      // above them gets the full width it needs, and the two readings of the row
+      // that are not its title sit together under it.
+      '<span class="agent-meta">' +
+      whereChip(wt) +
+      (chips ? '<span class="agent-chips">' + chips + "</span>" : "") +
+      "</span>" +
+      "</div>" +
+      subs
+    );
+  }
+
+  function agentsList(data) {
+    const wts = (data && data.worktrees) || [];
+    const entries = [];
+    const sessions = new Set();
+    for (const wt of wts) {
+      for (const a of wt.agents || []) {
+        entries.push({ a, wt });
+        sessions.add(a.sessionId);
+      }
+    }
+    const order = statusOrder(data);
+    entries.sort(
+      (x, y) => order.indexOf(statusOf(x.a)) - order.indexOf(statusOf(y.a))
+    );
+
+    // A subagent whose parent session is not itself listed — its agent is
+    // running somewhere this panel is not showing. On the cards it has a row of
+    // its own; without this it would simply vanish when the view is switched.
+    const orphans = [];
+    for (const wt of wts) {
+      for (const s of wt.subagents || []) {
+        if (!sessions.has(s.parentSessionId)) orphans.push({ s, wt });
+      }
+    }
+
+    if (!entries.length && !orphans.length) {
+      return (
+        '<div class="empty">No agents running.<br/>' +
+        "Start one from a worktree, or with “New Agent &amp; Worktree”.</div>"
+      );
+    }
+    return (
+      '<div class="agents">' +
+      entries.map((e) => agentListRow(data, e.a, e.wt)).join("") +
+      orphans
+        .map((o) =>
+          subagentRow(
+            o.s,
+            o.s.parentStatus === "waiting",
+            o.s.parentSessionId,
+            o.s.parentLabel || "another agent",
+            o.wt.name || baseName(o.wt.path)
+          )
+        )
+        .join("") +
+      "</div>"
+    );
+  }
+
+  /**
+   * The two views, as a segmented pair rather than one button that swaps: which
+   * view you are in is a state worth showing, and a single toggle can only show
+   * the one you are not in.
+   */
+  function viewSwitch() {
+    const opt = (id, icon, label, tip) =>
+      '<button class="tbtn ghost viewbtn' +
+      (panelView === id ? " active" : "") +
+      '" data-tool="view" data-view="' +
+      id +
+      '" data-tip="' +
+      esc(tip) +
+      '" aria-label="' +
+      esc(label) +
+      '" aria-pressed="' +
+      (panelView === id ? "true" : "false") +
+      '">' +
+      icon +
+      "</button>";
+    return (
+      '<span class="view-switch" role="group" aria-label="Panel view">' +
+      opt(
+        "worktrees",
+        icons.worktreeStack,
+        "Worktrees view",
+        "Worktrees: one card per worktree, with its agents inside it"
+      ) +
+      opt(
+        "agents",
+        icons.agentMark,
+        "Agents view",
+        "Agents: every agent in the repository in one list, waiting ones first"
+      ) +
+      "</span>"
+    );
+  }
+
   /**
    * The whole repo's agents, in the glyphs a card uses for its own: how many
    * agents, how many live subagents, and the per-status breakdown. Read off the
@@ -1244,6 +1520,9 @@
    * derived a second way that can disagree with them. Subagents are counted
    * where the cards count them: an agent's own that stayed put, plus the ones
    * sent into a worktree, which that worktree's card carries as `subagents`.
+   *
+   * Returns the glyphs only. Their line is emitted by `toolbar`, which shares it
+   * with the view switch, so a repo with nothing to summarize still gets the row.
    */
   function repoStats(data) {
     const wts = (data && data.worktrees) || [];
@@ -1271,7 +1550,7 @@
       icons.agentMark +
       agents.length +
       "</span>";
-    return '<div class="repo-stats">' + count + subStat + stats + "</div>";
+    return count + subStat + stats;
   }
 
   function toolbar(data) {
@@ -1296,27 +1575,51 @@
       '<button class="tbtn ghost" data-action="openBranches" data-tip="Branches: list every branch and create a worktree from one">' +
       icons.branch +
       "</button>" +
-      collapseAllBtn(data) +
       "</span>" +
       "</div>" +
+      // The repo-wide agent summary shares its line with the two controls that
+      // are about how the list below is shown rather than about creating or
+      // opening anything: expand/collapse, then the view switch. Both are held
+      // against the right edge as one group, leaving the name's row to the
+      // actions. The line is emitted even with no worktrees to summarize, since
+      // the switch has to be reachable either way.
+      '<div class="repo-stats">' +
       repoStats(data) +
+      '<span class="repo-view-tools">' +
+      collapseAllBtn(data) +
+      viewSwitch() +
+      "</span>" +
+      "</div>" +
       "</div>"
     );
   }
 
   /**
-   * The toolbar's expand/collapse control. One button doing both, because the
-   * two are never both useful: with anything open the only thing left to ask for
-   * is closing them, and with everything shut, opening them. It says which of
-   * the two it will do rather than naming the state it is in.
+   * The expand/collapse control. One button doing both, because the two are
+   * never both useful: with anything open the only thing left to ask for is
+   * closing them, and with everything shut, opening them. It says which of the
+   * two it will do rather than naming the state it is in.
+   *
+   * Disabled, not dropped, in the agents view: that view's rows are the leaves,
+   * so there is nothing to fold - but a control that vanishes and comes back
+   * moves the switch beside it out from under the pointer that just used it.
    */
   function collapseAllBtn(data) {
     const wts = (data && data.worktrees) || [];
     const anyExpanded = wts.some((w) => expanded.has(w.path));
+    const off = panelView === "agents";
     const label = anyExpanded ? "Collapse all" : "Expand all";
     return (
-      '<button class="tbtn ghost" data-tool="collapseAll" data-tip="' +
-      label +
+      // Off via a class and aria-disabled, not the `disabled` attribute: a
+      // disabled button dispatches no mouse events, so the tooltip saying WHY it
+      // is off would be the one thing you could not hover to read. The click
+      // handler re-checks the class, which is what actually stops the action.
+      '<button class="tbtn ghost' +
+      (off ? " disabled" : "") +
+      '" data-tool="collapseAll" aria-disabled="' +
+      (off ? "true" : "false") +
+      '" data-tip="' +
+      (off ? "Disabled in the agents view: nothing to fold" : label) +
       '" aria-label="' +
       label +
       '">' +
@@ -1357,12 +1660,16 @@
     const prevCards = root.querySelector(".cards");
     const y = prevCards ? prevCards.scrollTop : 0;
     const wts = data.worktrees || [];
-    const cards = wts.map(card).join("");
-    root.innerHTML =
-      toolbar(data) +
-      '<div class="cards">' +
-      (cards || '<div class="empty">No worktrees found.</div>') +
-      "</div>";
+    // Both views scroll in the same `.cards` region, so the toolbar stays put and
+    // the scroll restore above works for either.
+    const body =
+      panelView === "agents"
+        ? '<div class="cards agents-list">' + agentsList(data) + "</div>"
+        : '<div class="cards">' +
+          (wts.map(card).join("") ||
+            '<div class="empty">No worktrees found.</div>') +
+          "</div>";
+    root.innerHTML = toolbar(data) + body;
     const nextCards = root.querySelector(".cards");
     if (nextCards) nextCards.scrollTop = y;
   }
@@ -1601,12 +1908,22 @@
       // The Performance tab's state arrives after the tab asks for it, so it has
       // to be part of the signature or the section would sit on "Checking…".
       (data && data.gitPerf) || null,
+      // Preferences: without this the confirming push after a reorder would be
+      // dropped as unchanged, leaving the tab showing the optimistic order with
+      // nothing to correct it if the write failed.
+      statusOrder(data),
     ]);
   }
 
   // The settings tabs. Each renders its own body section; `settingsTab` tracks
   // which one is shown.
   const SETTINGS_TABS = [
+    {
+      id: "preferences",
+      icon: "gear",
+      label: "Preferences",
+      section: preferencesSection,
+    },
     { id: "github", icon: "pr", label: "GitHub", section: githubSection },
     {
       id: "integrations",
@@ -1623,6 +1940,94 @@
     },
     { id: "debug", icon: "bug", label: "Debug", section: debugSection },
   ];
+
+  // What each status means, in the words the marketplace listing uses, so the
+  // rows being reordered say what they are ordering rather than assuming the
+  // three names are self-explanatory.
+  const STATUS_DETAIL = {
+    waiting: "Needs you: a permission prompt or a question",
+    active: "Processing a prompt, or running a tool or shell command",
+    idle: "Started, or finished responding and awaiting you",
+  };
+
+  /**
+   * Settings → Preferences: how the panel presents what it already knows.
+   *
+   * Today that is one thing, the order the agents view groups its rows in. Up and
+   * down buttons rather than drag and drop: there are three rows, the whole list
+   * is on screen, and a keyboard can reach every move. The buttons at the ends
+   * are disabled rather than hidden, so the column of controls does not change
+   * shape as rows move through it.
+   */
+  function preferencesSection(data) {
+    const order = statusOrder(data);
+    const isDefault = order.join() === DEFAULT_STATUS_ORDER.join();
+    const move = (status, delta, label, disabled) =>
+      '<button class="iconbtn order-move" data-order-status="' +
+      status +
+      '" data-order-delta="' +
+      delta +
+      '"' +
+      (disabled ? " disabled" : "") +
+      ' aria-label="' +
+      esc(label) +
+      '" data-tip="' +
+      esc(label) +
+      '">' +
+      (delta < 0 ? icons.arrowUp : icons.arrowDown) +
+      "</button>";
+
+    const rows = order
+      .map((s, i) => {
+        const label = STATUS[s].label;
+        return (
+          '<li class="order-row">' +
+          '<span class="order-rank">' +
+          (i + 1) +
+          "</span>" +
+          '<span class="order-main">' +
+          '<span class="order-name"><span class="status-dot ' +
+          s +
+          '"></span>' +
+          label +
+          "</span>" +
+          '<span class="order-detail dim">' +
+          STATUS_DETAIL[s] +
+          "</span>" +
+          "</span>" +
+          '<span class="order-moves">' +
+          move(s, -1, "Move " + label + " up", i === 0) +
+          move(s, 1, "Move " + label + " down", i === order.length - 1) +
+          "</span>" +
+          "</li>"
+        );
+      })
+      .join("");
+
+    return (
+      '<section class="gh-section">' +
+      '<h3 class="gh-h">' +
+      icons.gear +
+      " Preferences</h3>" +
+      '<p class="gh-lead">The agents view lists every agent in the repository at ' +
+      "once, grouped by status. This is the order those groups come in, so the " +
+      "status you most want to see first is at the top.</p>" +
+      '<ol class="order-list">' +
+      rows +
+      "</ol>" +
+      '<div class="order-actions">' +
+      '<button data-action="resetAgentStatusOrder"' +
+      (isDefault ? " disabled" : "") +
+      ">Reset to default</button>" +
+      "</div>" +
+      '<p class="gh-help dim">Within a group the rows keep the order the ' +
+      "worktree cards are in, so an agent moves only when its own status " +
+      "changes. Stored as <code>agentWorktrees.agentStatusOrder</code> and " +
+      "applies to every repository; the worktree cards are unaffected, since " +
+      "there each agent is already on the card for the code it is working on.</p>" +
+      "</section>"
+    );
+  }
 
   function githubSection(data) {
     const gh = (data && data.github) || { hasToken: false, connected: false };
@@ -2106,6 +2511,39 @@
     if (settingsTab === "performance" && !(lastData && lastData.gitPerf)) {
       send("loadGitPerf");
     }
+  }
+
+  /**
+   * Move a status one place in the agents-view order and tell the extension,
+   * which owns the setting.
+   *
+   * The row moves here first, on the cached payload, so the click lands
+   * immediately rather than after a settings write round trip; the extension's
+   * own push follows and is authoritative (it recomputes the move from the
+   * stored value, so a failed write corrects this back).
+   */
+  function moveStatus(status, delta) {
+    if (!lastData || (delta !== 1 && delta !== -1)) return;
+    const order = statusOrder(lastData);
+    const from = order.indexOf(status);
+    const to = from + delta;
+    if (from === -1 || to < 0 || to >= order.length) return;
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    lastData.agentStatusOrder = order;
+    renderSettings();
+    // The re-render replaced the button that was just pressed, which drops
+    // focus to the body - so a keyboard user moving a row two places has to
+    // tab back to it between presses. Put focus on the same control in the
+    // rebuilt list, or on its opposite when the row landed at an end and the
+    // one pressed is now disabled.
+    const same =
+      '[data-order-status="' + status + '"][data-order-delta="' + delta + '"]';
+    const other =
+      '[data-order-status="' + status + '"][data-order-delta="' + -delta + '"]';
+    const btn = root.querySelector(same);
+    const focus = btn && !btn.disabled ? btn : root.querySelector(other);
+    if (focus) focus.focus();
+    send("moveAgentStatus", { status, delta });
   }
 
   function addLinkedPath() {
@@ -2818,6 +3256,15 @@
       }
       return;
     }
+    // Preferences: move one agent status up or down the agents-view order.
+    const orderBtn = e.target.closest("[data-order-status]");
+    if (orderBtn) {
+      moveStatus(
+        orderBtn.getAttribute("data-order-status"),
+        Number(orderBtn.getAttribute("data-order-delta"))
+      );
+      return;
+    }
     // Linked Files controls (add a path / remove a path).
     const linkAdd = e.target.closest("[data-link-add]");
     if (linkAdd) {
@@ -2850,7 +3297,28 @@
     }
     const tool = e.target.closest("[data-tool='collapseAll']");
     if (tool) {
-      collapseAll();
+      // Off in the agents view, where there is nothing to fold. The button is
+      // still a live one (so its tooltip can say so), which makes this check the
+      // thing that stops the click from folding cards behind the other view.
+      if (!tool.classList.contains("disabled")) collapseAll();
+      return;
+    }
+    // Worktrees / agents. Webview-only: both views render from the payload the
+    // panel already has, so switching costs a re-render and nothing else.
+    const viewBtn = e.target.closest("[data-tool='view']");
+    if (viewBtn) {
+      const next =
+        viewBtn.getAttribute("data-view") === "agents" ? "agents" : "worktrees";
+      if (next !== panelView) {
+        panelView = next;
+        persist();
+        closeCardMenu();
+        render(lastData);
+        // render restores the scroll offset of the list it replaced, which means
+        // nothing in the list that replaced it: a new view starts at the top.
+        const list = root.querySelector(".cards");
+        if (list) list.scrollTop = 0;
+      }
       return;
     }
     const cardMenuBtn = e.target.closest("[data-tool='cardMenu']");
