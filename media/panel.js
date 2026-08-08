@@ -939,9 +939,54 @@
    * view's own builder, which encodes each path segment separately so a
    * `feature/x` branch keeps its slash.
    */
-  function githubBranchLink(wt) {
+  /**
+   * This worktree's branch page on GitHub, or "" when there is none to open:
+   * a non-github.com origin, a detached worktree (no branch page), or a branch
+   * that has never been pushed. The last is read off `git status`'s own
+   * `# branch.upstream` header, which git omits when there is no upstream -
+   * linking to a tree that does not exist yet is a 404 dressed as a feature.
+   *
+   * The one case this gets wrong is a branch pushed without `-u`: it is on the
+   * remote but has no upstream, so the link is hidden. Cheap to be wrong about,
+   * since the fix is one `git push -u`, and the alternative is asking GitHub
+   * whether every branch exists.
+   */
+  function branchOnGitHub(wt) {
     if (!wt.branch || wt.detached) return "";
-    const url = branchUrl(lastData, wt.branch);
+    if (!wt.git || !wt.git.upstream) return "";
+    return branchUrl(lastData, wt.branch);
+  }
+
+  /**
+   * The worktree's own folder name, beside the branch when the two differ. The
+   * card is titled by the branch (worktreeData sends `name` as the branch when
+   * there is one), which is the right primary key - but a worktree's directory
+   * can be called anything, and when it is, "which folder is this" is not
+   * answerable from the card at all.
+   *
+   * Left off when it would only repeat: a folder named after its branch, which
+   * is what `claude -w` produces, and the primary worktree, whose folder is the
+   * repository already named at the top of the panel.
+   */
+  function folderNote(wt) {
+    if (wt.isPrimary) return "";
+    const base =
+      String(wt.path || "")
+        .split(/[\\/]/)
+        .filter(Boolean)
+        .pop() || "";
+    if (!base || base === wt.name) return "";
+    return (
+      '<span class="head-folder" data-tip="Worktree folder: ' +
+      esc(wt.path) +
+      '">' +
+      esc(base) +
+      "</span>"
+    );
+  }
+
+  function githubBranchLink(wt) {
+    const url = branchOnGitHub(wt);
     if (!url) return "";
     return (
       '<a class="ghlink" href="' +
@@ -1206,11 +1251,7 @@
           '<span class="branch">' +
           esc(wt.name) +
           "</span>" +
-          // Right beside the name (shown via CSS only on .terminal-open): the
-          // branch you are talking to, said where you read which branch it is.
-          '<span class="agents-bar-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
-          icons.terminal +
-          "</span>" +
+          folderNote(wt) +
           "</span>" +
           // The actions pinned to the header, held against the right edge and
           // kept on the name's first line however far the name wraps. Three
@@ -1243,7 +1284,21 @@
           "</button>" +
           "</span>" +
           "</div>" +
-          (meta ? '<div class="card-meta">' + meta + "</div>" : "") +
+          // The meta line leads with the column the chevron sits in, so the
+          // terminal glyph has a place of its own directly under it rather than
+          // trailing the branch name. Shown via CSS only while this card holds
+          // the terminal; the cell is always there, so the line's content keeps
+          // the same left edge either way.
+          (meta
+            ? '<div class="card-meta">' +
+              '<span class="meta-gutter">' +
+              '<span class="meta-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
+              icons.terminal +
+              "</span>" +
+              "</span>" +
+              meta +
+              "</div>"
+            : "") +
           prLine(wt.pr, true) +
           '<div class="card-body">' +
           debugRows +
@@ -1270,6 +1325,7 @@
         '<span class="branch">' +
         esc(wt.name) +
         "</span>" +
+        folderNote(wt) +
         editBranchBtn +
         ghLink +
         '<span class="badges">' +
@@ -1534,9 +1590,9 @@
 
     // The branch on GitHub stays an <a>: the webview opens http(s) links in the
     // browser itself, so routing it through the extension host would be a round
-    // trip for nothing. It is absent for a detached worktree, which has no branch
-    // page, and for a non-github.com origin.
-    const url = wt.branch && !wt.detached ? branchUrl(lastData, wt.branch) : "";
+    // trip for nothing. Absent when there is no page to open - see
+    // branchOnGitHub.
+    const url = branchOnGitHub(wt);
     const ghItem = url
       ? '<a class="card-menu-item" role="menuitem" href="' +
         esc(url) +
@@ -3297,12 +3353,19 @@
       row.classList.toggle("terminal-open", on);
       if (on) activeRow = row;
     });
-    // The card-level marker lives on the Agents bar in the comfortable layout
-    // and on the card header in the compact one; only one of the two exists.
+    // Three markers move together: the card's own outline, and the tinted bar -
+    // the Agents bar in the comfortable layout, the card header in the compact
+    // one, only one of which exists. The card is in this list because it is what
+    // carries the outline; left out, the outline only caught up on the next full
+    // render, which waits for a data push, so switching terminals highlighted
+    // the row immediately and the card seconds later.
     root
-      .querySelectorAll(".agents-bar.terminal-open, .card-head.terminal-open")
-      .forEach((bar) => bar.classList.remove("terminal-open"));
+      .querySelectorAll(
+        ".card.terminal-open, .agents-bar.terminal-open, .card-head.terminal-open"
+      )
+      .forEach((el) => el.classList.remove("terminal-open"));
     const card = activeRow && activeRow.closest(".card");
+    if (card) card.classList.add("terminal-open");
     const bar = card && card.querySelector(".agents-bar, .card-head");
     if (bar) bar.classList.add("terminal-open");
   }

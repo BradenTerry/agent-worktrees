@@ -2140,8 +2140,13 @@ button.busy {
 }
 /* Which card the pointer is in, said on the card itself rather than only on the
    row under the cursor: the near-miss this density is meant to prevent is
-   clicking the right-looking agent on the wrong worktree. */
-.card.compact:hover:not(.open) {
+   clicking the right-looking agent on the wrong worktree.
+   Excluded on the terminal-open card, whose blue outline means something the
+   pointer position does not and must not be overwritten by hovering it. (This
+   guard used to name `.open`, the class that marked the workspace folder; when
+   the outline moved to the terminal, the guard had to move with it or hovering
+   the outlined card would grey its border out.) */
+.card.compact:hover:not(.terminal-open) {
   border-color: rgba(127, 127, 127, 0.7);
 }
 
@@ -2198,6 +2203,20 @@ button.busy {
   min-width: 0;
   line-height: 1.35;
 }
+/* The worktree's folder name, when it differs from the branch the card is titled
+   by. Secondary weight and colour: it answers "which directory" for someone who
+   needs it, without competing with the branch, which is what the card is
+   scanned for. Inline, so it wraps with the name rather than beside a two-line
+   block. */
+.head-folder {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--vscode-descriptionForeground);
+}
+.card.compact .head-folder {
+  margin-left: 5px;
+  vertical-align: 0;
+}
 .card.compact .branch {
   display: inline;
   font-size: 12px;
@@ -2207,11 +2226,6 @@ button.busy {
   /* break-word, not anywhere: a branch name breaks between its segments before
      it breaks through the middle of a word. */
   overflow-wrap: break-word;
-}
-/* Inline with the name, so it trails its last word and wraps with it. */
-.card.compact .head-main .agents-bar-terminal {
-  vertical-align: -2px;
-  margin-left: 5px;
 }
 /* A flex item leading the actions run, not inline content: the badges centre on
    the buttons beside them and hold the name's first line however far it wraps. */
@@ -2259,12 +2273,6 @@ button.busy {
   padding: 0 6px;
   letter-spacing: 0;
   text-transform: none;
-}
-/* Same rule as the Agents bar: the terminal glyph only where it is true. It sits
-   immediately after the branch name, so "the agent you are talking to is in this
-   worktree" is read off the same spot as which worktree that is. */
-.card.compact .card-head.terminal-open .agents-bar-terminal {
-  display: inline-flex;
 }
 /* The comfortable header sets Delete off with a divider because it sits in a run
    of five similar buttons; here a small extra gap is enough, and the
@@ -2425,11 +2433,36 @@ button.busy {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 8px;
-  /* Indented to the header's branch name, so the two read as one block. Refresh
-     is what lines up with the name here, not the git totals - it leads the line,
-     so the totals sit to its right. The left edge of the name, the badges and
-     this button is the column the eye follows down the card. */
-  padding: 0 6px 5px 20px;
+  /* The left inset is the header's, not the name's: the first cell here is the
+     chevron's column (see .meta-gutter), and the content after it lands on the
+     name's left edge, so the two lines still read as one block. */
+  padding: 0 6px 5px 3px;
+}
+/* The chevron's column, continued onto the meta line. 12px is the chevron's own
+   width, and the negative margin trims the row's 8px gap to the header's 5px, so
+   what follows starts exactly where the branch name does. Present whether or not
+   it has anything in it - the alternative is the meta line shifting left on every
+   card that does not hold the terminal. */
+.card.compact .meta-gutter {
+  flex: 0 0 12px;
+  display: inline-flex;
+  justify-content: center;
+  margin-right: -3px;
+}
+/* The terminal glyph: this worktree's agent owns the terminal you are typing
+   into. Under the chevron rather than beside the name, where it competed with the
+   name for the first line and pushed a long one to wrap sooner. */
+.card.compact .meta-terminal {
+  display: none;
+  align-items: center;
+  color: var(--vscode-focusBorder, #3794ff);
+}
+.card.compact .meta-terminal svg {
+  width: 13px;
+  height: 13px;
+}
+.card.compact.terminal-open .meta-terminal {
+  display: inline-flex;
 }
 /* Refresh, at the head of the line it re-reads. Sized down to the line rather
    than to the header's run - this is 11px text, and a 20px button beside it

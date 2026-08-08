@@ -152,16 +152,38 @@ The dot fades while a pseudo-element ring expands, both animating only transform
 and opacity, so an infinite pulse stays on the compositor rather than repainting
 each frame.
 
+### The folder name
+
+The card is titled by the branch - `worktreeData` sends `name` as the branch when
+there is one - which is the right primary key. But a worktree's directory can be
+called anything, and when it is, "which folder is this" is not answerable from the
+card at all. So the folder name sits beside the branch in secondary weight and
+colour, derived in the webview from `wt.path` rather than added to the payload.
+
+It is left off where it would only repeat: a folder named after its branch, which
+is what `claude -w` produces, and the primary worktree, whose folder is the
+repository already named at the top of the panel.
+
 ### Which card is outlined
 
 The card outline marks the worktree whose agent owns **the terminal you are typing
 into**, and it is set on the card rather than only on its header, so it is
-findable when the card is collapsed and the header is all there is.
+findable when the card is collapsed and the header is all there is. The terminal
+glyph that says the same thing sits in the chevron's column on the meta line,
+directly under it - beside the branch name it was competing with the name for the
+first line and pushing a long one to wrap sooner.
 
 It used to mark the worktree that happened to be the open workspace folder
 (`inWorkspace`). That is one card, forever, and not something you need the panel
 to tell you - where the terminal is changes as you work, and it is the thing you
 can act on by mistake.
+
+Two things have to move with it. `applyActiveTerminal` re-tints in place on a
+terminal switch, without a re-render, so the card has to be in the set of elements
+it toggles - left out, the row highlighted immediately and the outline caught up
+only on the next data push. And the hover rule that greys a card's border carries
+`:not(.terminal-open)`, so hovering the outlined card does not overwrite the one
+border on the panel that means something.
 
 
 The GitHub link is framed like the buttons around it. It was unframed back when

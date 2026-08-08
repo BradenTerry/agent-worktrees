@@ -96,7 +96,8 @@ function overviewData() {
         detached: false,
         locked: false,
         inWorkspace: true,
-        git: { dirty: 0, insertions: 0, deletions: 0, ahead: 0, behind: 2 },
+        // upstream set: the branch is pushed, so its GitHub entry is offered.
+        git: { dirty: 0, insertions: 0, deletions: 0, ahead: 0, behind: 2, upstream: "origin/main" },
         // Has launch configurations, nothing running: the Debug button only.
         canDebug: true,
         agents: [
@@ -135,7 +136,14 @@ function overviewData() {
         // Source Control is currently scoped here, so this card's scope pill
         // renders filled while the others show the inactive state.
         scmActive: true,
-        git: { dirty: 4, insertions: 212, deletions: 38, ahead: 3, behind: 0 },
+        git: {
+          dirty: 4,
+          insertions: 212,
+          deletions: 38,
+          ahead: 3,
+          behind: 0,
+          upstream: "origin/feat/checkout-redesign",
+        },
         // A debug session the panel started in this worktree, with the stop
         // button that is the way back out of it.
         canDebug: true,
@@ -218,7 +226,7 @@ function overviewData() {
         detached: false,
         locked: false,
         inWorkspace: false,
-        git: { dirty: 1, insertions: 9, deletions: 4, ahead: 1, behind: 0 },
+        git: { dirty: 1, insertions: 9, deletions: 4, ahead: 1, behind: 0, upstream: "origin/fix/login-race" },
         // Started with "Run without debugging", so the row carries the chip that
         // says no debugger is attached.
         canDebug: true,
@@ -267,6 +275,7 @@ function overviewData() {
         detached: false,
         locked: false,
         inWorkspace: false,
+        // No upstream: never pushed, so this card's menu has no GitHub entry.
         git: { dirty: 2, insertions: 34, deletions: 6, ahead: 0, behind: 0 },
         agents: [],
         subagents: [

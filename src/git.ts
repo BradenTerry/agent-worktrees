@@ -199,6 +199,11 @@ export interface GitStatus {
    *  only re-run status (the agent-only refresh) can still spot a worktree that
    *  changed branches without re-listing every worktree. */
   branch?: string;
+  /** Upstream short-ref (e.g. `origin/feature`), or undefined when the branch
+   *  has none - which for the common case means it has never been pushed. From
+   *  the `# branch.upstream` header of the same status call, so it costs nothing
+   *  extra. Note a branch pushed without `-u` has no upstream either. */
+  upstream?: string;
 }
 
 /**
@@ -487,6 +492,7 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
   let ahead = 0;
   let behind = 0;
   let branch: string | undefined;
+  let upstream: string | undefined;
   try {
     const startedAt = Date.now();
     const { stdout } = await git(
@@ -519,6 +525,11 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
         // e.g. "# branch.head main", or "(detached)" with no branch.
         const name = line.slice("# branch.head ".length).trim();
         if (name && name !== "(detached)") branch = name;
+      } else if (line.startsWith("# branch.upstream ")) {
+        // e.g. "# branch.upstream origin/main". Emitted only when the branch has
+        // an upstream, so its absence is the signal.
+        const up = line.slice("# branch.upstream ".length).trim();
+        if (up) upstream = up;
       } else if (!line.startsWith("#")) {
         // 1/2 = changed tracked, u = unmerged, ? = untracked, ! = ignored.
         if (line[0] !== "!") dirty++;
@@ -535,7 +546,7 @@ export async function getStatus(cwd: string): Promise<GitStatus> {
   // that makes loading many worktrees on Windows noticeably faster.
   const { insertions, deletions } =
     tracked > 0 ? await getDiffStat(cwd) : { insertions: 0, deletions: 0 };
-  return { dirty, insertions, deletions, ahead, behind, branch };
+  return { dirty, insertions, deletions, ahead, behind, branch, upstream };
 }
 
 /**
