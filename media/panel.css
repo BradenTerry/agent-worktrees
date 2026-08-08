@@ -2530,12 +2530,15 @@ button.busy {
    scroll region and the card header is sticky, so a menu inside a card is clipped
    by the first and stacked under the second. Positioned in viewport coordinates
    by openCardMenu, which also flips it above the caret when there is no room
-   below. */
+   below, and caps its height to the space it has - hence the scroll here, for
+   the short-panel case where neither side fits the whole list. */
 .card-menu {
   position: fixed;
   z-index: 30;
   min-width: 202px;
   padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid
     var(--vscode-menu-border, var(--vscode-widget-border, rgba(255, 255, 255, 0.12)));
   border-radius: 6px;

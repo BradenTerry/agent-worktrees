@@ -1823,14 +1823,22 @@
     const r = btn.getBoundingClientRect();
     const m = cardMenuEl.getBoundingClientRect();
     const gap = 4;
-    const below = window.innerHeight - r.bottom;
-    cardMenuEl.style.top =
-      (below < m.height + gap && r.top > m.height + gap
-        ? r.top - m.height - gap
-        : r.bottom + gap) + "px";
+    const edge = 4;
+    const roomBelow = window.innerHeight - r.bottom - gap - edge;
+    const roomAbove = r.top - gap - edge;
+    // The panel is often a short sidebar pane, so neither side has room for the
+    // whole menu. Rather than let it run off the bottom with entries unreachable,
+    // take the taller side and cap the menu to it - .card-menu scrolls.
+    const flip = m.height > roomBelow && roomAbove > roomBelow;
+    const room = Math.max(0, flip ? roomAbove : roomBelow);
+    cardMenuEl.style.maxHeight = room + "px";
+    const height = Math.min(m.height, room);
+    cardMenuEl.style.top = (flip ? r.top - gap - height : r.bottom + gap) + "px";
     cardMenuEl.style.left =
-      Math.max(4, Math.min(r.right - m.width, window.innerWidth - m.width - 4)) +
-      "px";
+      Math.max(
+        edge,
+        Math.min(r.right - m.width, window.innerWidth - m.width - edge)
+      ) + "px";
     const first = cardMenuEl.querySelector(".card-menu-item");
     if (first) first.focus();
   }
@@ -3566,8 +3574,11 @@
   window.addEventListener("resize", closeCardMenu);
   document.addEventListener(
     "scroll",
-    () => {
-      if (cardMenuEl) closeCardMenu();
+    (e) => {
+      // Except the menu scrolling itself: in a short panel it is capped to the
+      // room it has and scrolls internally, and that must not shut it.
+      if (cardMenuEl && !(e.target && cardMenuEl.contains(e.target)))
+        closeCardMenu();
     },
     true
   );
