@@ -25,6 +25,21 @@ test("pr-status - CI checks and review on the PR row", async ({ page }) => {
   await page.locator(".card").nth(1).screenshot({ path: shot("pr-status.png"), animations: "disabled" });
 });
 
+test("collapsed - every card shut", async ({ page }) => {
+  const data = overviewData();
+  // A locked worktree, so its glyph shows up on one of the four.
+  data.worktrees[2].locked = true;
+  await mountPanel(page, { data });
+  // Collapsed through the toolbar control rather than by setting the class, so
+  // this shows what the real path produces. The harness seeds every card as
+  // expanded, so the button's first click is the collapsing one.
+  await page.locator("[data-tool='collapseAll']").click();
+  await page.locator("#root").screenshot({
+    path: shot("collapsed.png"),
+    animations: "disabled",
+  });
+});
+
 test("settings - GitHub PR integration", async ({ page }) => {
   const data = overviewData();
   await mountPanel(page, { data, message: { type: "openSettings" } });

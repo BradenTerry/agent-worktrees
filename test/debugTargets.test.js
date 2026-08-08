@@ -9,6 +9,7 @@ const {
   launchTasksOf,
   taggedWorktree,
   taggedNoDebug,
+  taggedBaseName,
   WORKTREE_KEY,
   NO_DEBUG_KEY,
 } = require("../out/debugTargets.js");
@@ -215,6 +216,34 @@ test("prepareConfig points the folder variables at the worktree", () => {
   assert.equal(out.program, `${WT}/src/index.js`);
   assert.equal(out.legacy, `${WT}/old.js`);
   assert.equal(out.label, "feature build");
+});
+
+test("prepareConfig suffixes the session name but keeps the base name", () => {
+  const out = prepareConfig(
+    { name: "Run Extension", type: "node", request: "launch" },
+    WT,
+    "feature",
+    "feature"
+  );
+  // The suffix disambiguates VS Code's own worktree-agnostic views.
+  assert.equal(out.name, "Run Extension (feature)");
+  // The card row reads this instead, since the card already says the worktree.
+  assert.equal(taggedBaseName(out, out.name), "Run Extension");
+});
+
+test("prepareConfig names an unnamed configuration, base name included", () => {
+  const out = prepareConfig({ type: "node", request: "launch" }, WT, "feature", "feature");
+  assert.equal(out.name, "Launch (feature)");
+  assert.equal(taggedBaseName(out, out.name), "Launch");
+});
+
+test("taggedBaseName falls back for a session started without the tag", () => {
+  // A session from a previous version, or a config round-tripped through
+  // something that dropped unknown properties: the row keeps the full name
+  // rather than losing its label.
+  assert.equal(taggedBaseName({ name: "Run (feature)" }, "Run (feature)"), "Run (feature)");
+  assert.equal(taggedBaseName(undefined, "Run (feature)"), "Run (feature)");
+  assert.equal(taggedBaseName({ agentWorktreesBaseName: "" }, "Run (feature)"), "Run (feature)");
 });
 
 test("prepareConfig substitutes inside nested arrays and objects", () => {

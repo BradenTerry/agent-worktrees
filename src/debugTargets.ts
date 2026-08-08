@@ -61,6 +61,11 @@ export const NO_DEBUG_KEY = "agentWorktreesNoDebug";
  *  `${input:...}` answer. Nothing about such a session is logged: its name and
  *  arguments hold what the user typed. */
 export const FROM_INPUT_KEY = "agentWorktreesFromInput";
+/** Config key carrying the configuration's name before the worktree suffix was
+ *  appended (see prepareConfig). The suffix disambiguates the session in VS
+ *  Code's own worktree-agnostic views; on a worktree's own card it only repeats
+ *  what the card already says, so the row reads this instead of the name. */
+export const BASE_NAME_KEY = "agentWorktreesBaseName";
 
 const EMPTY: LaunchFile = { configurations: [], compounds: [], inputs: [] };
 
@@ -219,7 +224,13 @@ export function prepareConfig(
     folderBasename
   ) as DebugConfigLike;
   if (out.cwd === undefined) out.cwd = worktreePath;
-  out.name = `${config.name || "Launch"} (${worktreeName})`;
+  const baseName = config.name || "Launch";
+  // Suffixed for VS Code's session dropdown, Call Stack and debug console, which
+  // are worktree-agnostic: several worktrees can each be running a config of the
+  // same name. The unsuffixed name is kept for the card row, where the worktree
+  // is already established by the card the row sits in.
+  out.name = `${baseName} (${worktreeName})`;
+  out[BASE_NAME_KEY] = baseName;
   out[WORKTREE_KEY] = worktreePath;
   if (noDebug) out[NO_DEBUG_KEY] = true;
   delete out.preLaunchTask;
@@ -245,6 +256,21 @@ export function taggedWorktree(config: unknown): string | undefined {
   if (!config || typeof config !== "object") return undefined;
   const value = (config as Record<string, unknown>)[WORKTREE_KEY];
   return typeof value === "string" && value ? value : undefined;
+}
+
+/**
+ * A running session's name without the worktree suffix, for the row on that
+ * worktree's own card. Falls back to the caller's full name when the tag is
+ * missing — a session started before this key existed, or one whose config was
+ * round-tripped somewhere that dropped unknown properties.
+ */
+export function taggedBaseName(
+  config: unknown,
+  fallback: string
+): string {
+  if (!config || typeof config !== "object") return fallback;
+  const value = (config as Record<string, unknown>)[BASE_NAME_KEY];
+  return typeof value === "string" && value ? value : fallback;
 }
 
 /** Whether a running session was started without debugging. */

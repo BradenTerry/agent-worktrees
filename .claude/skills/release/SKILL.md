@@ -128,6 +128,11 @@ way from a typed version, and tags the chosen ref for you.
 
 - `images/` and `screenshots/` are excluded from the packaged `.vsix`; the
   Marketplace listing loads PNGs from raw GitHub URLs, so the release does not
-  bundle them.
+  bundle them. Those URLs point at `main` in the repo, and the workflow rewrites
+  them to the release's tag in the working tree just before `vsce package` (never
+  committing that), so a published listing keeps the screenshots of the build it
+  is selling rather than tracking main. The step **fails the release** if it finds
+  no `/agent-worktrees/main/images/` URLs to rewrite - if you reshape those URLs
+  in `MARKETPLACE.md`, update the step with them.
 - Tagging via the manual workflow uses `GITHUB_TOKEN`, which does not re-trigger
   the push-tag run - that is intentional, not a failure.

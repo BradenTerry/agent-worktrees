@@ -49,6 +49,16 @@ change so the marketplace listing stays current. `images/` and `screenshots/`
 are excluded from the packaged `.vsix`; the listing loads the PNGs from raw
 GitHub URLs.
 
+In the repo those URLs point at **main**, which is correct there: the file on
+main should show what main looks like. `release.yml` rewrites them to the
+release's tag in the working tree just before `vsce package`, and never commits
+that. Without it a published listing would keep resolving against main forever,
+so landing a UI change without cutting a release would start advertising a panel
+nobody can install. Keep the URL shape as
+`raw.githubusercontent.com/<owner>/agent-worktrees/main/images/<name>.png` - the
+release step greps for that exact `/agent-worktrees/main/images/` substring and
+**fails the release** if it finds none.
+
 ## Validating accessibility / contrast
 
 The webview styling can't be eyeballed from the source alone, and we do **not**

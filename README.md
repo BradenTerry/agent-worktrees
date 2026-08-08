@@ -23,8 +23,16 @@ its running agents in one view.
 
 **Worktrees**
 
-- Every worktree (primary + linked) as a card, with `Primary` / `detached` /
-  `locked` badges and a per-card refresh that re-reads just that worktree.
+- Every worktree (primary + linked) as a card. The primary one is marked with a
+  house beside its name; detached and locked show as glyphs on the card's summary
+  line. Per-card refresh forces that worktree's PR/CI and re-gathers git status
+  (the gather itself covers every card - only the PR call is scoped).
+- **[Card layout](docs/card-layout.md)**: two lines at rest, the PR block
+  tightened to three, every per-worktree action behind a caret menu, and a header
+  that is both the expand toggle and a sticky one, so an agent row is never
+  scrolled away from the name of the worktree it belongs to. The panel used to
+  ship a second, roomier density with a toolbar toggle; it was removed rather than
+  maintained twice.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
   upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file
@@ -75,9 +83,11 @@ its running agents in one view.
   session whose cwd is not itself a card is the cue to re-list worktrees (see
   [Refresh coalescing](docs/refresh-coalescing.md)).
 - Status per agent, read from Claude Code's own session registry (see
-  [Agent status](docs/agent-status.md)). Collapsible lists with per-status counts,
-  and a number badge on the Activity Bar icon counting **waiting** agents, so a
-  blocked agent surfaces while the panel is hidden.
+  [Agent status](docs/agent-status.md)). Per-status counts on each card and once
+  for the whole repo under its name, a bounded scrolling list so a busy worktree
+  cannot push the others off screen, and a number badge on the Activity Bar icon
+  counting **waiting** agents, so a blocked agent surfaces while the panel is
+  hidden.
 - **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
   type, description and elapsed time, read from the files Claude writes for them,
   and land on the card for the worktree they were actually given.
@@ -86,11 +96,12 @@ its running agents in one view.
 
 **GitHub and branches**
 
-- **A branch on GitHub from its card**: a GitHub mark beside the worktree name
-  links to `<origin>/tree/<branch>`. Origin is resolved once per window at the
+- **A branch on GitHub from its card**: a menu entry links to
+  `<origin>/tree/<branch>`. Origin is resolved once per window at the
   repo root (every worktree of a repo shares it) and needs no token, so the link
   is there whether or not the PR integration is on. Absent for a non-GitHub
-  origin and for a detached worktree, which has no branch page.
+  origin, for a detached worktree (no branch page), and for a branch with no
+  upstream, which has not been pushed and so has no tree to open.
 - **PR status** on a card when a stored token resolves a PR for the branch: title,
   lifecycle state, CI rollup, review decision, comment counts, plus `Out of date`
   and `Auto-merge` pills (`src/github.ts`, `src/prs.ts`).
@@ -159,6 +170,7 @@ The rationale behind the parts that are easy to get wrong twice:
 
 | Doc | Covers |
 | --- | --- |
+| [Card layout](docs/card-layout.md) | How `card()` lays out a worktree: what folds together, the sticky header, the actions menu |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the two status tiers, the agent-only path, why there is no `**/*` watcher, and the Performance tab |
@@ -184,6 +196,19 @@ npm run compile     # or: npm run watch
 
 Press `F5` (Run Extension) to launch an Extension Development Host. Open a folder
 that is a git repository (with worktrees) to populate the panel.
+
+Which loop applies depends on what you touched, because `tsc` builds `src/` only
+and never copies `media/`:
+
+| Changed | To see it |
+| --- | --- |
+| `media/panel.js`, `media/panel.css` | **`Developer: Reload Webviews`** in the dev host. No recompile, no relaunch. |
+| `src/**.ts` | Rebuild (`npm run watch` covers it), then reload the dev host window. |
+
+One caveat on the first row: the asset URLs `html()` builds are stable across
+launches, so nothing invalidates them, and a reloaded webview can re-serve a
+cached `panel.js`. A UI change then looks like it did not build when it built
+fine. Restarting the debug session clears it.
 
 ### Tests
 
