@@ -13,6 +13,8 @@ and its running agents in one view.
   agent together.
 - Live agent status: active, waiting, idle. Activity Bar badge when one is
   blocked on you.
+- Switch the panel to an agents view: every agent in the repo in one list,
+  waiting ones first, each row naming the branch it is working on.
 - PR state, CI checks and reviews on the card. No browser tab.
 - Run or debug a worktree's launch configuration without opening a second window.
 - Search a worktree, or open a file from it, in your current window.
@@ -40,6 +42,26 @@ and its running agents in one view.
 - Skill chips show which Claude skills an agent has used.
 - Dead sessions retire themselves, so reopening a window shows agents that are
   actually running.
+
+### All of them in one list
+
+Two buttons in the toolbar switch the panel between the worktree cards and an
+agents view: every agent in the repository as one list, whatever worktree it is
+in, with the waiting ones at the top.
+
+Each row names the branch it is working on, so two agents with similar summaries
+are still easy to tell apart, and keeps everything the card row has - click to
+reveal its terminal, stop it, see its subagents and skills. Subagents hang under the
+agent that spawned them, each naming its own worktree when it was given one.
+
+Rows are grouped by status, waiting first out of the box. That order is yours:
+**Settings → Preferences** moves the statuses up and down, so if you would rather
+watch what is running than what is blocked, put **active** on top. The panel
+remembers which view you were in.
+
+| Every agent in one list | Choosing the order |
+| :--- | :--- |
+| <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/agents-view.png" alt="The agents view: every agent in the repository in one list, waiting first, each row naming its branch" width="380"> | <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/preferences.png" alt="Settings, Preferences tab: the agent statuses in the order the agents view groups them, with up and down controls" width="380"> |
 
 ### Status
 
@@ -184,6 +206,8 @@ A worktree is not part of your open workspace, so **Find in Files** and
 - **Source Control scoping**, so the SCM view follows the worktree you pick.
 - **A Performance tab**: git's `status` accelerators for this repo, with a switch
   for each, plus how often the panel rechecks worktrees.
+- **A Preferences tab**: the order the agents view groups its statuses in, moved
+  with an up/down control per status.
 - **Buttons that show their work**: slow actions swap their icon for a spinner.
 - **A settings nav that folds to icons** on a narrow sidebar.
 

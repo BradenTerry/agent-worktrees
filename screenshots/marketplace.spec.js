@@ -40,6 +40,28 @@ test("collapsed - every card shut", async ({ page }) => {
   });
 });
 
+test("agents-view - every agent in one list", async ({ page }) => {
+  const data = overviewData();
+  await mountPanel(page, { data });
+  // Switched through the real toolbar control rather than by seeding the state,
+  // so the image shows what a click actually produces.
+  await page.locator("[data-tool='view'][data-view='agents']").click();
+  await page.locator("#root").screenshot({
+    path: shot("agents-view.png"),
+    animations: "disabled",
+  });
+});
+
+test("preferences - the agents view's status order", async ({ page }) => {
+  const data = overviewData();
+  await mountPanel(page, { data, message: { type: "openSettings" }, height: 620 });
+  await page.locator('.settings-tab[data-tab="preferences"]').click();
+  await page.locator("#root").screenshot({
+    path: shot("preferences.png"),
+    animations: "disabled",
+  });
+});
+
 test("settings - GitHub PR integration", async ({ page }) => {
   const data = overviewData();
   await mountPanel(page, { data, message: { type: "openSettings" } });
