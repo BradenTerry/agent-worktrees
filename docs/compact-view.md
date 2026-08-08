@@ -53,27 +53,37 @@ from its worktree's name. The header repaints the card's own background tint
 (it needs to be opaque, since rows pass under it) and the card's expanded body
 carries a vertical rail back up to it.
 
-**The controls sit in two runs, in two places.** The header's run, in the card's
-top-right corner, holds what acts on a worktree from outside it - switch branch,
-refresh, Delete - led by the Source Control scope button, the one control there
-that is also a *reading*. Switch branch sits next to the name it
-rewrites; Delete stays last, since destructive actions sit at the end of a run,
-and the confirmation modal is what actually guards a near-miss on the toggle.
+**Two controls on the name line, and a menu.** The header holds the Source
+Control scope button - the one control there that is also a *reading* - and a
+caret. Behind the caret: switch branch, refresh, open in a new window, view the
+branch on GitHub, and delete. Those are each reached rarely; you switch a branch
+or delete a worktree roughly once in its life, and four or five buttons sitting on
+the name line being *available* were costing every card the width. A menu spends
+one extra click on the rare path and gives the name back on all of them.
 
-The second run is in the card **body**, directly above the Agents section: the
-ways *into* the worktree - the branch on GitHub, search, find file, Debug, open
-window - with **New agent** at its far right, hard against the list of what is
-already running.
-These are the reasons to have opened the card, so they appear when it is open,
-where the header's four remain readable on a collapsed one.
+The run is 51px now, on every card, where it was 108px and varied by whether the
+worktree had a Delete button. Every branch name in the fixtures fits on one line
+down to 260px.
 
-Splitting them is what lets there be ten controls without a wall of icons. A
-single run of ten identically framed buttons has no shape - nothing in it is
-findable faster than anything else - where four in the corner and six above the
-agents are two groups to choose between first. It also keeps the header's width
-honest: Debug only exists on a worktree with launch configs, and in the header it
-made the run 88px on some cards and 61px on others, so the name column jumped
-between them. In the body its absence costs the card nothing.
+The menu is grouped in three: what changes the worktree, where to open it, and the
+one thing that destroys it. Delete is drawn in the error colour as well as set off
+by a rule - in a list of plain rows a rule alone is easy to read past - and it is
+absent entirely on the primary worktree, which cannot be removed. The GitHub entry
+stays an `<a>`, since the webview opens http(s) links itself and routing it through
+the extension host would be a round trip for nothing.
+
+It is mounted on `document.body`, not inside the card. The cards are a scroll
+region and the card header is `position: sticky`, so a menu inside a card is
+clipped by the first and stacked under the second. That means it is positioned in
+viewport coordinates, which in turn means it cannot follow the thing it points at:
+a scroll, a resize or a re-render closes it rather than leaving it pointing at
+nothing.
+
+**The card body has a row of its own**: search, find file, Debug and **New agent**
+- the ways *into* a worktree, which are the reasons to have opened the card. Debug
+only exists on a worktree with launch configs, and here its absence costs the card
+nothing, where in the header it made the run a different width per card and the
+name column jumped between them.
 
 ### Expand all / collapse all
 
@@ -200,12 +210,11 @@ a column a character wide, which is worse than moving them down, so a media quer
 at that width restores the wrap and the 9em floor. Above it - every width a
 sidebar is realistically dragged to - the column stays pinned.
 
-The threshold tracks what the header holds and has to move with it. That run is
-108px - the scope button, switch branch, refresh and Delete - or 77px on the
-primary card, which gets no Delete; padding, chevron and gaps take about 30px
-more. The body's tools row is not part of this: it lays out on its own line and
-wraps, so adding to it costs the name nothing. Re-measure before adding a control
-to the header.
+The threshold tracks what the header holds and has to move with it, though with
+the run down to 51px - a constant, since both controls are on every card - there
+is a lot of slack: the fixtures fit on one line at 260px, well under it. The body's
+tools row is not part of this either, since it lays out on its own line and wraps.
+Re-measure before putting a control back on the header.
 
 ### The agent rows
 

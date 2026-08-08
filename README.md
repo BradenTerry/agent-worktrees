@@ -29,10 +29,10 @@ its running agents in one view.
   (the gather itself covers every card - only the PR call is scoped).
 - **[Compact view](docs/compact-view.md)**, a second card density toggled from the
   toolbar and persisted with the expand state. It folds the header and git summary
-  into two lines and tightens the PR block (which keeps its frame) to three, splits
-  the controls between a run on the name line and a row inside the card, and makes
-  the header both the expand toggle and a sticky one, so an agent row is never
-  scrolled away from the name of the worktree it belongs to.
+  into two lines and tightens the PR block (which keeps its frame) to three, puts
+  the rarely-reached per-worktree actions behind a caret menu and the rest in a row
+  inside the card, and makes the header both the expand toggle and a sticky one, so
+  an agent row is never scrolled away from the name of the worktree it belongs to.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
   upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file

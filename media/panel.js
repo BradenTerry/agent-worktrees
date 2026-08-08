@@ -35,6 +35,10 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M10.5 2.5l3 3-7 7H3.5v-3z"/><path d="M9 4l3 3"/></svg>',
     refresh:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/></svg>',
+    // The card's overflow menu trigger. Points down because the menu opens below
+    // it, and turns when it is open.
+    caret:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg>',
     // The repository's primary working directory: the checkout the repo itself
     // lives in, as opposed to a worktree linked off it. A house rather than a
     // star or a pin - it is the one you came from, not the one you favoured.
@@ -1226,9 +1230,17 @@
           // two line up down the card's left-to-right order rather than facing
           // each other across the name.
           scmScopeBtn(wt.path, wt.scmActive, true) +
-          editBranchBtn +
-          refreshBtn +
-          deleteBtn +
+          // Switch branch, refresh, open in a window and delete, behind one
+          // caret. Four buttons that are each reached rarely - you switch a
+          // branch or delete a worktree once in its life - were taking the whole
+          // name line to sit there being available. A menu costs one extra click
+          // on the rare path and gives the name back the width on every card.
+          '<button class="act ghost iconact card-menu-btn" data-tool="cardMenu" data-path="' +
+          esc(wt.path) +
+          '" data-tip="More actions for this worktree" aria-label="More actions"' +
+          ' aria-haspopup="menu" aria-expanded="false">' +
+          icons.caret +
+          "</button>" +
           "</span>" +
           "</div>" +
           (meta ? '<div class="card-meta">' + meta + "</div>" : "") +
@@ -1242,11 +1254,9 @@
           // the header's own run holds what acts on the branch from outside, and
           // these are the reasons to have opened the card.
           '<div class="card-tools">' +
-          ghLink +
           searchBtn +
           findFileBtn +
           debugBtn +
-          openWindowBtn +
           agentBtn +
           "</div>" +
           agentSection(wt.path, agents, foreign) +
@@ -1402,6 +1412,8 @@
   }
 
   function render(data) {
+    // The caret this was positioned against is about to be replaced.
+    closeCardMenu();
     lastData = data;
     hideTip(); // a re-render replaces the hovered node; drop any open tooltip
     if (settingsOpen) {
@@ -1474,6 +1486,104 @@
   // Minimal attribute-selector escaping for paths in querySelector.
   function cssEscape(s) {
     return String(s).replace(/["\\]/g, "\\$&");
+  }
+
+  // --- Card overflow menu ----------------------------------------------------
+  // The rarely-reached per-worktree actions, behind the caret in a card header.
+  // Mounted on document.body rather than inside the card: `.cards` is the scroll
+  // region and the card header is sticky, so a menu positioned inside one is
+  // clipped by the first and stacked under the second. On the body it is also
+  // untouched by a data re-render, which the skills modal needs for the same
+  // reason.
+  let cardMenuEl = null;
+  let cardMenuPath = "";
+
+  function closeCardMenu() {
+    if (!cardMenuEl) return;
+    cardMenuEl.remove();
+    cardMenuEl = null;
+    const btn = root.querySelector(
+      "[data-tool='cardMenu'][data-path=\"" + cssEscape(cardMenuPath) + '"]'
+    );
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    cardMenuPath = "";
+  }
+
+  function openCardMenu(btn, path) {
+    const wt = ((lastData && lastData.worktrees) || []).find(
+      (w) => w.path === path
+    );
+    if (!wt) return;
+    const already = cardMenuPath === path && cardMenuEl;
+    closeCardMenu();
+    // A second click on the same caret shuts it, as a menu button should.
+    if (already) return;
+
+    const item = (action, glyph, label, extra) =>
+      '<button class="card-menu-item' +
+      (extra || "") +
+      '" role="menuitem" data-action="' +
+      action +
+      '" data-path="' +
+      esc(path) +
+      '"><span class="card-menu-ico">' +
+      glyph +
+      "</span>" +
+      label +
+      "</button>";
+
+    // The branch on GitHub stays an <a>: the webview opens http(s) links in the
+    // browser itself, so routing it through the extension host would be a round
+    // trip for nothing. It is absent for a detached worktree, which has no branch
+    // page, and for a non-github.com origin.
+    const url = wt.branch && !wt.detached ? branchUrl(lastData, wt.branch) : "";
+    const ghItem = url
+      ? '<a class="card-menu-item" role="menuitem" href="' +
+        esc(url) +
+        '" target="_blank" rel="noopener noreferrer"><span class="card-menu-ico">' +
+        icons.github +
+        "</span>View branch on GitHub</a>"
+      : "";
+
+    // Three groups: what changes the worktree, where to open it, and the one
+    // thing that destroys it. Delete is also drawn in the error colour - in a
+    // list of plain rows nothing else marks it out, and the rule alone is easy to
+    // read past. The confirmation modal is still what actually guards it.
+    const items =
+      item("changeBranch", icons.edit, "Switch branch&hellip;") +
+      item("refreshWorktree", icons.refresh, "Refresh") +
+      '<div class="card-menu-sep"></div>' +
+      item("openWindow", icons.window, "Open in new window") +
+      ghItem +
+      (wt.isPrimary
+        ? ""
+        : '<div class="card-menu-sep"></div>' +
+          item("removeWorktree", icons.trash, "Delete worktree&hellip;", " danger"));
+
+    cardMenuEl = document.createElement("div");
+    cardMenuEl.className = "card-menu";
+    cardMenuEl.setAttribute("role", "menu");
+    cardMenuEl.innerHTML = items;
+    document.body.appendChild(cardMenuEl);
+    cardMenuPath = path;
+    btn.setAttribute("aria-expanded", "true");
+
+    // Under the caret and right-aligned to it, flipped above when there is not
+    // room below. Measured after mounting, since the height depends on whether
+    // Delete is in the list.
+    const r = btn.getBoundingClientRect();
+    const m = cardMenuEl.getBoundingClientRect();
+    const gap = 4;
+    const below = window.innerHeight - r.bottom;
+    cardMenuEl.style.top =
+      (below < m.height + gap && r.top > m.height + gap
+        ? r.top - m.height - gap
+        : r.bottom + gap) + "px";
+    cardMenuEl.style.left =
+      Math.max(4, Math.min(r.right - m.width, window.innerWidth - m.width - 4)) +
+      "px";
+    const first = cardMenuEl.querySelector(".card-menu-item");
+    if (first) first.focus();
   }
 
   // --- Skills modal ----------------------------------------------------------
@@ -2817,6 +2927,11 @@
       collapseAll();
       return;
     }
+    const cardMenuBtn = e.target.closest("[data-tool='cardMenu']");
+    if (cardMenuBtn) {
+      openCardMenu(cardMenuBtn, cardMenuBtn.getAttribute("data-path") || "");
+      return;
+    }
     const densityTool = e.target.closest("[data-tool='density']");
     if (densityTool) {
       setDensity(isCompact() ? "comfortable" : "compact");
@@ -3022,6 +3137,35 @@
       toggle(bar.getAttribute("data-toggle"));
   });
 
+  // The menu lives on the body, outside #root, so its clicks need their own
+  // handler rather than the delegated one the cards use.
+  document.addEventListener("click", (e) => {
+    const item = cardMenuEl && e.target.closest(".card-menu-item");
+    if (item) {
+      const action = item.getAttribute("data-action");
+      const path = item.getAttribute("data-path") || undefined;
+      closeCardMenu();
+      // No action means the <a> among them, which navigates on its own.
+      if (action) send(action, { path });
+      return;
+    }
+    // Anywhere else, including the caret itself - which then re-opens through
+    // root's handler only when it was not the click that shut this.
+    if (cardMenuEl && !e.target.closest("[data-tool='cardMenu']")) closeCardMenu();
+  });
+
+  // A menu positioned against a button cannot follow it: the cards scroll under
+  // a sticky header, and the panel can be resized. Shut it instead of leaving it
+  // pointing at nothing.
+  window.addEventListener("resize", closeCardMenu);
+  document.addEventListener(
+    "scroll",
+    () => {
+      if (cardMenuEl) closeCardMenu();
+    },
+    true
+  );
+
   root.addEventListener("change", (e) => {
     if (e.target && e.target.id === "gh-enable") {
       send("togglePr", { value: !!e.target.checked });
@@ -3057,6 +3201,10 @@
         openMenu = "";
         renderBranches();
       }
+      return;
+    }
+    if (cardMenuEl) {
+      closeCardMenu();
       return;
     }
     if (settingsOpen) {

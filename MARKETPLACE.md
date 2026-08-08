@@ -196,13 +196,12 @@ density button folds every card down.
   its own agent rows, so the row you are about to click always has the name of
   its worktree directly above it. No more revealing a terminal from the card
   below the one you meant.
-- **What acts on a worktree stays on its name line** - switch branch, refresh and
-  Delete, led by the Source Control scope button - so a finished worktree goes
-  away, a branch gets switched or a card gets re-read without expanding it first.
-  The ways *into* a worktree (its branch on GitHub, search, find file, Debug, new
-  window, and **New agent**) are a row inside the card, right above its agents.
-  Four icons on the name line instead of ten keeps the branch name readable
-  instead of wrapping to make room for them.
+- **The name line stays a name line.** Two controls sit on it: the Source Control
+  scope pill, and a caret whose menu holds switch branch, refresh, open in a new
+  window, view the branch on GitHub, and delete. Search, find file, Debug and
+  **New agent** are a row inside the card, right above its agents. Branch names get
+  the width instead of a row of icons, and nothing needs the card expanded to be
+  reached.
 - **No pills for things a glyph can say.** Your repository's own working directory
   gets a small house beside its name; a locked or detached worktree gets a padlock
   or a broken chain next to its agent counts. The row those words used to need is

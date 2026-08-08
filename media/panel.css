@@ -2266,19 +2266,6 @@ button.busy {
 .card.compact .card-head.terminal-open .agents-bar-terminal {
   display: inline-flex;
 }
-/* The branch on GitHub, leading the body's tools row. Framed like the buttons
-   around it - every other control in the row is a framed icon, and an unframed
-   one among them reads as a different kind of thing. Same border and sizing as
-   .act.ghost, which it cannot simply wear: it is an <a>, not a <button>. */
-.card.compact .card-tools .ghlink {
-  width: 24px;
-  height: 20px;
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
-  border-radius: 3px;
-}
-.card.compact .card-tools .ghlink:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
-}
 /* The comfortable header sets Delete off with a divider because it sits in a run
    of five similar buttons; here a small extra gap is enough, and the
    confirmation modal is what actually guards a near-miss. */
@@ -2324,6 +2311,98 @@ button.busy {
 .card.compact .card-tools .act {
   flex: 0 0 auto;
   padding: 2px 5px;
+}
+/* The card's overflow menu: switch branch, refresh, open elsewhere, delete. Fixed
+   rather than absolute, because it is mounted on document.body - the cards are a
+   scroll region and the card header is sticky, so a menu inside a card is clipped
+   by the first and stacked under the second. Positioned in viewport coordinates
+   by openCardMenu, which also flips it above the caret when there is no room
+   below. */
+.card-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 202px;
+  padding: 4px;
+  border: 1px solid
+    var(--vscode-menu-border, var(--vscode-widget-border, rgba(255, 255, 255, 0.12)));
+  border-radius: 6px;
+  background: var(
+    --vscode-menu-background,
+    var(--vscode-editorWidget-background, #252526)
+  );
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+/* Buttons and one <a> in the same list, so both are declared here: the GitHub
+   entry is a link the webview opens itself. */
+.card-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.card-menu-item:hover,
+.card-menu-item:focus-visible {
+  outline: none;
+  background: var(
+    --vscode-menu-selectionBackground,
+    var(--vscode-list-activeSelectionBackground)
+  );
+  color: var(
+    --vscode-menu-selectionForeground,
+    var(--vscode-list-activeSelectionForeground)
+  );
+}
+/* Delete: the one entry that cannot be undone. Its own colour, since a rule
+   alone is easy to read past. It keeps that colour on hover rather than taking
+   the selection fill - red text on the selection blue is the one combination
+   here that would not be legible. */
+.card-menu-item.danger {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+.card-menu-item.danger:hover,
+.card-menu-item.danger:focus-visible {
+  color: var(--vscode-errorForeground, #f14c4c);
+  background: color-mix(
+    in srgb,
+    var(--vscode-errorForeground, #f14c4c) 18%,
+    transparent
+  );
+}
+.card-menu-ico {
+  display: inline-flex;
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+.card-menu-ico svg {
+  width: 14px;
+  height: 14px;
+}
+.card-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(
+    --vscode-menu-separatorBackground,
+    var(--vscode-widget-border, rgba(255, 255, 255, 0.12))
+  );
+}
+/* The caret turns while its menu is open, the way the settings rail's fold does. */
+.card.compact .card-menu-btn svg {
+  transition: transform 0.12s ease;
+}
+.card.compact .card-menu-btn[aria-expanded="true"] svg {
+  transform: rotate(180deg);
 }
 /* locked and detached, as glyphs on the meta line beside the agent counts. The
    warning colour is what marks them as exceptions; they carry no text, so the
