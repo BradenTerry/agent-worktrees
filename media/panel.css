@@ -2272,6 +2272,33 @@ button.busy {
   gap: 6px;
   padding: 3px 6px;
   border-radius: 3px;
+  /* A wrapped summary makes the row taller than its dot and chips. Align them to
+     the first line rather than centring against the whole block, so the status
+     dot keeps sitting beside the words it qualifies. */
+  align-items: flex-start;
+}
+/* The work summary wraps rather than clipping to an ellipsis. It is the one
+   thing on the row you actually read, and a compact row is narrow enough that
+   the useful half of it was landing outside. Bounded: the extension caps a
+   summary at 120 characters (MAX_TITLE), so a row can never run away. */
+.card.compact .agent-label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  /* break-word, not anywhere: `anywhere` also lets a flex item shrink below its
+     longest word, which on a narrow panel squeezed the column until words split
+     down the middle. This keeps the label at least one word wide and makes the
+     chips beside it give up the space instead. */
+  overflow-wrap: break-word;
+  line-height: 1.35;
+}
+/* The chips and the stop button stay on the first line beside the dot. */
+.card.compact .agent-row .status-dot,
+.card.compact .agent-row .terminal-chip,
+.card.compact .agent-row .subagent-count,
+.card.compact .agent-row .skill-chip,
+.card.compact .agent-row .row-actions {
+  margin-top: 2px;
 }
 .card.compact .subagent-row {
   margin-left: 10px;
