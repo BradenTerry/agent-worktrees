@@ -22,8 +22,12 @@
     // backdrop — monochrome so it inherits currentColor in both themes.
     agentMark:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.2V2.1"/><path d="M4.7 5.3c0-2.3 6.6-2.3 6.6 0"/><path d="M3 5.5h10"/><rect x="4.7" y="6.1" width="6.6" height="7.2" rx="2.1"/><path d="M6.1 9.4h3.8"/></svg>',
+    // Agent + worktree, with a plus badge in the free top-left corner: the glyph
+    // alone says what the thing is, not that the button makes one, and this is
+    // the only creating control in a toolbar of openers. Top-left because the
+    // branch node already occupies bottom-right and the antenna the top-middle.
     agentWorktree:
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M16 14.5c2.4 0 3 1.4 3 3.5" stroke-width="1.5"/><circle cx="20" cy="20" r="1.7" stroke-width="1.4"/><path d="M12 4.4V2.6" stroke-width="1.5"/><circle cx="12" cy="2.4" r="0.9" fill="currentColor"/><path d="M7.5 6.8c0-2.6 9-2.6 9 0" stroke-width="1.5"/><path d="M5 7.2h14" stroke-width="1.5"/><rect x="7" y="8.2" width="10" height="10.4" rx="3" stroke-width="1.5"/><path d="M9 12.4h6" stroke-width="2.2"/></svg>',
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M3.5 1.1v4.9M1.05 3.55h4.9" stroke-width="1.8"/><path d="M16 14.5c2.4 0 3 1.4 3 3.5" stroke-width="1.5"/><circle cx="20" cy="20" r="1.7" stroke-width="1.4"/><path d="M12 4.4V2.6" stroke-width="1.5"/><circle cx="12" cy="2.4" r="0.9" fill="currentColor"/><path d="M7.5 6.8c0-2.6 9-2.6 9 0" stroke-width="1.5"/><path d="M5 7.2h14" stroke-width="1.5"/><rect x="7" y="8.2" width="10" height="10.4" rx="3" stroke-width="1.5"/><path d="M9 12.4h6" stroke-width="2.2"/></svg>',
     focus:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 3h4v4M13 3l-5 5M7 13H3V9M3 13l5-5"/></svg>',
     stop: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
@@ -1471,40 +1475,58 @@
   }
 
   /**
-   * The two views, as a segmented pair rather than one button that swaps: which
-   * view you are in is a state worth showing, and a single toggle can only show
-   * the one you are not in.
+   * The two views, as a tab strip across the foot of the header: two labels
+   * sitting on the rule that divides the header from the list, the current one
+   * underlined.
+   *
+   * Tabs rather than a pair of buttons, because that is what this is - the list
+   * below is the tab's contents, and pressing one changes the whole panel. As
+   * two small controls parked at the end of a line of counters they read as two
+   * more toolbar buttons, which undersold what they do. A strip on a rule says
+   * which view you are in without being read, because the underline is attached
+   * to the thing it names. The shape is VS Code's own panel-title tabs
+   * (uppercase 11px, active underline in `panelTitle-activeBorder`), so it reads
+   * as chrome around the list rather than as another row of panel content.
+   *
+   * Labelled in words, not glyphs. The agent mark is the panel's most repeated
+   * glyph - it counts agents on the line above, in every card and on every agent
+   * row - so spending it again on "the view listing agents" made the control
+   * read as another counter.
    */
-  function viewSwitch() {
-    const opt = (id, icon, label, tip) =>
-      '<button class="tbtn ghost viewbtn' +
+  function viewTabs(data) {
+    const tab = (id, label, tip) =>
+      '<button class="view-tab' +
       (panelView === id ? " active" : "") +
-      '" data-tool="view" data-view="' +
+      '" role="tab" data-tool="view" data-view="' +
       id +
       '" data-tip="' +
       esc(tip) +
-      '" aria-label="' +
-      esc(label) +
-      '" aria-pressed="' +
+      '" aria-selected="' +
       (panelView === id ? "true" : "false") +
       '">' +
-      icon +
+      esc(label) +
       "</button>";
     return (
-      '<span class="view-switch" role="group" aria-label="Panel view">' +
-      opt(
+      '<div class="view-tabs">' +
+      '<div class="view-tablist" role="tablist" aria-label="Panel view">' +
+      tab(
         "worktrees",
-        icons.worktreeStack,
-        "Worktrees view",
+        "Worktrees",
         "Worktrees: one card per worktree, with its agents inside it"
       ) +
-      opt(
+      tab(
         "agents",
-        icons.agentMark,
-        "Agents view",
+        "Agents",
         "Agents: every agent in the repository in one list, waiting ones first"
       ) +
-      "</span>"
+      "</div>" +
+      // Held against the right end of the strip, the way a panel keeps its
+      // actions beside its tabs: what it folds is the tab's contents, so it
+      // belongs on the tab's line rather than up among the counters.
+      '<span class="view-tab-actions">' +
+      collapseAllBtn(data) +
+      "</span>" +
+      "</div>"
     );
   }
 
@@ -1554,11 +1576,12 @@
   }
 
   function toolbar(data) {
+    const stats = repoStats(data);
     return (
-      // Name, tools and the repo-wide agent summary as one block: the summary is
-      // about the repository the name identifies, and the rule under the block
-      // separates all of it from the cards rather than the name from its own
-      // stats.
+      // Name, tools, the repo-wide agent summary and the view tabs as one block:
+      // the summary is about the repository the name identifies, and the tabs
+      // are what the block hands down to the list. The rule under it all is the
+      // tab strip's own, so the tabs sit on it.
       '<div class="repo-bar">' +
       '<div class="repo-head">' +
       "<span>" +
@@ -1577,19 +1600,12 @@
       "</button>" +
       "</span>" +
       "</div>" +
-      // The repo-wide agent summary shares its line with the two controls that
-      // are about how the list below is shown rather than about creating or
-      // opening anything: expand/collapse, then the view switch. Both are held
-      // against the right edge as one group, leaving the name's row to the
-      // actions. The line is emitted even with no worktrees to summarize, since
-      // the switch has to be reachable either way.
-      '<div class="repo-stats">' +
-      repoStats(data) +
-      '<span class="repo-view-tools">' +
-      collapseAllBtn(data) +
-      viewSwitch() +
-      "</span>" +
-      "</div>" +
+      // The repo-wide agent summary, on its own line under the name. Dropped
+      // entirely when there is nothing to summarize, rather than left as an
+      // empty line: the tab strip below it is what has to be reachable in an
+      // empty repository, and it no longer rides on this row.
+      (stats ? '<div class="repo-stats">' + stats + "</div>" : "") +
+      viewTabs(data) +
       "</div>"
     );
   }

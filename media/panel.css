@@ -44,12 +44,11 @@ body {
   font-weight: 600;
   color: var(--vscode-foreground);
 }
-/* Name, tools and the repo-wide agent summary as one block, with the rule under
-   all of it: it separates the header from the cards, not the name from its own
-   summary. */
+/* Name, tools, the repo-wide agent summary and the view tabs as one block. The
+   rule under it all belongs to the tab strip at its foot (`.view-tabs`) rather
+   than to this box, so the selected tab's underline can sit on the same line. */
 .repo-bar {
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
   margin-bottom: 8px;
 }
 /* Every agent in the repo, in the glyphs a card uses for its own. Same size and
@@ -60,7 +59,7 @@ body {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 8px;
-  padding: 0 4px 7px;
+  padding: 0 4px 6px;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--vscode-foreground);
@@ -716,44 +715,101 @@ body {
   height: 11px;
 }
 
-/* The worktrees / agents switch in the toolbar. Two joined buttons, not two
-   loose ones: it is one control with two positions, and the shared outline plus
-   the seam between them is what says so. */
-/* Expand/collapse and the view switch, held against the right edge of the
-   summary line they share with the agent counts. An auto margin applies per flex
-   line, so on a panel too narrow to hold both it wraps to a row of its own and
-   stays right-aligned there. */
-.repo-view-tools {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+/* The worktrees / agents tabs, across the foot of the header. The strip carries
+   the rule that separates the header from the list, so the tabs sit ON that rule
+   the way a panel's tabs sit on theirs - which is what makes them read as tabs
+   over the list rather than as two buttons above it. Expand/collapse rides at
+   the right end, where a panel keeps its actions. */
+.view-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
 }
-.view-switch {
-  display: inline-flex;
+.view-tablist {
+  display: flex;
   align-items: stretch;
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
-  border-radius: 4px;
-  overflow: hidden;
+  gap: 2px;
+  min-width: 0;
 }
-.view-switch .tbtn.ghost {
-  border: none;
-  border-radius: 0;
-  padding: 3px 6px;
+.view-tab-actions {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding-bottom: 3px;
 }
-.view-switch .tbtn.ghost + .tbtn.ghost {
-  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+/* Borderless on the strip, like a panel's title actions: an outlined box parked
+   on the rule reads as a third tab that lost its label. It keeps the hover fill,
+   which is what says it is pressable. */
+.view-tab-actions .tbtn.ghost {
+  border-color: transparent;
 }
-/* Selected, in VS Code's own list-selection colours rather than the button fill:
-   the panel's accent fill means "this is the worktree you are typing into", and
-   a view switch is not that. */
-.view-switch .tbtn.ghost.active,
-.view-switch .tbtn.ghost.active:hover {
-  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
-  background: var(
-    --vscode-list-activeSelectionBackground,
-    rgba(128, 128, 128, 0.28)
+/* A folder tab: outlined on three sides, corners rounded at the top only, and
+   open at the bottom into the list it labels. Every tab carries the full border
+   so none of them changes size when selected - the inactive ones just carry it
+   in transparent. Uppercase 11px keeps VS Code's panel-title voice. */
+.view-tab {
+  position: relative;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px 5px 0 0;
+  /* Pulls the tab's bottom edge onto the strip's rule, so the selected one can
+     paint over that segment and join the page below instead of sitting on it. */
+  margin-bottom: -1px;
+  padding: 4px 10px 5px;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(
+    --vscode-panelTitle-inactiveForeground,
+    var(--vscode-descriptionForeground)
   );
+}
+/* An unselected tab brightens and picks up its outline, but keeps its bottom
+   edge open to the rule: it is still behind the page, not joined to it. The
+   explicit transparent background is load-bearing - the bare `button:hover` rule
+   further down is more specific than `.view-tab` and would otherwise drop the
+   secondary-button fill in behind the label. */
+.view-tab:hover {
+  color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
+  background: transparent;
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  border-bottom-color: transparent;
+}
+/* The selected tab is the front one: it fills with the page colour and its
+   bottom border, painted in that same colour over the strip's rule, cuts the
+   rule away so the tab and the list below read as one surface. */
+.view-tab.active,
+.view-tab.active:hover {
+  color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
+  background: var(--vscode-editor-background, transparent);
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  border-bottom-color: var(--vscode-editor-background, transparent);
+}
+/* The accent, as a cap along the top edge rather than a fourth border colour:
+   at a glance the colour is what finds the selected tab, and the outline alone
+   is too quiet to do that in a light theme. */
+.view-tab.active::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  top: -1px;
+  height: 2px;
+  border-radius: 5px 5px 0 0;
+  background: var(
+    --vscode-panelTitle-activeBorder,
+    var(--vscode-focusBorder, #0078d4)
+  );
+}
+.view-tab:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
 }
 
 .actions {

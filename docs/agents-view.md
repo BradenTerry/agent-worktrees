@@ -10,25 +10,41 @@ means opening four cards.
 
 ## Switching
 
-- A segmented pair of buttons: the stacked-cards glyph for the worktrees view,
-  the agent mark for this one. Two buttons rather than one that swaps, because
-  which view you are in is a state worth showing and a single toggle can only
-  show the one you are not in.
-- It sits at the right end of the repo-wide agent summary line, not in the row of
-  tools beside the repository name. What it picks is how those agents are listed,
-  so it belongs with the count of them; the name's row is the actions that create
-  and open things. **Expand/collapse all** is grouped with it, immediately to its
-  left, for the same reason. The auto margin holding the pair right applies per
-  flex line, so on a panel too narrow for both it wraps to its own row and stays
-  right-aligned.
+- A **tab strip** across the foot of the panel header, labelled **Worktrees** and
+  **Agents**. Two tabs rather than one button that swaps, because which view you
+  are in is a state worth showing and a single toggle can only show the one you
+  are not in.
+- Tabs, not two toolbar buttons. The list below is the tab's contents and
+  pressing one changes the whole panel; as a pair of small controls parked at the
+  end of the agent-summary line they read as two more buttons among the counters,
+  and the panel had no at-a-glance answer to "which view is this".
+- Drawn as folder tabs: outlined on three sides, top corners rounded, open at the
+  bottom. The strip carries the rule that divides the header from the list, and
+  the selected tab paints its own bottom edge in the page colour over that rule,
+  cutting it - so the tab and the list read as one surface and the unselected one
+  reads as sitting behind it. Every tab carries the full border, transparent when
+  unselected, so nothing changes size when the selection moves. The accent
+  (`panelTitle-activeBorder`) caps the selected tab's top edge, because at a
+  glance colour is what finds it - a neutral outline alone is too quiet in a
+  light theme. Uppercase 11px keeps VS Code's panel-title voice, so the strip
+  reads as chrome around the list rather than as panel content.
+- Words rather than glyphs. The pair used a stacked-cards mark and the agent
+  mark, but the agent mark is the panel's most repeated glyph - it heads the
+  repo agent count, every card's agent count and every agent row - so a fourth
+  use of it read as another counter rather than as a control.
+- The strip is the last row of `.repo-bar`, under the repository name and the
+  repo-wide agent summary: the header names the repository and counts what is in
+  it, then hands down to the tabs the choice of how that is listed.
 - The choice is persisted in the webview state (`panelView`), so reopening the
   panel returns to the view you were last in.
-- **Expand/collapse all** is disabled in this view - its rows are the leaves, so
-  there is nothing to fold - but it stays in place rather than disappearing, so
-  the switch beside it does not move between the two views. Its tooltip says so
-  ("Disabled in the agents view: nothing to fold"), which is why it is dimmed by
-  a class rather than by the `disabled` attribute: a truly disabled button
-  dispatches no mouse events and could not be hovered to read it.
+- **Expand/collapse all** rides at the right end of the strip, borderless, where
+  a panel keeps its title actions - what it folds is the tab's contents. It is
+  disabled in this view (its rows are the leaves, so there is nothing to fold)
+  but stays in place rather than disappearing, so the strip does not change shape
+  between the two views. Its tooltip says so ("Disabled in the agents view:
+  nothing to fold"), which is why it is dimmed by a class rather than by the
+  `disabled` attribute: a truly disabled button dispatches no mouse events and
+  could not be hovered to read it.
 
 Switching is webview-local. Both views render from the same `{type:"update"}`
 payload the extension already posts, so the switch is a re-render with **no round
@@ -39,7 +55,7 @@ flowchart LR
     U["{type: update} payload<br/>worktrees[] with agents[] + subagents[]"] --> R["render(data)"]
     R -->|panelView = worktrees| C["cards: one per worktree"]
     R -->|panelView = agents| A["agentsList(data): one flat list"]
-    S["view switch (data-tool=view)"] -->|"persist() + render(lastData)"| R
+    S["view tab (data-tool=view)"] -->|"persist() + render(lastData)"| R
     A --> RW["rows carry the branch they are working on"]
 ```
 
@@ -121,5 +137,5 @@ flowchart LR
 
 Everything about the worktree itself stays on the cards: git totals, the PR
 rollup, debug sessions, the per-worktree actions menu, Source Control scoping.
-This view is deliberately only the agents; the switch is one click away when the
+This view is deliberately only the agents; the other tab is one click away when the
 question is about a worktree instead.
