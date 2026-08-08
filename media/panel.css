@@ -2096,8 +2096,10 @@ button.busy {
   letter-spacing: 0;
   text-transform: none;
 }
-/* Same rule as the Agents bar: the terminal glyph only where it is true. */
-.card.compact .card-meta.terminal-open .agents-bar-terminal {
+/* Same rule as the Agents bar: the terminal glyph only where it is true. It sits
+   immediately after the branch name, so "the agent you are talking to is in this
+   worktree" is read off the same spot as which worktree that is. */
+.card.compact .card-head.terminal-open .agents-bar-terminal {
   display: inline-flex;
 }
 /* The two actions pinned to the header, against the right edge: the branch on
@@ -2139,32 +2141,17 @@ button.busy {
 .card.compact .meta-stats {
   display: inline-flex;
   align-items: center;
-  /* Pushed to the right edge, with the git totals holding the left: two
-     readings of the worktree at opposite ends of the line, the rule between. */
+  /* Pushed to the right edge, with the git totals holding the left: two readings
+     of the worktree at opposite ends of one line. The auto margin applies per
+     flex line, so a panel too narrow to hold both wraps the stats to a row of
+     their own and keeps them right-aligned there - no measuring, no breakpoint,
+     and it happens per card at whatever width that card actually runs out. */
   margin-left: auto;
   flex: 0 0 auto;
   gap: 7px;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--vscode-foreground);
-}
-/* The rule, drawn only when there are git segments to its left. On the group
-   itself rather than as an element between the two, so a wrap can never strand
-   it at the end of a line with nothing after it. */
-.card.compact .meta-stats.ruled {
-  padding-left: 9px;
-  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.4));
-}
-/* Too narrow for both: the stats take the whole next row (still right-aligned,
-   so the column they read down does not move) and the rule goes with them. Set
-   by syncMetaFit, which measures the unstacked line - CSS cannot detect a wrap,
-   and the width where it happens depends on how much this worktree has to say. */
-.card.compact .card-meta.stacked .meta-stats {
-  flex: 0 0 100%;
-  margin-left: 0;
-  padding-left: 0;
-  border-left: none;
-  justify-content: flex-end;
 }
 .card.compact .meta-count {
   display: inline-flex;

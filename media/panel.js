@@ -1068,28 +1068,18 @@
       // of glyphs. Either side can be absent (a clean worktree with no agents,
       // an agent working on a worktree with nothing to report), and the rule is
       // only drawn when both are there.
-      // The rule is a border on the group itself rather than an element between
-      // the two, so it is always attached to what it introduces: it cannot be
-      // stranded at the end of the git segments when the line wraps, and it
-      // disappears with the group when the stats drop to a line of their own
-      // (see syncMetaFit).
+      // The stats hold the right edge of the meta line against the git totals on
+      // the left. Plain flex does the rest: an auto margin applies per flex line,
+      // so when the panel is too narrow to hold both the stats wrap to a row of
+      // their own and stay right-aligned there.
       const agentGroup = countStat + subStat + stats;
       const meta =
-        git +
-        (agentGroup
-          ? '<span class="meta-stats' +
-            (git ? " ruled" : "") +
-            '">' +
-            // Shown (via CSS) only while this worktree holds the active terminal.
-            '<span class="agents-bar-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
-            icons.terminal +
-            "</span>" +
-            agentGroup +
-            "</span>"
-          : "");
+        git + (agentGroup ? '<span class="meta-stats">' + agentGroup + "</span>" : "");
 
       return shell(
-        '<div class="card-head" data-toggle="' +
+        '<div class="card-head' +
+          (hasActiveTerminal ? " terminal-open" : "") +
+          '" data-toggle="' +
           esc(wt.path) +
           '" role="button" tabindex="0" aria-expanded="' +
           (isCollapsed ? "false" : "true") +
@@ -1102,6 +1092,11 @@
           '<span class="branch">' +
           esc(wt.name) +
           "</span>" +
+          // Right beside the name (shown via CSS only on .terminal-open): the
+          // branch you are talking to, said where you read which branch it is.
+          '<span class="agents-bar-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
+          icons.terminal +
+          "</span>" +
           '<span class="badges">' +
           badges.join("") +
           "</span>" +
@@ -1112,13 +1107,7 @@
           ghLink +
           deleteBtn +
           "</div>" +
-          (meta
-            ? '<div class="card-meta' +
-              (hasActiveTerminal ? " terminal-open" : "") +
-              '">' +
-              meta +
-              "</div>"
-            : "") +
+          (meta ? '<div class="card-meta">' + meta + "</div>" : "") +
           prLine(wt.pr, true) +
           '<div class="card-body">' +
           '<div class="card-actions">' +
@@ -1231,45 +1220,6 @@
       "</div>";
     const nextCards = root.querySelector(".cards");
     if (nextCards) nextCards.scrollTop = y;
-    syncMetaFit();
-  }
-
-  /**
-   * Compact meta line: the git totals sit left, the agent stats right, with a
-   * rule between them. When the panel is too narrow to hold both, the stats take
-   * a line of their own and the rule goes with them — a rule with nothing to its
-   * left is a stray mark, not a separator.
-   *
-   * CSS cannot ask "did this item wrap", and a media query would have to guess
-   * one width for every card, when what actually decides it is how much each
-   * worktree has to say (a clean worktree with one agent fits where a busy one
-   * does not). So it is measured per card. The measurement always runs with the
-   * class off, so the stacked state can never feed back into the answer and
-   * leave two widths oscillating.
-   */
-  function syncMetaFit() {
-    metaFitQueued = false;
-    const metas = root.querySelectorAll(".card.compact .card-meta");
-    if (!metas.length) return;
-    metas.forEach((m) => m.classList.remove("stacked"));
-    // Second pass, so every class is off before the first layout read.
-    metas.forEach((m) => {
-      const git = m.querySelector(".gitline");
-      const stats = m.querySelector(".meta-stats");
-      if (!git || !stats) return;
-      // Below the git block entirely, rather than merely lower than its top:
-      // a gitline that wrapped internally is taller than the stats beside it,
-      // which are centred against it and so start lower on the same line.
-      if (stats.offsetTop >= git.offsetTop + git.offsetHeight)
-        m.classList.add("stacked");
-    });
-  }
-
-  let metaFitQueued = false;
-  function queueMetaFit() {
-    if (metaFitQueued) return;
-    metaFitQueued = true;
-    requestAnimationFrame(syncMetaFit);
   }
 
   function toggle(path) {
@@ -2949,13 +2899,12 @@
       if (on) activeRow = row;
     });
     // The card-level marker lives on the Agents bar in the comfortable layout
-    // and on the meta line (which carries the agent stats) in the compact one;
-    // only one of the two exists on a card.
+    // and on the card header in the compact one; only one of the two exists.
     root
-      .querySelectorAll(".agents-bar.terminal-open, .card-meta.terminal-open")
+      .querySelectorAll(".agents-bar.terminal-open, .card-head.terminal-open")
       .forEach((bar) => bar.classList.remove("terminal-open"));
     const card = activeRow && activeRow.closest(".card");
-    const bar = card && card.querySelector(".agents-bar, .card-meta");
+    const bar = card && card.querySelector(".agents-bar, .card-head");
     if (bar) bar.classList.add("terminal-open");
   }
 
@@ -3015,13 +2964,6 @@
   });
   // Scrolling moves the anchor out from under a fixed tooltip; just drop it.
   root.addEventListener("scroll", hideTip, true);
-
-  // Dragging the sidebar edge is the one thing that changes whether a compact
-  // card's meta line still fits on one row. Coalesced into a frame, so a drag
-  // costs one measurement per paint rather than one per resize event.
-  if (typeof ResizeObserver !== "undefined") {
-    new ResizeObserver(queueMetaFit).observe(root);
-  }
 
   // Mount. The branches editor tab requests its own data; the sidebar asks for
   // a refresh in case it mounted after the first push.
