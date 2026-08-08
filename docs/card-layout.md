@@ -57,6 +57,14 @@ from its worktree's name. The header repaints the card's own background tint
 (it needs to be opaque, since rows pass under it) and the card's expanded body
 carries a vertical rail back up to it.
 
+**The body opens on a horizontal rule**, so where the fold is is drawn rather
+than remembered: above it is what the card shows at rest, below it is what
+expanding got you. It sits on `.card-body` rather than on the Worktree line,
+which is the body's usual first row but is dropped on the primary worktree - the
+rule has to mark the boundary on every card, not on most of them. The rail starts
+at it and hangs off it, so the two read as one bracket around the body instead of
+two unrelated hairlines.
+
 **Two controls on the name line, and a menu.** The header holds the Source
 Control scope button - the one control there that is also a *reading* - and a
 caret. Behind the caret: switch branch, refresh, open in a new window, view the

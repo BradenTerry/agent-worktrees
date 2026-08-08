@@ -2420,6 +2420,15 @@ button.busy {
 /* --- Body: actions, then the agents, on a rail back to the header --------- */
 .card .card-body {
   position: relative;
+  /* A rule where the fold is. Everything above it is on the card at rest;
+     everything below it is what expanding the card got you. Without it the body
+     just continued the header's stack of lines and the boundary was only
+     inferable from having watched it open. The vertical rail below starts at this
+     rule and hangs off it, so the two read as one bracket around the body rather
+     than as two unrelated hairlines. */
+  border-top: 1px solid rgba(127, 127, 127, 0.25);
+  padding-top: 7px;
+  margin-top: 5px;
   padding-bottom: 5px;
 }
 /* The rail runs the height of the expanded body, aligned under the header's

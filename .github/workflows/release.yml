@@ -118,6 +118,37 @@ jobs:
       - name: Test
         run: npm test
 
+      # The listing's screenshots are absolute raw.githubusercontent URLs, because
+      # the Marketplace renders the README off its own site and cannot resolve a
+      # relative path. In the repo they point at main, which is right there - the
+      # file on main should show what main looks like. Published, that same ref
+      # would keep resolving against main forever: land a UI change without
+      # cutting a release and the listing starts advertising a panel that nobody
+      # can install yet.
+      #
+      # So the ref is pinned to this release's tag on the way into the .vsix, and
+      # only there. The working tree is rewritten and never committed (the same
+      # thing `npm version --no-git-tag-version` above does), so main keeps its
+      # live refs and each published listing keeps the screenshots of the build it
+      # is actually selling. The tag exists by the time anyone loads the page: the
+      # `gh release create` step below runs before the publish step.
+      - name: Pin the listing's screenshots to this release's tag
+        env:
+          TAG: ${{ steps.channel.outputs.tag }}
+        run: |
+          set -euo pipefail
+          before="$(grep -c "/agent-worktrees/main/images/" MARKETPLACE.md)"
+          if [ "$before" -eq 0 ]; then
+            echo "::error::No main-pinned image URLs found in MARKETPLACE.md. The listing's screenshot URLs changed shape - update this step, or a release will ship unpinned images."
+            exit 1
+          fi
+          sed -i "s#/agent-worktrees/main/images/#/agent-worktrees/$TAG/images/#g" MARKETPLACE.md
+          echo "Pinned $before screenshot URL(s) to $TAG."
+          if grep -q "/agent-worktrees/main/images/" MARKETPLACE.md; then
+            echo "::error::Some image URLs still point at main after rewriting."
+            exit 1
+          fi
+
       - name: Package extension
         run: npx --yes @vscode/vsce package ${{ steps.channel.outputs.pre_release_flag }} --readme-path MARKETPLACE.md --out agent-worktrees.vsix
 
