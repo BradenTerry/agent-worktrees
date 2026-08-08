@@ -1,17 +1,18 @@
-# Compact view
+# The worktree card
 
-The worktree panel renders its cards at one of two densities, toggled from the
-panel toolbar and persisted in the webview's state (`density`, alongside
-`expanded`). `comfortable` is the original layout and the default; `compact` is
-the subject of this note.
+How `card()` in `media/panel.js` lays out one worktree, and why it is shaped the
+way it is. There is one layout: the panel used to ship two densities with a
+toolbar toggle, and the roomier one was removed - keeping it meant every change
+here had to be made twice and verified twice, for a layout nobody chose once the
+tighter one existed.
 
-## Why
+## Why it is dense
 
-The comfortable card gives each subsystem its own labelled block: header row,
+The original card gave each subsystem its own labelled block: header row,
 separator, git summary, action row, debug rows, PR rollup, Agents bar, agent
-rows. It is legible in isolation and it does not scale. At roughly seven rows
-per worktree, a repo with four or five of them does not fit in a sidebar, and
-two failures follow from the scrolling that causes:
+rows. That is legible in isolation and it does not scale. At roughly seven rows
+per worktree, a repo with four or five of them does not fit in a sidebar, and two
+failures follow from the scrolling that causes:
 
 - The panel's whole value is the at-a-glance read across worktrees. If half of
   them are off screen, there is no glance.
@@ -19,15 +20,11 @@ two failures follow from the scrolling that causes:
   and every card ends in a stack of similar-looking rows. Clicking the right
   agent on the wrong worktree is easy, and reveals the wrong terminal.
 
-## What compact changes
+## The shape
 
-Same data, same actions, three structural changes.
-
-**Two lines at rest, plus the PR block.** The card header carries the branch
-name. One meta line underneath carries two unrelated readings of the worktree at
+**Two lines at rest, plus the PR block.** The header carries the branch name. One meta line underneath carries two unrelated readings of the worktree at
 opposite ends of it: what is running in it on the left - agent count, live
-subagents, per-status dots, the summary that used to live in the Agents bar - and
-what its working tree looks like on the right.
+subagents, per-status dots - and what its working tree looks like on the right.
 
 The agents take the left because that is the reading the panel exists for, and
 the left edge is where a column of cards is scanned; the git totals hold the
@@ -44,8 +41,15 @@ runs with a rule between them - so the CI checkmarks and the review checkmarks
 still cannot be read as one ambiguous sequence, which is what the two labels
 exist to prevent. Four rows become three.
 
-**The header is the toggle, and it sticks.** There is no separate Agents bar to
-click; the header carries `data-toggle` and expands the card. It is
+**The name half of the header is the toggle, and the header sticks.** `.head-toggle`
+- the chevron and the name - carries `data-toggle` and expands the card; the
+actions at the right end are outside it, divided off by a vertical rule. The whole
+row used to be the toggle, so a click that missed one of the buttons folded the
+card you were reaching into. The rule is there because the two halves are
+otherwise one undifferentiated strip: the boundary should be something you can
+see, not something you learn by mis-clicking. The hover tint is on the toggle
+alone and fills the header's full height up to the rule, so what lights up is
+exactly what the click will hit. The header is
 `position: sticky` inside the cards scroll region, so while a card's agent rows
 scroll past, the name of the worktree they belong to stays pinned directly above
 them. This is the part that addresses the misclick: a row is never separated
@@ -115,7 +119,7 @@ cards rather than the name from its own summary.
 
 ### No badges at all
 
-The compact card has no badge line. Everything that used to be on one is said
+The card has no badge line. Everything that used to be on one is said
 another way, and the row it needed is gone.
 
 **Primary** is a glyph on the left of the name. It is true of exactly one card and
@@ -143,7 +147,7 @@ card.
 
 The waiting dot pulses in both summaries: on a card's meta line and on the
 repo-wide line under the repository name. Only waiting, though - the agent rows
-and the comfortable Agents bar pulse active as well, but a count is not a row. A
+pulse active as well, but a count is not a row. A
 panel with agents working would have a green dot ticking on every card and again
 at the top, which is motion that says nothing you did not already know. Waiting is
 the one that wants you to look, and it is what the Activity Bar badge counts.
@@ -172,9 +176,12 @@ the name alone does not say which repo's worktree directory it sits in.
 The card outline marks the worktree whose agent owns **the terminal you are typing
 into**, and it is set on the card rather than only on its header, so it is
 findable when the card is collapsed and the header is all there is. The terminal
-glyph that says the same thing sits in the chevron's column on the meta line,
-directly under it - beside the branch name it was competing with the name for the
-first line and pushing a long one to wrap sooner.
+glyph that says the same thing closes the meta line's left group, after the agent
+counts and the state flags. Beside the branch name it competed with the name for
+the first line and pushed a long one to wrap sooner; in a column of its own ahead
+of the counts it held 12px open on every card to say something true of one of
+them. At the end of the run it costs width only on the card it applies to, and
+the counts keep a left edge that does not move between cards.
 
 It used to mark the worktree that happened to be the open workspace folder
 (`inWorkspace`). That is one card, forever, and not something you need the panel
@@ -198,15 +205,24 @@ instead of wearing the class.
 Every icon-only control carries `data-tip`, the panel's own tooltip, rather than
 `title`. The native tooltip's delay is long enough that an unlabelled button
 feels unlabelled; `aria-label` goes on alongside it so the name is there for a
-screen reader either way.
+screen reader either way. `TIP_DELAY` is 400ms - shorter than the native one, and
+longer than the 200ms it started at. A card is a dense run of small glyphs and
+the pointer crosses several on the way to the one you want; at 200ms they fired
+in passing, so crossing a card set off a sequence of tips for things you were not
+asking about.
 
 **New agent** is icon-only here, at the far right of the body's tools row, so
 the control that starts one sits against the list of what is already running. It
 keeps both glyphs, the plus and the agent mark, which
 together are what say "another one of these", and it is outlined in the accent
 rather than filled: filled, it was the single saturated block on a card otherwise
-made of quiet outlines. The comfortable card keeps the words and the fill, being
-the only thing on its row that is not an icon.
+made of quiet outlines. It sits inline beside the Agents heading, so the control
+that starts an agent is next to the list of the ones already running.
+
+It is sized to that heading rather than to the header's run of buttons: a 12px
+glyph and an 11px plus, in 1px of padding. On the panel's default sizes - a 13px
+glyph and a 14px plus - it stood about a third taller than the 11px word beside
+it and read as a control that had wandered down from the header.
 
 The Agents bar carries no count. The meta line above already has the agent total
 beside the live subagents and the per-status dots, where it can be read against
@@ -217,9 +233,11 @@ them; repeated on the bar it was the same number twice on one card.
 The name is inline content and wraps; nothing else in the header wraps with it.
 The chevron and the column of controls both hold the name's **first** line at
 every width, so they occupy one place on the card no matter how many lines the
-name takes. `.head-main` therefore has no `min-width` floor - given one it would
-push the controls past the card's right edge instead of letting the name yield -
-and `.card-head` is `nowrap`.
+name takes. Neither `.head-toggle` nor `.head-main` inside it has a `min-width`
+floor - given one they would push the controls past the card's right edge instead
+of letting the name yield - and `.card-head` is `nowrap`. Below 240px the header
+wraps instead, and there `.head-toggle` takes the floor, so the toggle and the
+actions land on separate rows rather than sharing a one-character column.
 
 Holding that first line takes a computed offset, because the header is
 `align-items: flex-start` and flex-start aligns *tops*: an item ends up high by
@@ -260,7 +278,7 @@ centred on the summary's **first line box** with its own computed offset. The
 offsets cannot be shared: the three are different heights, and the stop button is
 taller than the line box, so it needs a negative one where the dot needs +4.8px.
 
-The summary is sized with the rest of the density, at `--row-font`. Left to
+The summary is sized with the rest of the card, at `--row-font`. Left to
 inherit the body size it came out at 13px - the largest text on a card whose
 branch name is 12px and whose git line is 11px, in a layout whose whole point is
 that nothing is bigger than it needs to be. The size and the line box those
@@ -272,39 +290,37 @@ single saturated block on a card otherwise made of quiet outlines - 104px agains
 25px neighbours, about a third of the action row, and the loudest thing on a card
 whose status colours are the part meant to catch the eye. Outlined in the accent
 with accent text, it still reads as the primary action and still says what it
-does. The comfortable card keeps the filled button, where it anchors a row of its
-own.
+does.
 
-Net effect on the screenshot fixture (four worktrees, everything expanded): 1420
-device pixels tall against 2280. Collapsed, the four cards take about a third of
-the height of the comfortable ones.
+Net effect on the screenshot fixture (four worktrees, everything expanded): about
+1300 device pixels tall, against 2280 for the layout this replaced. Collapsed, the
+four cards take roughly a third of that again.
 
 ## Implementation notes
 
-- Both densities are built by `card()` in `media/panel.js` from the same set of
-  button/segment builders; only the assembly at the end differs. Anything that
-  varies between them (the source-control pill's label, the PR rollup's shape)
-  takes a `compact` flag rather than being rebuilt.
-- All compact styling is scoped to `.card.compact` in `media/panel.css`, so the
-  comfortable layout is untouched by construction.
-- The two densities emit different markup, so `setDensity` re-renders rather
-  than toggling a class. Expand state is independent of density and survives the
-  switch.
-- `data-toggle` is what the click and keydown handlers look for, so both the
-  Agents bar and the compact header work through the same path. The keydown
-  handler ignores events from a `button`/`a` inside the header, since the header
-  now contains the Delete button and a button fires its own click on
-  Enter/Space.
-- `applyActiveTerminal` marks the card-level "this worktree holds the terminal
-  you are talking to" glyph on whichever of `.agents-bar` / `.card-head` exists.
+- `card()` in `media/panel.js` builds the whole card from a set of
+  button/segment builders. There is no density flag: the one place a shape is
+  still chosen is `prLine`, whose `stacked` argument gives the branches view its
+  two labelled rows while a card gets the side-by-side rollup.
+- `data-toggle` is what the click and keydown handlers look for. It sits on
+  `.head-toggle`, not on the header, so the header's action buttons are outside
+  it by structure rather than by exclusion. Both handlers still ignore events
+  from a `button`/`a` within the toggle - the primary mark and the name are not
+  the only things that can end up there, and a control inside it would otherwise
+  fold the card on its way out. `toggle()` reaches the card with `closest(".card")`
+  rather than `parentElement`, since the toggle is now two levels down.
+- `applyActiveTerminal` re-tints in place on a terminal switch, without a
+  re-render, and toggles `terminal-open` on both the card (which carries the
+  outline) and its header (the tint). Leaving the card out of that set is what
+  made the outline lag a terminal switch by a data push.
 - Under 340px of panel width a media query drops the agent-count chip from the
   header: the branch name is what tells two cards apart, and the status dots
   beside the chip already break the count down.
 
 ## Screenshots
 
-`npm run screenshots` renders both densities from the same fixture
-(`images/overview.png` and `images/compact.png`), which is the comparison the
-marketplace listing uses. The compact shot is driven by seeding
-`state: { density: "compact" }` through the harness's stubbed `getState`, the
-same channel the real webview restores it from.
+`npm run screenshots` renders the panel from the fixture in
+`screenshots/fixtures.js` - `images/overview.png` expanded and
+`images/collapsed.png` with every card shut, both from the same data. The
+collapsed shot clicks the toolbar's collapse control rather than setting the
+class, so it shows what the real path produces.

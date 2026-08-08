@@ -25,26 +25,17 @@ test("pr-status - CI checks and review on the PR row", async ({ page }) => {
   await page.locator(".card").nth(1).screenshot({ path: shot("pr-status.png"), animations: "disabled" });
 });
 
-test("compact - the same worktrees at compact density", async ({ page }) => {
+test("collapsed - every card shut", async ({ page }) => {
   const data = overviewData();
-  // The density lives in the webview's persisted state, which the harness seeds
-  // through the same getState() the extension's webview provides.
-  await mountPanel(page, { data, state: { density: "compact" } });
-  await page.locator("#root").screenshot({ path: shot("compact.png"), animations: "disabled" });
-});
-
-test("compact-collapsed - every card shut, at compact density", async ({ page }) => {
-  const data = overviewData();
-  // A locked worktree, so the badge line shows up on one of the four: it is only
-  // drawn for the unusual states, and none of the fixtures carries one.
+  // A locked worktree, so its glyph shows up on one of the four.
   data.worktrees[2].locked = true;
-  await mountPanel(page, { data, state: { density: "compact" } });
+  await mountPanel(page, { data });
   // Collapsed through the toolbar control rather than by setting the class, so
   // this shows what the real path produces. The harness seeds every card as
   // expanded, so the button's first click is the collapsing one.
   await page.locator("[data-tool='collapseAll']").click();
   await page.locator("#root").screenshot({
-    path: shot("compact-collapsed.png"),
+    path: shot("collapsed.png"),
     animations: "disabled",
   });
 });

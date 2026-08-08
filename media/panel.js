@@ -36,7 +36,8 @@
     refresh:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/></svg>',
     // The card's overflow menu trigger. Points down because the menu opens below
-    // it, and turns when it is open.
+    // it, and keeps pointing down while it is open: the arrow says where the menu
+    // is, not whether it is showing, and the menu itself is the state.
     caret:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg>',
     // The repository's primary working directory: the checkout the repo itself
@@ -64,10 +65,6 @@
     // toolbar says "close", not "collapse".
     collapseAll:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 3l3 2 3-2M5 13l3-2 3 2"/></svg>',
-    // Density toggle: the same list of rows, drawn tighter. Four evenly spaced
-    // lines read as "a denser list" where a chevron or a minus would not.
-    density:
-      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h11"/></svg>',
     window:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.2"/><path d="M1.5 6h13"/></svg>',
     // Find in Files, scoped to one worktree: VS Code's own magnifier shape so it
@@ -150,18 +147,6 @@
   // review requested from the signed-in user — "all" (no filter) or "requested".
   const savedState = vscode.getState() || {};
 
-  // How much space a worktree card gets. "comfortable" is the original layout,
-  // one labelled block per subsystem. "compact" folds the header, git summary
-  // and PR rollup into two tight lines and hides the per-worktree actions until
-  // the card is expanded, so a panel with several worktrees fits on screen and
-  // an agent row is never far from the name of the worktree it belongs to.
-  // Persisted like the expand state, so the choice survives a reload.
-  let density = savedState.density === "compact" ? "compact" : "comfortable";
-  const isCompact = () => density === "compact";
-
-  // Worktree paths whose agent list is folded away inside an open compact card.
-  // Stored as the closed set rather than the open one, so the default is open
-  // and a worktree that gains its first agent shows it without being asked.
   // Independent of `expanded`: that says whether the card is open at all, this
   // says whether the rows inside it are, which is what a worktree running a
   // dozen agents needs when you still want its actions and its PR in reach.
@@ -201,7 +186,6 @@
   function persist() {
     vscode.setState({
       expanded: Array.from(expanded),
-      density,
       settingsNavCollapsed,
       branchPrune: branchFilters.prune,
       branchUsers: branchFilters.users.slice(),
@@ -499,13 +483,11 @@
             '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
             icons.terminal +
             "</span>" +
-            // The two counters. Compact wraps them so it can put them on a line
-            // of their own under the summary, which needs the full width now
-            // that it wraps rather than clipping; the roomy layout leaves them
-            // inline on the row where there is room for all three.
-            (isCompact() && (subChip || skillChip)
+            // The counters go on a line of their own under the summary, which
+            // needs the row's full width now that it wraps rather than clipping.
+            (subChip || skillChip
               ? '<span class="agent-chips">' + subChip + skillChip + "</span>"
-              : subChip + skillChip) +
+              : "") +
             '<span class="row-actions">' +
             '<button class="iconbtn" data-action="stopAgent" data-session="' +
             esc(a.sessionId) +
@@ -527,8 +509,8 @@
    * in the worktree, and the per-status breakdown. Zero-count statuses are
    * dropped rather than dimmed, and a single agent shows just its status dot —
    * the agent count next to it already says how many there are, so a "1"
-   * breakdown adds nothing. Shared by the comfortable Agents bar and the
-   * compact card header so a collapsed card reads the same in both densities.
+   * breakdown adds nothing. Shared by a card's meta line and the repo-wide
+   * summary, so the total and the per-card numbers are derived the same way.
    */
   function agentStats(agents, foreign) {
     const counts = { active: 0, waiting: 0, idle: 0 };
@@ -583,41 +565,6 @@
     return { subTotal, subStat, stats };
   }
 
-  /**
-   * Collapsible "Agents" bar at the bottom of a comfortable card: it toggles the
-   * agent list and carries the per-status counts.
-   */
-  function agentsBar(agents, path, foreign) {
-    const { subStat, stats } = agentStats(agents, foreign);
-
-    const hasActiveTerminal =
-      !!activeSessionId &&
-      agents.some((a) => a.sessionId === activeSessionId);
-    return (
-      '<div class="agents-bar' +
-      (hasActiveTerminal ? " terminal-open" : "") +
-      '" data-toggle="' +
-      esc(path) +
-      '" role="button" tabindex="0">' +
-      '<span class="chevron">' +
-      icons.chevron +
-      "</span>" +
-      '<span class="agents-bar-label">Agents</span>' +
-      '<span class="agents-bar-count">' +
-      agents.length +
-      "</span>" +
-      // Shown (via CSS) only while this worktree holds the active terminal, so
-      // a collapsed card still says its agent is the one being talked to.
-      '<span class="agents-bar-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
-      icons.terminal +
-      "</span>" +
-      subStat +
-      '<span class="agents-bar-stats">' +
-      stats +
-      "</span>" +
-      "</div>"
-    );
-  }
 
   /**
    * Scope the Source Control view to this worktree. Opt-in (Settings →
@@ -625,11 +572,11 @@
    * shown in Source Control (the scope is already set).
    * Labeled on every worktree (not just the active one) so toggling the
    * scope never shifts the layout; the active worktree's pill fills blue,
-   * making which worktree the diff view is on readable at a glance. The compact
-   * density drops the label — the button moves into the card's action row,
-   * where every control is an icon and the width is worth more than the word.
+   * making which worktree the diff view is on readable at a glance. Icon-only:
+   * it leads the header's run of icon buttons, where the width is worth more
+   * than the word.
    */
-  function scmScopeBtn(path, scmActive, compact) {
+  function scmScopeBtn(path, scmActive) {
     if (!lastData || !lastData.scmEnabled) return "";
     return (
       '<button class="iconbtn scm-scope' +
@@ -642,13 +589,12 @@
         : "Show only this worktree in Source Control") +
       '" aria-label="Show only this worktree in Source Control">' +
       icons.branch +
-      (compact ? "" : '<span class="scm-scope-label">Source Control</span>') +
       "</button>"
     );
   }
 
   /**
-   * The agent list inside an open compact card, behind a fold of its own. The
+   * The agent list inside an open card. The
    * card's own toggle governs everything in the body — the actions, the debug
    * rows and these — which is one control too few for a worktree running a dozen
    * agents: the only way to get the list out of the way was to close the card,
@@ -660,7 +606,7 @@
    * repeated on it — the meta line carries them two rows above, and they stay
    * visible when this is shut.
    */
-  function agentSection(path, agents, foreign) {
+  function agentSection(path, agents, foreign, agentBtn) {
     return (
       '<div class="agent-list">' +
       // A label, not a control. The list used to fold away behind it, which is
@@ -672,31 +618,35 @@
       // No count on it. The meta line above already carries the agent total
       // beside the live subagents and the per-status dots, where it can be read
       // against them; repeated here it was the same number twice on one card.
-      '<div class="agents-heading">Agents</div>' +
+      // New agent sits beside the heading, so the control that starts one is next
+      // to the list of what is already running rather than on a row of its own.
+      // It is the only per-worktree button left outside the menu: everything else
+      // is reached rarely enough that a menu entry is the right home, and this one
+      // is the opposite.
+      '<div class="agents-heading">' +
+      '<span class="agents-heading-label">Agents</span>' +
+      (agentBtn || "") +
+      "</div>" +
       agentRows(agents, foreign) +
       "</div>"
     );
   }
 
   /**
-   * Git working-tree summary line: diff totals and ahead/behind. `compact`
-   * drops the Source Control pill (the compact card renders it in its action
-   * row instead) and shortens "4 changes" to a counted dot, so the git summary
-   * and the PR rollup fit on one line together.
+   * Git working-tree summary line: diff totals and ahead/behind, with the change
+   * count as a counted dot rather than "4 changes", so it fits on one line
+   * beside the agent counts.
    */
-  function gitLine(g, path, scmActive, compact) {
-    const scopeBtn = compact ? "" : scmScopeBtn(path, scmActive, false);
-    if (!g) return scopeBtn ? '<div class="gitline">' + scopeBtn + "</div>" : "";
+  function gitLine(g) {
+    if (!g) return "";
     const segs = [];
     if (g.dirty)
       segs.push(
-        '<span class="seg dirty"' +
-          (compact
-            ? ' title="' + g.dirty + (g.dirty === 1 ? " change" : " changes") + '"'
-            : "") +
-          '><span class="gdot"></span>' +
+        '<span class="seg dirty" title="' +
           g.dirty +
-          (compact ? "" : g.dirty === 1 ? " change" : " changes") +
+          (g.dirty === 1 ? " change" : " changes") +
+          '"><span class="gdot"></span>' +
+          g.dirty +
           "</span>"
       );
     // Zero-value segments are hidden: the nonzero counts are the signal, and a
@@ -722,7 +672,7 @@
           icons.check +
           "Clean</span>"
       );
-    return '<div class="gitline">' + scopeBtn + segs.join("") + "</div>";
+    return '<div class="gitline">' + segs.join("") + "</div>";
   }
 
   // PR-state badge labels and the CSS class that colors them.
@@ -738,11 +688,15 @@
    * the state badge, then separate "Checks" and "Reviews" rows so the CI rollup
    * and the review decision don't read as one ambiguous run of checkmarks.
    * Rendered only when PR data is present (the integration is on and a PR
-   * exists). `compact` keeps the framed block but folds the two labelled rows
-   * into one and tightens the padding (see the branch below and the compact
-   * section of panel.css). The branches view calls this without the flag.
+   * exists).
+   *
+   * `stacked` keeps the two labelled rows one above the other, which is what the
+   * branches view wants: its rows are full editor width and it is not fighting
+   * for vertical space. A worktree card passes nothing and gets the side-by-side
+   * rollup and the tighter padding that goes with it - a card is in a sidebar,
+   * and the block is one thing about the branch either way.
    */
-  function prLine(pr, compact) {
+  function prLine(pr, stacked) {
     if (!pr) return "";
     const st = PR_STATE[pr.state] || PR_STATE.open;
     const plural = (n) => (n === 1 ? "" : "s");
@@ -886,12 +840,24 @@
         "</span>" +
         "</div>"
     );
-    // Compact keeps the block — the rollup reads as one thing, which is the
-    // point of framing it — and buys a row by putting the review and check runs
-    // side by side instead of one above the other. Both runs are mostly ticks
-    // and crosses, so each keeps its label: without one there is nothing to say
-    // which sequence is CI and which is the review decision.
-    if (compact) {
+    // A card buys a row by putting the review and check runs side by side instead
+    // of one above the other. Both runs are mostly ticks and crosses, so each
+    // keeps its label either way: without one there is nothing to say which
+    // sequence is CI and which is the review decision.
+    if (stacked) {
+      if (reviewSegs.length)
+        rows.push(
+          '<div class="pr-row"><span class="pr-row-label">Reviews</span>' +
+            reviewSegs.join("") +
+            "</div>"
+        );
+      if (checkSegs.length)
+        rows.push(
+          '<div class="pr-row"><span class="pr-row-label">Checks</span>' +
+            checkSegs.join("") +
+            "</div>"
+        );
+    } else {
       const group = (label, segs) =>
         '<span class="pr-group"><span class="pr-group-label">' +
         label +
@@ -905,24 +871,11 @@
             (checkSegs.length ? group("Checks", checkSegs) : "") +
             "</div>"
         );
-    } else {
-      if (reviewSegs.length)
-        rows.push(
-          '<div class="pr-row"><span class="pr-row-label">Reviews</span>' +
-            reviewSegs.join("") +
-            "</div>"
-        );
-      if (checkSegs.length)
-        rows.push(
-          '<div class="pr-row"><span class="pr-row-label">Checks</span>' +
-            checkSegs.join("") +
-            "</div>"
-        );
     }
 
     return (
       '<a class="prline' +
-      (compact ? " compact" : "") +
+      (stacked ? "" : " tight") +
       '" href="' +
       esc(pr.url) +
       '" title="' +
@@ -968,6 +921,10 @@
    * repos' worktree directories this one lives.
    */
   function worktreeNameRow(wt) {
+    // Not the primary worktree: its directory is the repository itself, whose
+    // name is already at the top of the panel, so the line would restate it on
+    // the one card that never needed it.
+    if (wt.isPrimary) return "";
     const base =
       String(wt.path || "")
         .split(/[\\/]/)
@@ -1001,10 +958,6 @@
 
   function card(wt) {
     const isCollapsed = !expanded.has(wt.path);
-    const badges = [];
-    if (wt.detached) badges.push('<span class="badge warn">detached</span>');
-    if (wt.locked) badges.push('<span class="badge warn">locked</span>');
-
     // The repository's own working directory, marked beside the name rather than
     // labelled beside it. It is true of exactly one card and never changes, so a
     // worded pill spent a badge line - and the width of one - restating something
@@ -1037,19 +990,16 @@
     // Subagents another worktree's agent is running in this one.
     const foreign = wt.subagents || [];
 
-    const compact = isCompact();
 
-    // Icon-only in compact, where it sits in the Agents bar among controls that
-    // are all icons; the comfortable card keeps the words, being the only thing
-    // on its row that is not an icon. The plus and the agent mark together are
-    // what says "another one of these", so both survive the label.
+    // Icon-only: it sits among controls that are all icons. The plus and the
+    // agent mark together are what say "another one of these", so both survive
+    // the label being dropped.
     const agentBtn =
       '<button class="act agent" data-action="agent" data-path="' +
       esc(wt.path) +
       '" data-tip="Start a Claude session in this worktree" aria-label="New agent">' +
       '<span class="agent-plus">+</span>' +
       icons.agentMark +
-      (compact ? "" : "<span>New agent</span>") +
       "</button>";
 
     // This worktree's branch on GitHub. Only when origin is a github.com remote
@@ -1091,43 +1041,10 @@
       icons.window +
       "</button>";
 
-    // Reach this worktree's files from this window. A worktree is not a
-    // workspace folder, so neither Find in Files nor Ctrl/Cmd+P covers it: these
-    // two scope those to the worktree instead of making you open (and then work
-    // across) a second window. They sit in the action row rather than the card
-    // header, which already carries four buttons on a narrow sidebar.
-    const searchBtn =
-      '<button class="act ghost iconact" data-action="searchWorktree" data-path="' +
-      esc(wt.path) +
-      '" data-tip="Search this worktree\'s contents (Find in Files, scoped to it)" aria-label="Search this worktree">' +
-      icons.search +
-      "</button>";
-    const findFileBtn =
-      '<button class="act ghost iconact" data-action="findWorktreeFile" data-path="' +
-      esc(wt.path) +
-      '" data-tip="Open a file from this worktree by name" aria-label="Find file in this worktree">' +
-      icons.fileSearch +
-      "</button>";
-
-    // Run and Debug for this worktree. Only rendered when the worktree has
-    // launch configurations of its own; a repo with no debug setup gets no
-    // button. It shares the action row with New agent (which is right-aligned),
-    // so it fills space the card already had rather than adding a row.
+    // Searching a worktree, finding a file in it and running its launch configs
+    // are all menu entries now (see openCardMenu). The sessions this panel
+    // started still get their own rows, so the list is still needed here.
     const debugSessions = wt.debugSessions || [];
-    const debugBtn = wt.canDebug
-      ? '<button class="act ghost debug' +
-        (debugSessions.length ? " running" : "") +
-        '" data-action="debugWorktree" data-path="' +
-        esc(wt.path) +
-        '" data-tip="' +
-        (debugSessions.length
-          ? "Start another launch configuration in this worktree"
-          : "Run a launch configuration from this worktree (with or without debugging)") +
-        '" aria-label="Run and Debug">' +
-        icons.debug +
-        (compact ? "" : "<span>Debug</span>") +
-        "</button>"
-      : "";
 
     // Rows for the sessions this panel started. VS Code's debug toolbar can stop
     // them too, but it acts on the one session it considers active, so the card
@@ -1183,176 +1100,133 @@
 
     const shell = (inner) =>
       '<div class="card' +
-      (compact ? " compact" : "") +
       (hasActiveTerminal ? " terminal-open" : "") +
       (isCollapsed ? " collapsed" : "") +
       '">' +
       inner +
       "</div>";
 
-    if (compact) {
-      // One sticky header line, one meta line, and the agents. The header is the
-      // expand toggle (there is no separate Agents bar to click) and it stays
-      // pinned while its own agent rows scroll under it, so a row is never
-      // separated from the name of the worktree it belongs to — which is the
-      // whole point of the density: no scrolling back up to check whose agent
-      // you are about to click.
-      const { subTotal, subStat, stats } = agentStats(agents, foreign);
-      const countStat =
-        agents.length || subTotal
-          ? '<span class="meta-count" title="' +
-            agents.length +
-            " agent" +
-            (agents.length === 1 ? "" : "s") +
-            ' in this worktree">' +
-            icons.agentMark +
-            agents.length +
-            "</span>"
-          : "";
-      const git = gitLine(wt.git, wt.path, wt.scmActive, true);
+    // One sticky header line, one meta line, and the agents. The header is the
+    // expand toggle, and it stays pinned while its own agent rows scroll under
+    // it, so a row is never separated from the name of the worktree it belongs
+    // to - no scrolling back up to check whose agent you are about to click.
+    const { subTotal, subStat, stats } = agentStats(agents, foreign);
+    const countStat =
+      agents.length || subTotal
+        ? '<span class="meta-count" title="' +
+          agents.length +
+          " agent" +
+          (agents.length === 1 ? "" : "s") +
+          ' in this worktree">' +
+          icons.agentMark +
+          agents.length +
+          "</span>"
+        : "";
+    const git = gitLine(wt.git);
 
-      // The meta line carries two unrelated readings of the same worktree - what
-      // is running in it, and what its working tree looks like - so they sit as
-      // two groups at opposite ends of the line rather than as one
-      // undifferentiated run of glyphs. Either side can be absent (a clean
-      // worktree with no agents, an agent working on a worktree with nothing to
-      // report).
-      //
-      // The agents lead. They are the reading the panel exists for, and the left
-      // edge is where a column of cards is scanned; the git totals hold the right
-      // edge against them. Plain flex does the rest: an auto margin applies per
-      // flex line, so when the panel is too narrow to hold both, the totals wrap
-      // to a row of their own and stay right-aligned there.
-      const agentGroup = countStat + subStat + stats;
-      const leftGroup = agentGroup + stateFlags;
-      const meta =
-        (leftGroup ? '<span class="meta-stats">' + leftGroup + "</span>" : "") + git;
+    // The meta line carries two unrelated readings of the same worktree - what
+    // is running in it, and what its working tree looks like - so they sit as
+    // two groups at opposite ends of the line rather than as one
+    // undifferentiated run of glyphs. Either side can be absent (a clean
+    // worktree with no agents, an agent working on a worktree with nothing to
+    // report).
+    //
+    // The agents lead. They are the reading the panel exists for, and the left
+    // edge is where a column of cards is scanned; the git totals hold the right
+    // edge against them. Plain flex does the rest: an auto margin applies per
+    // flex line, so when the panel is too narrow to hold both, the totals wrap
+    // to a row of their own and stay right-aligned there.
+    //
+    // The terminal glyph closes the group. It is the one item here that is about
+    // you rather than about the worktree - which of these cards you are typing
+    // into - so it sits at the end of the run instead of leading it from a column
+    // of its own, and the counts and flags keep a left edge that does not move
+    // between cards.
+    const terminalMark =
+      '<span class="meta-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
+      icons.terminal +
+      "</span>";
+    const agentGroup = countStat + subStat + stats;
+    const leftGroup = agentGroup + stateFlags;
+    const meta =
+      (leftGroup
+        ? '<span class="meta-stats">' + leftGroup + terminalMark + "</span>"
+        : "") + git;
 
-
-      return shell(
-        '<div class="card-head' +
-          (hasActiveTerminal ? " terminal-open" : "") +
-          '" data-toggle="' +
-          esc(wt.path) +
-          '" role="button" tabindex="0" aria-expanded="' +
-          (isCollapsed ? "false" : "true") +
-          '" data-tip="' +
-          esc(wt.path) +
-          '">' +
-          '<span class="chevron">' +
-          icons.chevron +
-          "</span>" +
-          // The name and the terminal glyph, as inline content rather than as
-          // flex items: a branch name too long for the line wraps, and the glyph
-          // follows the last word instead of floating beside a two-line block.
-          '<span class="head-main">' +
-          primaryMark +
-          '<span class="branch">' +
-          esc(wt.name) +
-          "</span>" +
-          "</span>" +
-          // The actions pinned to the header, held against the right edge and
-          // kept on the name's first line however far the name wraps. Three
-          // buttons only: past about that
-          // many identically framed icons the run stops having a shape, nothing
-          // in it is findable faster than anything else, and the name — the one
-          // thing you scan a card for — starts wrapping to pay for them. So this
-          // holds the three that act on the worktree without going into it —
-          // switch its branch, re-read it, delete it — and everything you would
-          // open it to do lives in the body. Switch branch leads them, next to
-          // the name it rewrites. Delete stays last, as it is in the comfortable
-          // header — destructive actions sit at the end of a run, and the
-          // confirmation modal guards a near-miss.
-          '<span class="head-actions">' +
-          // Source Control scope leads the run: it is the one control here that
-          // is also a reading, and the badge below says the same thing, so the
-          // two line up down the card's left-to-right order rather than facing
-          // each other across the name.
-          scmScopeBtn(wt.path, wt.scmActive, true) +
-          // Switch branch, refresh, open in a window and delete, behind one
-          // caret. Four buttons that are each reached rarely - you switch a
-          // branch or delete a worktree once in its life - were taking the whole
-          // name line to sit there being available. A menu costs one extra click
-          // on the rare path and gives the name back the width on every card.
-          '<button class="act ghost iconact card-menu-btn" data-tool="cardMenu" data-path="' +
-          esc(wt.path) +
-          '" data-tip="More actions for this worktree" aria-label="More actions"' +
-          ' aria-haspopup="menu" aria-expanded="false">' +
-          icons.caret +
-          "</button>" +
-          "</span>" +
-          "</div>" +
-          // The meta line leads with the column the chevron sits in, so the
-          // terminal glyph has a place of its own directly under it rather than
-          // trailing the branch name. Shown via CSS only while this card holds
-          // the terminal; the cell is always there, so the line's content keeps
-          // the same left edge either way.
-          (meta
-            ? '<div class="card-meta">' +
-              '<span class="meta-gutter">' +
-              '<span class="meta-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
-              icons.terminal +
-              "</span>" +
-              "</span>" +
-              meta +
-              "</div>"
-            : "") +
-          prLine(wt.pr, true) +
-          '<div class="card-body">' +
-          worktreeNameRow(wt) +
-          debugRows +
-          // The ways into the worktree - re-read it, search it, find a file in
-          // it, debug it, open it in a window - and New agent at the far right.
-          // Directly above the Agents section, so the control that starts one
-          // sits against the list of what is already running. Inside the body:
-          // the header's own run holds what acts on the branch from outside, and
-          // these are the reasons to have opened the card.
-          '<div class="card-tools">' +
-          searchBtn +
-          findFileBtn +
-          debugBtn +
-          agentBtn +
-          "</div>" +
-          agentSection(wt.path, agents, foreign) +
-          "</div>"
-      );
-    }
 
     return shell(
-      '<div class="card-top">' +
+      '<div class="card-head' +
+        (hasActiveTerminal ? " terminal-open" : "") +
+        '">' +
+        // Only the chevron and the name expand the card, not the whole header
+        // row. The actions at the right end are their own targets, and a miss
+        // between them used to fold the card you were reaching into; the divider
+        // before them draws where the toggle stops so the boundary is something
+        // you can see rather than something you learn by mis-clicking.
+        //
+        // No tooltip here. It carried the worktree's full path, which meant
+        // hovering anywhere on the header - the whole width of the card's
+        // primary click target - popped a tip over the card above it. The path
+        // is on the Worktree line in the body, on the thing it describes.
+        '<div class="head-toggle" data-toggle="' +
+        esc(wt.path) +
+        '" role="button" tabindex="0" aria-expanded="' +
+        (isCollapsed ? "false" : "true") +
+        '">' +
+        '<span class="chevron">' +
+        icons.chevron +
+        "</span>" +
+        // The name and the terminal glyph, as inline content rather than as
+        // flex items: a branch name too long for the line wraps, and the glyph
+        // follows the last word instead of floating beside a two-line block.
+        '<span class="head-main">' +
         primaryMark +
         '<span class="branch">' +
         esc(wt.name) +
         "</span>" +
-        editBranchBtn +
-        ghLink +
-        '<span class="badges">' +
-        badges.join("") +
         "</span>" +
-        refreshBtn +
-        openWindowBtn +
-        deleteBtn +
         "</div>" +
-        '<hr class="card-sep" />' +
-        '<div class="meta-row">' +
-        gitLine(wt.git, wt.path, wt.scmActive, false) +
-        "</div>" +
-        worktreeNameRow(wt) +
-        '<div class="agent-action-row">' +
-        '<span class="row-lead">' +
-        searchBtn +
-        findFileBtn +
-        debugBtn +
+        // The actions pinned to the header, held against the right edge and
+        // kept on the name's first line however far the name wraps. Three
+        // buttons only: past about that
+        // many identically framed icons the run stops having a shape, nothing
+        // in it is findable faster than anything else, and the name — the one
+        // thing you scan a card for — starts wrapping to pay for them. So this
+        // holds the three that act on the worktree without going into it —
+        // switch its branch, re-read it, delete it — and everything you would
+        // open it to do lives in the body. Switch branch leads them, next to
+        // the name it rewrites — destructive actions sit at the end of a run,
+        // and the confirmation modal guards a near-miss.
+        '<span class="head-actions">' +
+        // Source Control scope leads the run: it is the one control here that
+        // is also a reading, and the badge below says the same thing, so the
+        // two line up down the card's left-to-right order rather than facing
+        // each other across the name.
+        scmScopeBtn(wt.path, wt.scmActive) +
+        // Switch branch, refresh, open in a window and delete, behind one
+        // caret. Four buttons that are each reached rarely - you switch a
+        // branch or delete a worktree once in its life - were taking the whole
+        // name line to sit there being available. A menu costs one extra click
+        // on the rare path and gives the name back the width on every card.
+        '<button class="act ghost iconact card-menu-btn" data-tool="cardMenu" data-path="' +
+        esc(wt.path) +
+        '" data-tip="More actions for this worktree" aria-label="More actions"' +
+        ' aria-haspopup="menu" aria-expanded="false">' +
+        icons.caret +
+        "</button>" +
         "</span>" +
-        agentBtn +
         "</div>" +
-        debugRows +
-        prLine(wt.pr, false) +
-        agentsBar(agents, wt.path, foreign) +
+        // Indented to the branch name above it, like the Worktree line below, so
+        // the card's facts share one left edge.
+        (meta ? '<div class="card-meta">' + meta + "</div>" : "") +
+        prLine(wt.pr) +
         '<div class="card-body">' +
-        agentRows(agents, foreign) +
+        worktreeNameRow(wt) +
+        debugRows +
+        agentSection(wt.path, agents, foreign, agentBtn) +
         "</div>"
     );
+
   }
 
   /**
@@ -1409,22 +1283,15 @@
       esc(data.repoName || "Repository") +
       "</span>" +
       '<span class="tools">' +
-      '<button class="tbtn icon" data-action="agentWorktree" data-tip="New Agent &amp; Worktree: create a worktree with Claude (claude -w) and start an agent in it">' +
+      // Ghost like the rest of the toolbar. It wore the filled treatment as the
+      // primary action, which made it the one saturated block in a row of quiet
+      // outlines - and the panel's accent now means "this is the worktree you are
+      // typing into", which this button is not.
+      '<button class="tbtn ghost icon" data-action="agentWorktree" data-tip="New Agent &amp; Worktree: create a worktree with Claude (claude -w) and start an agent in it">' +
       icons.agentWorktree +
       "</button>" +
       '<button class="tbtn ghost" data-action="openBranches" data-tip="Branches: list every branch and create a worktree from one">' +
       icons.branch +
-      "</button>" +
-      '<button class="tbtn ghost' +
-      (isCompact() ? " active" : "") +
-      '" data-tool="density" data-tip="' +
-      (isCompact()
-        ? "Compact view is on: one line per worktree, actions inside the card. Click for the roomier layout."
-        : "Compact view: fold each worktree down to a line or two and tuck its actions inside the card") +
-      '" aria-pressed="' +
-      (isCompact() ? "true" : "false") +
-      '">' +
-      icons.density +
       "</button>" +
       collapseAllBtn(data) +
       "</span>" +
@@ -1498,36 +1365,26 @@
   }
 
   /**
-   * Fold or unfold one compact card's agent list. Like `toggle`, this flips a
-   * class on the DOM it already has rather than re-rendering: the rows are
-   * unchanged, only their visibility, and a re-render would cost the panel its
-   * scroll position on every click.
+   * Expand or collapse one card. Flips a class on the DOM it already has rather
+   * than re-rendering: the rows are unchanged, only their visibility, and a
+   * re-render would cost the panel its scroll position on every click.
    */
-
   function toggle(path) {
     if (expanded.has(path)) expanded.delete(path);
     else expanded.add(path);
     persist();
     const el = root.querySelector('[data-toggle="' + cssEscape(path) + '"]');
-    if (el && el.parentElement) el.parentElement.classList.toggle("collapsed");
-    // The compact header is the card's sole disclosure control, so it carries
-    // the state for screen readers; the class toggle above never re-renders it.
+    // closest, not parentElement: the toggle is the name half of the header, so
+    // the card it folds is two levels up.
+    const card = el && el.closest(".card");
+    if (card) card.classList.toggle("collapsed");
+    // The header is the card's sole disclosure control, so it carries the state
+    // for screen readers; the class toggle above never re-renders it.
     if (el && el.hasAttribute("aria-expanded"))
       el.setAttribute("aria-expanded", expanded.has(path) ? "true" : "false");
     syncCollapseAllBtn();
   }
 
-  /**
-   * Switch the card layout. The two densities emit different markup, so this
-   * re-renders rather than toggling a class; the expand state is untouched, so
-   * whatever was open stays open on the other side of the switch.
-   */
-  function setDensity(next) {
-    if (density === next) return;
-    density = next;
-    persist();
-    if (lastData) render(lastData);
-  }
 
   function collapseAll() {
     const wts = (lastData && lastData.worktrees) || [];
@@ -1600,13 +1457,24 @@
         "</span>View branch on GitHub</a>"
       : "";
 
-    // Three groups: what changes the worktree, where to open it, and the one
-    // thing that destroys it. Delete is also drawn in the error colour - in a
-    // list of plain rows nothing else marks it out, and the rule alone is easy to
-    // read past. The confirmation modal is still what actually guards it.
+    // Four groups: what changes the worktree, what reaches into it, where to
+    // open it, and the one thing that destroys it. Delete is also drawn in the
+    // error colour - in a list of plain rows nothing else marks it out, and the
+    // rule alone is easy to read past. The confirmation modal is still what
+    // actually guards it.
+    //
+    // Debug is here only when the worktree has launch configurations, the same
+    // condition its button carried; a menu entry that cannot do anything is
+    // worse than an absent one, since you have to open the menu to find out.
     const items =
       item("changeBranch", icons.edit, "Switch branch&hellip;") +
       item("refreshWorktree", icons.refresh, "Refresh") +
+      '<div class="card-menu-sep"></div>' +
+      item("searchWorktree", icons.search, "Search this worktree&hellip;") +
+      item("findWorktreeFile", icons.fileSearch, "Find file&hellip;") +
+      (wt.canDebug
+        ? item("debugWorktree", icons.debug, "Run and Debug&hellip;")
+        : "") +
       '<div class="card-menu-sep"></div>' +
       item("openWindow", icons.window, "Open in new window") +
       ghItem +
@@ -1713,7 +1581,7 @@
   // The tab rail, folded down to its icons. A sidebar is narrow enough that the
   // labelled rail can take a third of the width, and the settings bodies are
   // text; folding it gives that back without moving the tabs somewhere else.
-  // Persisted like the density, so the choice survives a reload.
+  // Persisted like the expand state, so the choice survives a reload.
   let settingsNavCollapsed = savedState.settingsNavCollapsed === true;
   let lastGhSig = "";
   // Once a token is connected, the token input and its how-to text are hidden
@@ -2776,7 +2644,7 @@
       "</span>" +
       "</div>" +
       meta +
-      (pr ? prLine(pr) : "") +
+      (pr ? prLine(pr, true) : "") +
       "</div>"
     );
   }
@@ -2987,11 +2855,6 @@
       openCardMenu(cardMenuBtn, cardMenuBtn.getAttribute("data-path") || "");
       return;
     }
-    const densityTool = e.target.closest("[data-tool='density']");
-    if (densityTool) {
-      setDensity(isCompact() ? "comfortable" : "compact");
-      return;
-    }
     // Branches view: filter/sort dropdowns and selections (webview-only).
     if (VIEW === "branches") {
       const pageBtn = e.target.closest("[data-page]");
@@ -3182,11 +3045,12 @@
       });
       return;
     }
-    // The expand toggle: the Agents bar in the comfortable layout, the card
-    // header itself in the compact one. Both carry data-toggle. Controls inside
-    // the header are excluded — the GitHub link is a plain anchor the webview
-    // lets through to the browser, so it never reaches the data-action branch
-    // above and would otherwise toggle the card on its way out.
+    // The expand toggle: the header's name half carries data-toggle, so the
+    // actions beside it are outside it and no longer need excluding by their
+    // own right. Controls inside it are still excluded — an anchor the webview
+    // lets through to the browser never
+    // reaches the data-action branch above and would otherwise toggle the card
+    // on its way out.
     const bar = e.target.closest("[data-toggle]");
     if (bar && !e.target.closest("a, button"))
       toggle(bar.getAttribute("data-toggle"));
@@ -3274,8 +3138,8 @@
 
   root.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
-    // Not when a control inside the header has focus: the compact header holds
-    // Delete and the GitHub link, and both fire their own click on Enter/Space.
+    // Not when a control inside the header has focus: it holds the scope button
+    // and the actions caret, which fire their own click on Enter/Space.
     const bar = e.target.closest("[data-toggle]");
     if (bar && !e.target.closest("button, a")) {
       e.preventDefault();
@@ -3352,28 +3216,31 @@
       row.classList.toggle("terminal-open", on);
       if (on) activeRow = row;
     });
-    // Three markers move together: the card's own outline, and the tinted bar -
-    // the Agents bar in the comfortable layout, the card header in the compact
-    // one, only one of which exists. The card is in this list because it is what
+    // Two markers move together: the card's own outline and the tinted card
+    // header. The card is in this list because it is what
     // carries the outline; left out, the outline only caught up on the next full
     // render, which waits for a data push, so switching terminals highlighted
     // the row immediately and the card seconds later.
     root
-      .querySelectorAll(
-        ".card.terminal-open, .agents-bar.terminal-open, .card-head.terminal-open"
-      )
+      .querySelectorAll(".card.terminal-open, .card-head.terminal-open")
       .forEach((el) => el.classList.remove("terminal-open"));
     const card = activeRow && activeRow.closest(".card");
     if (card) card.classList.add("terminal-open");
-    const bar = card && card.querySelector(".agents-bar, .card-head");
-    if (bar) bar.classList.add("terminal-open");
+    const head = card && card.querySelector(".card-head");
+    if (head) head.classList.add("terminal-open");
   }
 
   // --- Custom hover tooltip --------------------------------------------------
   // Native `title` tooltips have a long, browser-fixed delay. For the agent
-  // summary we want a snappier one, so elements carry `data-tip` and we render
-  // our own tooltip on document.body (no clipping by card overflow) after 200ms.
-  const TIP_DELAY = 200;
+  // summary we want our own, so elements carry `data-tip` and we render it on
+  // document.body (no clipping by card overflow) after a wait.
+  //
+  // 400ms, up from 200. A card is a dense run of small glyphs and the pointer
+  // crosses several of them on the way to the one you want; at 200ms the tips
+  // fired on the way past, so moving across a card set off a sequence of popups
+  // for things you were not asking about. The longer wait still beats the native
+  // delay and now takes a deliberate stop to trigger.
+  const TIP_DELAY = 400;
   let tipEl = null;
   let tipTimer = null;
 

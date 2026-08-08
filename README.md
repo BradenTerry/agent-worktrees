@@ -27,12 +27,12 @@ its running agents in one view.
   house beside its name; detached and locked show as glyphs on the card's summary
   line. Per-card refresh forces that worktree's PR/CI and re-gathers git status
   (the gather itself covers every card - only the PR call is scoped).
-- **[Compact view](docs/compact-view.md)**, a second card density toggled from the
-  toolbar and persisted with the expand state. It folds the header and git summary
-  into two lines and tightens the PR block (which keeps its frame) to three, puts
-  the rarely-reached per-worktree actions behind a caret menu and the rest in a row
-  inside the card, and makes the header both the expand toggle and a sticky one, so
-  an agent row is never scrolled away from the name of the worktree it belongs to.
+- **[Card layout](docs/card-layout.md)**: two lines at rest, the PR block
+  tightened to three, every per-worktree action behind a caret menu, and a header
+  that is both the expand toggle and a sticky one, so an agent row is never
+  scrolled away from the name of the worktree it belongs to. The panel used to
+  ship a second, roomier density with a toolbar toggle; it was removed rather than
+  maintained twice.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
   upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file
@@ -170,7 +170,7 @@ The rationale behind the parts that are easy to get wrong twice:
 
 | Doc | Covers |
 | --- | --- |
-| [Compact view](docs/compact-view.md) | The second card density: what it folds together, the sticky header, and how one `card()` builds both |
+| [Card layout](docs/card-layout.md) | How `card()` lays out a worktree: what folds together, the sticky header, the actions menu |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the two status tiers, the agent-only path, why there is no `**/*` watcher, and the Performance tab |

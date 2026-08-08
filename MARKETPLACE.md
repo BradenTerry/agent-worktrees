@@ -21,8 +21,8 @@ single view.
 - **Run or debug a worktree's launch configuration** without opening it in another
   window, and stop the session from the same card.
 - **Work every branch in the repo** from a dedicated Branches tab.
-- **Switch to a compact view** when the panel gets busy: the same worktrees in
-  about half the height, with their names pinned above their agents.
+- **Read four worktrees in the height one used to take**, with each card's name
+  pinned above its own agents while you scroll.
 
 ## Agents
 
@@ -177,17 +177,17 @@ first. The panel adds a **Debug** button to each card instead.
 The button appears only on worktrees that have launch configurations, so a repo
 with no debug setup gets no extra clutter.
 
-## A compact view for when the panel gets busy
+## Cards built to be scanned
 
-Three or four worktrees, each with agents and a pull request, and the panel
-becomes something you scroll rather than something you scan. The toolbar's
-density button folds every card down.
+Three or four worktrees, each with agents and a pull request, and a panel of
+roomy cards becomes something you scroll rather than something you scan. Every
+card is two lines at rest, and one click shuts them all.
 
-<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/compact.png" alt="The same four worktrees at compact density: one header line with agent counts and status, one line with git status and the PR rollup, then the agent rows" width="380">
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/collapsed.png" alt="Four worktrees with every card collapsed: one header line each with agent counts, git totals and the PR rollup" width="380">
 
-- **The same worktrees in well under half the height** once you collapse them.
-  Nothing is dropped: the branch, its badges, the agent and subagent counts, the
-  status dots and the git totals fit on two lines instead of seven.
+- **Four worktrees in the height one used to take.** Nothing is dropped: the
+  branch, the agent and subagent counts, the status dots and the git totals fit
+  on two lines.
 - **The pull request stays one block.** Title, state, auto-merge or out-of-date,
   reviews and CI checks are still framed together as one thing about the branch,
   just tighter - reviews and checks share a line, split by a rule so the two sets
@@ -196,12 +196,17 @@ density button folds every card down.
   its own agent rows, so the row you are about to click always has the name of
   its worktree directly above it. No more revealing a terminal from the card
   below the one you meant.
-- **The name line stays a name line.** Two controls sit on it: the Source Control
-  scope pill, and a caret whose menu holds switch branch, refresh, open in a new
-  window, view the branch on GitHub, and delete. Search, find file, Debug and
-  **New agent** are a row inside the card, right above its agents. Branch names get
-  the width instead of a row of icons, and nothing needs the card expanded to be
-  reached.
+- **Click the name to open a card, not the whole line.** A vertical rule marks
+  where the toggle stops; the buttons past it are their own targets, so a click
+  that lands between them no longer folds the card you were reaching into. The
+  highlight that follows your pointer shows exactly what the click will hit.
+- **The name line stays a name line.** Two controls sit past that rule: the
+  Source Control scope pill, and a caret whose menu holds everything else a
+  worktree can do: switch
+  branch, refresh, search it, find a file in it, run or debug it, open it in a new
+  window, view the branch on GitHub, delete it. **New agent** sits beside the
+  Agents heading, next to the list of the ones already running. Branch names get
+  the width instead of a row of icons.
 - **The worktree's own name, labelled, inside the card.** Cards are titled by
   their branch, which is what you scan for; the directory the worktree actually
   lives in is a `Worktree` line in the body, with the full path on hover.
