@@ -202,6 +202,9 @@ density button folds every card down.
   **New agent** are a row inside the card, right above its agents. Branch names get
   the width instead of a row of icons, and nothing needs the card expanded to be
   reached.
+- **The worktree's own name, labelled, inside the card.** Cards are titled by
+  their branch, which is what you scan for; the directory the worktree actually
+  lives in is a `Worktree` line in the body, with the full path on hover.
 - **No pills for things a glyph can say.** Your repository's own working directory
   gets a small house beside its name; a locked or detached worktree gets a padlock
   or a broken chain next to its agent counts. The row those words used to need is

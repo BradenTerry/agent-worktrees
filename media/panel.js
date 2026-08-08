@@ -958,30 +958,29 @@
   }
 
   /**
-   * The worktree's own folder name, beside the branch when the two differ. The
-   * card is titled by the branch (worktreeData sends `name` as the branch when
-   * there is one), which is the right primary key - but a worktree's directory
-   * can be called anything, and when it is, "which folder is this" is not
-   * answerable from the card at all.
+   * The worktree's own directory name, as a labelled line in the card. The header
+   * is titled by the branch - worktreeData sends `name` as the branch when there
+   * is one - which is the right thing to scan a column of cards for; this answers
+   * the other question, which directory on disk the card is, and it is labelled
+   * rather than left as a bare second name sitting next to the first.
    *
-   * Left off when it would only repeat: a folder named after its branch, which
-   * is what `claude -w` produces, and the primary worktree, whose folder is the
-   * repository already named at the top of the panel.
+   * The full path is the tooltip: the name alone does not say where among several
+   * repos' worktree directories this one lives.
    */
-  function folderNote(wt) {
-    if (wt.isPrimary) return "";
+  function worktreeNameRow(wt) {
     const base =
       String(wt.path || "")
         .split(/[\\/]/)
         .filter(Boolean)
         .pop() || "";
-    if (!base || base === wt.name) return "";
+    if (!base) return "";
     return (
-      '<span class="head-folder" data-tip="Worktree folder: ' +
+      '<div class="worktree-name" data-tip="' +
       esc(wt.path) +
-      '">' +
+      '"><span class="worktree-name-label">Worktree</span>' +
+      '<span class="worktree-name-value">' +
       esc(base) +
-      "</span>"
+      "</span></div>"
     );
   }
 
@@ -1251,7 +1250,6 @@
           '<span class="branch">' +
           esc(wt.name) +
           "</span>" +
-          folderNote(wt) +
           "</span>" +
           // The actions pinned to the header, held against the right edge and
           // kept on the name's first line however far the name wraps. Three
@@ -1301,6 +1299,7 @@
             : "") +
           prLine(wt.pr, true) +
           '<div class="card-body">' +
+          worktreeNameRow(wt) +
           debugRows +
           // The ways into the worktree - re-read it, search it, find a file in
           // it, debug it, open it in a window - and New agent at the far right.
@@ -1325,7 +1324,6 @@
         '<span class="branch">' +
         esc(wt.name) +
         "</span>" +
-        folderNote(wt) +
         editBranchBtn +
         ghLink +
         '<span class="badges">' +
@@ -1339,6 +1337,7 @@
         '<div class="meta-row">' +
         gitLine(wt.git, wt.path, wt.scmActive, false) +
         "</div>" +
+        worktreeNameRow(wt) +
         '<div class="agent-action-row">' +
         '<span class="row-lead">' +
         searchBtn +

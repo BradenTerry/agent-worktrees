@@ -2203,19 +2203,30 @@ button.busy {
   min-width: 0;
   line-height: 1.35;
 }
-/* The worktree's folder name, when it differs from the branch the card is titled
-   by. Secondary weight and colour: it answers "which directory" for someone who
-   needs it, without competing with the branch, which is what the card is
-   scanned for. Inline, so it wraps with the name rather than beside a two-line
-   block. */
-.head-folder {
+/* The worktree's own directory name, labelled, as a line of the card rather than
+   a bare second name beside the branch. The label is the secondary half and takes
+   the muted colour; the name itself is content, so it takes the foreground - a
+   directory name is not decoration and 11px grey-on-grey is not readable enough
+   for something you might be copying. */
+.worktree-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
   font-size: 11px;
-  font-weight: 400;
+}
+.worktree-name-label {
+  flex: 0 0 auto;
   color: var(--vscode-descriptionForeground);
 }
-.card.compact .head-folder {
-  margin-left: 5px;
-  vertical-align: 0;
+.worktree-name-value {
+  color: var(--vscode-foreground);
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+/* Indented to the branch name, like the rows above it. */
+.card.compact .worktree-name {
+  padding: 0 6px 4px 19px;
 }
 .card.compact .branch {
   display: inline;

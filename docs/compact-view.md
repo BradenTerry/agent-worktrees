@@ -152,17 +152,20 @@ The dot fades while a pseudo-element ring expands, both animating only transform
 and opacity, so an infinite pulse stays on the compositor rather than repainting
 each frame.
 
-### The folder name
+### The worktree name
 
 The card is titled by the branch - `worktreeData` sends `name` as the branch when
-there is one - which is the right primary key. But a worktree's directory can be
-called anything, and when it is, "which folder is this" is not answerable from the
-card at all. So the folder name sits beside the branch in secondary weight and
-colour, derived in the webview from `wt.path` rather than added to the payload.
+there is one - which is the right thing to scan a column of cards for. Which
+*directory* the card is was then not answerable from it at all, so the card body
+carries a labelled `Worktree` line, derived in the webview from `wt.path` rather
+than added to the payload.
 
-It is left off where it would only repeat: a folder named after its branch, which
-is what `claude -w` produces, and the primary worktree, whose folder is the
-repository already named at the top of the panel.
+Labelled, and in the body, rather than a bare second name beside the branch: two
+names side by side in a header is a guessing game about which is which, and the
+directory is not what the card is scanned for. The label takes the muted colour
+and the name takes the foreground - a directory name is something you might be
+reading off to type somewhere, not decoration. The full path is the tooltip, since
+the name alone does not say which repo's worktree directory it sits in.
 
 ### Which card is outlined
 
