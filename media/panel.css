@@ -2236,20 +2236,20 @@ button.busy {
   width: 11px;
   height: 11px;
 }
-/* Reviews and checks share a row. They stay two runs with a rule between them,
-   so the CI checkmarks and the review checkmarks are never read as one
-   sequence - which is the whole reason the roomy layout labels two rows. */
+/* Reviews and checks share a row, side by side rather than stacked. Both runs
+   are mostly ticks and crosses, so each keeps the label the roomy layout gives
+   it: it is the label, not the position, that says which sequence is CI and
+   which is the review decision. */
 .prline.compact .pr-rollup {
-  gap: 8px;
+  gap: 4px 14px;
 }
 .prline.compact .pr-group {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.prline.compact .pr-group-sep {
-  align-self: stretch;
-  border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+.prline.compact .pr-group-label {
+  color: var(--vscode-descriptionForeground);
 }
 
 /* --- Body: actions, then the agents, on a rail back to the header --------- */
@@ -2380,13 +2380,30 @@ button.busy {
   overflow-wrap: break-word;
   line-height: 1.35;
 }
-/* The chips and the stop button stay on the first line beside the dot. */
+/* Aligned to the summary's first line, not centred against the whole block. */
 .card.compact .agent-row .status-dot,
 .card.compact .agent-row .terminal-chip,
-.card.compact .agent-row .subagent-count,
-.card.compact .agent-row .skill-chip,
 .card.compact .agent-row .row-actions {
   margin-top: 2px;
+}
+/* The subagent and skill counters drop to a line of their own beneath the
+   summary, which now needs the row's full width. `order` is what puts them
+   after the stop button in flow while leaving them last visually: a full-basis
+   item declared before it would push the button onto a third line. */
+.card.compact .agent-row {
+  flex-wrap: wrap;
+}
+.card.compact .agent-row .row-actions {
+  order: 1;
+}
+.card.compact .agent-chips {
+  order: 2;
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  /* Indented past the status dot, so they hang under the summary they count. */
+  margin: 1px 0 0 14px;
 }
 .card.compact .subagent-row {
   margin-left: 10px;

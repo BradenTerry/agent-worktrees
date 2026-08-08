@@ -475,8 +475,13 @@
             '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
             icons.terminal +
             "</span>" +
-            subChip +
-            skillChip +
+            // The two counters. Compact wraps them so it can put them on a line
+            // of their own under the summary, which needs the full width now
+            // that it wraps rather than clipping; the roomy layout leaves them
+            // inline on the row where there is room for all three.
+            (isCompact() && (subChip || skillChip)
+              ? '<span class="agent-chips">' + subChip + skillChip + "</span>"
+              : subChip + skillChip) +
             '<span class="row-actions">' +
             '<button class="iconbtn" data-action="stopAgent" data-session="' +
             esc(a.sessionId) +
@@ -871,27 +876,22 @@
         "</div>"
     );
     // Compact keeps the block — the rollup reads as one thing, which is the
-    // point of framing it — and buys its two saved rows by merging the review
-    // and check runs onto one line. They stay two runs, separated by a rule, so
-    // the CI checkmarks and the review checkmarks still cannot be read as one
-    // ambiguous sequence; the labels move to the segments' own titles.
+    // point of framing it — and buys a row by putting the review and check runs
+    // side by side instead of one above the other. Both runs are mostly ticks
+    // and crosses, so each keeps its label: without one there is nothing to say
+    // which sequence is CI and which is the review decision.
     if (compact) {
+      const group = (label, segs) =>
+        '<span class="pr-group"><span class="pr-group-label">' +
+        label +
+        "</span>" +
+        segs.join("") +
+        "</span>";
       if (reviewSegs.length || checkSegs.length)
         rows.push(
           '<div class="pr-row pr-rollup">' +
-            (reviewSegs.length
-              ? '<span class="pr-group" title="Reviews">' +
-                reviewSegs.join("") +
-                "</span>"
-              : "") +
-            (reviewSegs.length && checkSegs.length
-              ? '<span class="pr-group-sep"></span>'
-              : "") +
-            (checkSegs.length
-              ? '<span class="pr-group" title="Checks">' +
-                checkSegs.join("") +
-                "</span>"
-              : "") +
+            (reviewSegs.length ? group("Reviews", reviewSegs) : "") +
+            (checkSegs.length ? group("Checks", checkSegs) : "") +
             "</div>"
         );
     } else {
