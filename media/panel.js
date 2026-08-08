@@ -1103,9 +1103,11 @@
           '<span class="badges">' +
           badges.join("") +
           "</span>" +
-          // Delete is the one action pinned to the header. It is destructive, so
-          // it keeps the divider and extra gap the comfortable header gives it,
+          // The two actions pinned to the header, against the right edge: the
+          // branch on GitHub, and Delete. Delete stays last, as it is in the
+          // comfortable header — destructive actions sit at the end of a run,
           // and the confirmation modal is what actually guards a near-miss.
+          ghLink +
           deleteBtn +
           "</div>" +
           (meta
@@ -1123,7 +1125,6 @@
           findFileBtn +
           debugBtn +
           editBranchBtn +
-          ghLink +
           refreshBtn +
           openWindowBtn +
           agentBtn +
@@ -2770,9 +2771,13 @@
       return;
     }
     // The expand toggle: the Agents bar in the comfortable layout, the card
-    // header itself in the compact one. Both carry data-toggle.
+    // header itself in the compact one. Both carry data-toggle. Controls inside
+    // the header are excluded — the GitHub link is a plain anchor the webview
+    // lets through to the browser, so it never reaches the data-action branch
+    // above and would otherwise toggle the card on its way out.
     const bar = e.target.closest("[data-toggle]");
-    if (bar) toggle(bar.getAttribute("data-toggle"));
+    if (bar && !e.target.closest("a, button"))
+      toggle(bar.getAttribute("data-toggle"));
   });
 
   root.addEventListener("change", (e) => {

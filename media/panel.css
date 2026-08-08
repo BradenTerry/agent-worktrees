@@ -2100,13 +2100,18 @@ button.busy {
 .card.compact .card-meta.terminal-open .agents-bar-terminal {
   display: inline-flex;
 }
-/* Delete: the one action pinned to the header, so a worktree can be removed
-   without opening it. The comfortable header sets it off with a divider because
-   it sits in a run of other buttons; here it is alone against the right edge
-   with the branch name well clear of it, so the gap does that on its own. */
+/* The two actions pinned to the header, against the right edge: the branch on
+   GitHub (a link, sized to match rather than framed like a button) and Delete.
+   The comfortable header sets Delete off with a divider because it sits in a run
+   of five buttons; here there is one neighbour and the branch name is well clear
+   of both, so the gap does that on its own. */
+.card.compact .card-head .ghlink {
+  width: 22px;
+  height: 20px;
+}
 .card.compact .card-head .act.danger {
   flex: 0 0 auto;
-  margin-left: 8px;
+  margin-left: 2px;
   padding: 2px 5px;
 }
 .card.compact .card-head .act.danger::before {
@@ -2241,11 +2246,6 @@ button.busy {
   margin-left: auto;
   padding: 2px 7px;
   white-space: nowrap;
-}
-.card.compact .card-actions .ghlink {
-  width: 22px;
-  height: 20px;
-  border: 1px solid transparent;
 }
 /* The scope pill loses its label here (see scmScopeBtn) and sits with the other
    icon actions, so it is sized like them rather than like a gitline pill. */
