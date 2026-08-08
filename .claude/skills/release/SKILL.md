@@ -77,6 +77,21 @@ way from a typed version, and tags the chosen ref for you.
    - **Pre-release** (odd minor): the odd line just below the upcoming stable,
      next free patch - previews of `4.0.0` are `v3.9.0`, `v3.9.1`, ...
 
+   **Z is a number, not a digit.** It keeps counting past 9 - `v4.4.9` ->
+   `v4.4.10` -> `v4.4.11` -> `v4.4.12` - and reaching two figures is never a
+   reason to bump the minor. The minor means "new features" and moves by two to
+   keep the channels apart; a long run of bug fixes is still a run of bug fixes,
+   and rolling it over would burn a feature version on nothing and skip the
+   pre-release line in between. Same on the odd line: `v3.9.9` is followed by
+   `v3.9.10`. `release.yml` takes any `X.Y.Z` of plain numbers, so nothing in
+   the pipeline cares how long Z is.
+
+   Sorting is the one thing that does. `git tag --sort=-v:refname` in step 1 is
+   a *version* sort and puts `v4.4.10` above `v4.4.9`; a lexical one
+   (`git tag | sort -r`, or eyeballing an alphabetical list) puts `v4.4.9` on
+   top, which would have you compute the next version from an already-released
+   tag and try to cut `v4.4.10` twice. Keep the `-v:refname`.
+
    Confirm it does not already exist (`git tag | grep -x vX.Y.Z` returns
    nothing).
 

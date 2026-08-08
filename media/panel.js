@@ -2167,7 +2167,8 @@
       "</div>" +
       '<p class="gh-help dim">Within a group the rows keep the order the ' +
       "worktree cards are in, so an agent moves only when its own status " +
-      "changes. Stored as <code>agentWorktrees.agentStatusOrder</code> and " +
+      "changes. An agent you pin in that view sits above the groups entirely. " +
+      "Stored as <code>agentWorktrees.agentStatusOrder</code> and " +
       "applies to every repository; the worktree cards are unaffected, since " +
       "there each agent is already on the card for the code it is working on.</p>" +
       "</section>"
