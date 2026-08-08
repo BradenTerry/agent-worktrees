@@ -40,7 +40,8 @@ import {
   detachWorktreeHead,
   goneBranches,
   defaultBranchName,
-  unpushedCommitCount,
+  branchDeleteSafety,
+  BranchDeleteSafety,
   getStatus,
   hasUncommittedChanges,
   fetchRemotes,
@@ -2863,17 +2864,22 @@ export class WorktreeWebviewProvider
     // we know whether it is the default one, so it can run alongside the lookup
     // that decides that. It is discarded below when the branch turns out not to
     // be deletable — one concurrent git call, rather than another serial one.
-    const [dirty, defaultBranch, branchUnpushed, sessions] = await Promise.all([
+    const [dirty, defaultBranch, branchSafety, sessions] = await Promise.all([
       branch ? hasUncommittedChanges(fsPath) : Promise.resolve(false),
       defaultBranchName(primary),
-      branch ? unpushedCommitCount(primary, branch) : Promise.resolve(0),
+      branch
+        ? branchDeleteSafety(primary, branch)
+        : Promise.resolve<BranchDeleteSafety>({ unpushed: 0, measured: false }),
       this.readAgents().then((registry) => this.indexAgents(registry, [target])),
     ]);
 
     // The default branch is never offered for deletion.
     const deletableBranch =
       branch && branch !== defaultBranch ? branch : undefined;
-    const unpushed = deletableBranch ? branchUnpushed : 0;
+    const safety: BranchDeleteSafety = deletableBranch
+      ? branchSafety
+      : { unpushed: 0, measured: false };
+    const unpushed = safety.unpushed;
 
     // Every agent whose worktree is this path, or nested under it.
     const inScope = (key: string) =>
@@ -2945,52 +2951,116 @@ export class WorktreeWebviewProvider
       try {
         await removeWorktree(primary, fsPath, true);
       } catch (err) {
-        vscode.window.showErrorMessage(
-          `Could not remove worktree: ${(err as Error).message}`
-        );
-        return;
+        // A non-zero exit does not mean nothing happened. Once git starts
+        // removing a worktree there is no going back, so it unregisters the
+        // worktree even when deleting the directory fails (a file still open,
+        // a permission it lacks) and exits with "failed to delete '<path>'".
+        // Reporting that as a plain failure contradicted the panel, which reads
+        // `git worktree list` and had already dropped the entry. Ask git what
+        // the state actually is before deciding what to tell the user.
+        if (await this.worktreeStillRegistered(primary, target)) {
+          vscode.window.showErrorMessage(
+            `Could not remove worktree: ${(err as Error).message}`
+          );
+          return;
+        }
+        // Unregistered: the removal did happen. Only leftover files remain, so
+        // finish the job git could not, and mention it only if they survive.
+        const leftover = await this.deleteLeftoverDir(fsPath);
+        if (leftover) {
+          vscode.window.showWarningMessage(
+            `Removed the worktree from git, but some files could not be deleted ` +
+              `from ${fsPath}: ${leftover}`
+          );
+        }
       }
     }
 
     if (choice === "Remove and Delete Branch" && deletableBranch) {
-      await this.deleteOrphanedBranch(primary, deletableBranch, unpushed);
+      // Refresh before the branch delete, not just after: the worktree is gone
+      // now, and the delete can stop on a prompt or an error. Leaving the card
+      // up for as long as a modal is open leaves a card for a worktree that no
+      // longer exists, which the status poll then re-reads.
+      await this.refresh();
+      await this.deleteOrphanedBranch(primary, deletableBranch, safety);
     }
     await this.refresh();
     await this.postBranches();
   }
 
   /**
+   * True when git still lists a worktree at `target` (already normalized).
+   * Used to check what a failed `git worktree remove` actually did. A listing
+   * failure answers true: without an answer, assume the removal did not happen
+   * and let the caller report the original error.
+   */
+  private async worktreeStillRegistered(
+    repoRoot: string,
+    target: string
+  ): Promise<boolean> {
+    try {
+      const worktrees = await listWorktrees(repoRoot);
+      return worktrees.some((w) => normalize(w.path) === target);
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Delete the directory a failed `git worktree remove` left behind, now that
+   * git has already unregistered it. Returns undefined once the path is gone
+   * (including when it never remained), or the reason it could not be deleted.
+   */
+  private async deleteLeftoverDir(dir: string): Promise<string | undefined> {
+    try {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+      return undefined;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }
+
+  /**
    * Delete the branch left behind by a worktree removal the user already
-   * confirmed. Forces when the confirmation disclosed unpushed commits. When it
-   * promised nothing would be lost but git still refuses (the upstream count
-   * missed something, e.g. a gone upstream), re-confirm before forcing — the
-   * one case a second prompt is warranted.
+   * confirmed. Forces when the confirmation disclosed unpushed commits, and
+   * also when it measured none: `git branch -d` only accepts a branch merged
+   * into HEAD or into its own upstream, so a branch whose commits are all in
+   * origin/main is still refused whenever the local default branch has not been
+   * pulled or its upstream was pruned after the merge. Prompting there asked the
+   * user to confirm losing work the modal had just measured as zero. Only an
+   * unmeasured count (the count itself failed) still warrants the prompt.
    */
   private async deleteOrphanedBranch(
     repoRoot: string,
     branch: string,
-    unpushed: number
+    safety: BranchDeleteSafety
   ): Promise<void> {
+    const contained = safety.measured && safety.unpushed === 0;
     try {
-      await deleteBranch(repoRoot, branch, { local: true, force: unpushed > 0 });
+      await deleteBranch(repoRoot, branch, {
+        local: true,
+        force: safety.unpushed > 0,
+      });
     } catch (err) {
       const msg = (err as Error).message;
-      if (unpushed === 0 && /not fully merged/i.test(msg)) {
+      if (!/not fully merged/i.test(msg)) {
+        vscode.window.showErrorMessage(`Could not delete branch: ${msg}`);
+        return;
+      }
+      if (!contained) {
         const retry = await vscode.window.showWarningMessage(
           `Local branch "${branch}" is not fully merged. Force delete it?`,
           { modal: true },
           "Force Delete"
         );
         if (retry !== "Force Delete") return;
-        try {
-          await deleteBranch(repoRoot, branch, { local: true, force: true });
-        } catch (err2) {
-          vscode.window.showErrorMessage(
-            `Could not delete branch: ${(err2 as Error).message}`
-          );
-        }
-      } else {
-        vscode.window.showErrorMessage(`Could not delete branch: ${msg}`);
+      }
+      try {
+        await deleteBranch(repoRoot, branch, { local: true, force: true });
+      } catch (err2) {
+        vscode.window.showErrorMessage(
+          `Could not delete branch: ${(err2 as Error).message}`
+        );
       }
     }
   }
@@ -3353,8 +3423,9 @@ export class WorktreeWebviewProvider
 
     // Unpushed-work check, only when the PR is not merged (a merged squash leaves
     // commits that look unpushed but are not lost).
-    let unpushed = 0;
-    if (!merged) unpushed = await unpushedCommitCount(repoRoot, name);
+    let safety: BranchDeleteSafety = { unpushed: 0, measured: false };
+    if (!merged) safety = await branchDeleteSafety(repoRoot, name);
+    const unpushed = safety.unpushed;
     const unpushedNote =
       unpushed > 0
         ? `\n\nThis branch has ${
@@ -3412,15 +3483,21 @@ export class WorktreeWebviewProvider
       await deleteBranch(repoRoot, name, { local: true, force });
     } catch (err) {
       const msg = (err as Error).message;
-      // git -d still refused as unmerged (e.g. the unpushed count failed and the
-      // PR is not flagged merged): confirm once more, then force.
+      // git -d still refused as unmerged. `-d` only accepts a branch merged into
+      // HEAD or into its own upstream, so this also fires for a branch we
+      // measured as fully contained in origin/main (upstream pruned after the
+      // merge, or the local default branch not pulled) — force straight through
+      // that rather than asking about a loss that was measured at zero. Confirm
+      // only when the count is unknown because the measurement itself failed.
       if (!force && /not fully merged/i.test(msg)) {
-        const confirm = await vscode.window.showWarningMessage(
-          `Local branch "${name}" is not fully merged. Force delete it?`,
-          { modal: true },
-          "Force Delete"
-        );
-        if (confirm !== "Force Delete") return;
+        if (!safety.measured) {
+          const confirm = await vscode.window.showWarningMessage(
+            `Local branch "${name}" is not fully merged. Force delete it?`,
+            { modal: true },
+            "Force Delete"
+          );
+          if (confirm !== "Force Delete") return;
+        }
         try {
           await deleteBranch(repoRoot, name, { local: true, force: true });
         } catch (err2) {

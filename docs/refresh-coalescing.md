@@ -164,6 +164,31 @@ mean a git spawn per tick.
   parsed configs, so starting a session always re-reads the file and can't launch
   a stale copy.
 
+## A status belongs to the worktree it was asked for
+
+Every per-worktree git call (`getStatus`, its `git diff --numstat` follow-up,
+`hasUncommittedChanges`, `ls-files`, `switch`, `checkout --detach`) passes
+`atRoot: true`, which sets `GIT_CEILING_DIRECTORIES` to the parent of that
+worktree so git's repository discovery cannot climb out of the directory it was
+given.
+
+Without it, a cwd that is not a repository sends git looking upward until it
+finds one. Worktrees live at `<primary>/.claude/worktrees/<branch>`, *inside* the
+primary worktree, so what it finds is the primary — and a status for a worktree
+that has just been removed comes back holding the primary's branch, dirty count
+and line counts. The panel renders exactly what it is handed, so the removed
+worktree's card showed the same change counts as the primary card pinned above
+it: the "duplicated counts on two cards" report. Confined, the same call fails
+the way a removed worktree should, and `getStatus` returns its zeros.
+
+The same reasoning applies with more at stake to the two calls that write:
+`switchWorktreeBranch` and `detachWorktreeHead` would otherwise act on the
+primary worktree's HEAD when handed a path that has stopped being a worktree.
+
+A call whose cwd is an arbitrary folder inside a repository — `findRepoRoot`,
+`listWorktrees`, everything scoped to the repo root — must keep walking up, and
+does not set the flag.
+
 ## Cost control before a confirmation dialog
 
 The same spawn arithmetic decides how quickly a modal appears, and here the user

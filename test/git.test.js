@@ -13,6 +13,7 @@ const {
   listBranches,
   deleteBranch,
   unpushedCommitCount,
+  branchDeleteSafety,
   switchWorktreeBranch,
   setGitTracer,
   removeWorktree,
@@ -394,6 +395,113 @@ test("unpushedCommitCount counts commits not on the base branch", async () => {
   assert.strictEqual(await unpushedCommitCount(r, "work"), 2);
   // main has nothing beyond itself.
   assert.strictEqual(await unpushedCommitCount(r, "main"), 0);
+});
+
+test("branchDeleteSafety measures a merged branch as losing nothing even when git -d refuses", async () => {
+  // The false "force delete?" prompt: a branch whose commits are all in
+  // origin/main, whose upstream was pruned away when the remote branch was
+  // deleted after the merge, and whose local default branch has not been pulled.
+  // `git branch -d` refuses it (it only looks at HEAD and the branch's own
+  // upstream) although nothing would be lost.
+  const work = makeCloneWithRemote("safety-merged");
+  git(work, ["checkout", "-b", "feat"]);
+  fs.writeFileSync(path.join(work, "b.txt"), "one\n");
+  git(work, ["add", "."]);
+  git(work, ["commit", "-m", "c1"]);
+  git(work, ["push", "-u", "origin", "feat"]);
+  git(work, ["checkout", "main"]);
+  git(work, ["merge", "--no-ff", "-m", "merge", "feat"]);
+  git(work, ["push", "origin", "main"]);
+  git(work, ["push", "origin", "--delete", "feat"]);
+  git(work, ["fetch", "--prune"]);
+  // Local main falls behind origin/main, as a repo root does while the work
+  // happens in worktrees.
+  git(work, ["reset", "--hard", "HEAD~1"]);
+
+  const safety = await branchDeleteSafety(work, "feat");
+  assert.strictEqual(safety.unpushed, 0, "nothing on feat is missing from the base");
+  assert.strictEqual(safety.measured, true, "and that zero is a real measurement");
+
+  // Git itself still refuses the plain delete: that mismatch is what used to
+  // surface as a force-delete prompt for a branch with nothing to lose.
+  assert.throws(() => git(work, ["branch", "-d", "feat"]));
+  await deleteBranch(work, "feat", { local: true, force: true });
+  assert.ok(!localBranches(work).includes("feat"));
+});
+
+test("branchDeleteSafety reports an unmeasurable count as unmeasured", async () => {
+  // No origin and no default branch to compare against: the count is unknown,
+  // so it reports zero but never claims to have measured it.
+  const r = path.join(dir, "safety-nobase");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "trunk"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hello\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  git(r, ["checkout", "-b", "work"]);
+  fs.writeFileSync(path.join(r, "b.txt"), "one\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "c1"]);
+
+  const safety = await branchDeleteSafety(r, "work");
+  assert.strictEqual(safety.measured, false);
+  assert.strictEqual(safety.unpushed, 0);
+});
+
+test("branchDeleteSafety measures real unpushed commits", async () => {
+  const work = makeCloneWithRemote("safety-unpushed");
+  git(work, ["checkout", "-b", "wip"]);
+  fs.writeFileSync(path.join(work, "b.txt"), "one\n");
+  git(work, ["add", "."]);
+  git(work, ["commit", "-m", "c1"]);
+
+  const safety = await branchDeleteSafety(work, "wip");
+  assert.strictEqual(safety.unpushed, 1);
+  assert.strictEqual(safety.measured, true);
+  assert.strictEqual(safety.base, "origin/main");
+});
+
+test("getStatus never reports the parent repo's numbers for a stale worktree path", async () => {
+  // Worktrees live at <primary>/.claude/worktrees/<branch>, so a path that is no
+  // longer a worktree is still *inside* the primary worktree. Git's discovery
+  // walks up from a cwd that is not a repository, which used to hand back the
+  // primary's counts - rendered on the removed worktree's card, identical to the
+  // primary card above it.
+  const r = path.join(dir, "stale-status");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  git(r, ["config", "user.email", "t@example.com"]);
+  git(r, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(r, "a.txt"), "hello\n");
+  git(r, ["add", "."]);
+  git(r, ["commit", "-m", "init"]);
+  // Uncommitted work in the primary, so a leak is unmistakable.
+  fs.writeFileSync(path.join(r, "a.txt"), "changed\n");
+  fs.writeFileSync(path.join(r, "untracked.txt"), "x\n");
+
+  const wt = path.join(r, ".claude", "worktrees", "feat");
+  git(r, ["worktree", "add", "-b", "feat", wt]);
+  const live = await getStatus(wt);
+  assert.strictEqual(live.branch, "feat", "a live worktree still reports itself");
+  assert.strictEqual(live.dirty, 0);
+
+  const primary = await getStatus(r);
+  assert.ok(primary.dirty > 0 && primary.insertions > 0, "primary has changes");
+
+  // Removed, but the directory survives - what a removal git could not finish
+  // deleting leaves behind.
+  git(r, ["worktree", "remove", wt]);
+  fs.mkdirSync(wt, { recursive: true });
+  fs.writeFileSync(path.join(wt, "held.txt"), "x\n");
+
+  const stale = await getStatus(wt);
+  assert.strictEqual(stale.dirty, 0, "no counts borrowed from the parent repo");
+  assert.strictEqual(stale.insertions, 0);
+  assert.strictEqual(stale.deletions, 0);
+  assert.strictEqual(stale.branch, undefined, "and no branch to mistake for a switch");
+  assert.strictEqual(await hasUncommittedChanges(wt), false);
 });
 
 test("setGitTracer records each git call (command, result, timing)", async () => {

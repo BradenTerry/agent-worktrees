@@ -116,7 +116,9 @@ A full editor tab listing every branch in the repo, local and remote-only.
 - **Fetch and prune** to refresh ahead/behind and drop refs for branches deleted
   on the remote.
 - **Delete Local** removes a local branch only, never the remote. It warns about
-  unpushed commits and handles squash-merged branches cleanly.
+  unpushed commits and handles squash-merged branches cleanly. A branch whose work
+  is already in the default branch deletes without asking you to force it, even
+  when its remote branch is gone and your local default branch is behind.
 - **Delete gone** clears out every local branch whose remote is gone, in one
   confirmation.
 
@@ -195,7 +197,10 @@ first one. Each card now carries two buttons instead.
 - **Switch a worktree's branch**, or create a new one, from the panel.
 - **Delete a worktree** in a single confirmation that tells you upfront what it
   touches (running agents, uncommitted changes, unpushed commits) and can delete
-  the leftover branch in the same step.
+  the leftover branch in the same step. If git removes the worktree but cannot
+  delete its folder (something still had a file open), the panel cleans up what
+  git left behind, and only tells you if something survived - instead of
+  reporting a failed removal for a worktree that is already gone.
 - **Stale lock cleanup**: dead-session locks are cleared automatically, so a
   crashed agent no longer leaves a worktree stuck as `locked`. Locks you placed
   yourself are never touched.
