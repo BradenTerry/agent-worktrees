@@ -17,7 +17,7 @@ its running agents in one view.
 
 | Worktrees, git status & agents | Every agent in one list | PR checks, review & comments | Settings & integrations | Linked files | Skills used per agent |
 | :---: | :---: | :---: | :---: | :---: | :---: |
-| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/agents-view.png" alt="The agents view: every agent in the repository in one list, each row naming the branch it is working on" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/agents-view.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png" alt="The Linked Files settings tab listing gitignored paths symlinked into every worktree" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills an agent has used" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png) |
+| [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="Worktrees, git status, PRs and agents in the panel" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/agents-view.png" alt="The agents view: every agent in the repository in one list, a pinned one held at the top, each row naming the branch it is working on" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/agents-view.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="CI checks and review status on a worktree's PR" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="GitHub PR status and integration settings" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png" alt="The Linked Files settings tab listing gitignored paths symlinked into every worktree" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/linked-files.png) | [<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills an agent has used" width="240">](https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png) |
 
 ## Features
 
@@ -95,7 +95,9 @@ its running agents in one view.
   webview-local re-render with no round trip. Rows are grouped by status in the
   order set under **Settings → Preferences**
   (`agentWorktrees.agentStatusOrder`, waiting first by default), normalized on
-  every read so a hand-edited value can never hide a status's agents.
+  every read so a hand-edited value can never hide a status's agents. A pin per
+  row outranks that grouping and keeps one agent at the top; the pins are
+  webview state, swept as the sessions they name end.
 - **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
   type, description and elapsed time, read from the files Claude writes for them,
   and land on the card for the worktree they were actually given.
@@ -179,7 +181,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | Doc | Covers |
 | --- | --- |
 | [Card layout](docs/card-layout.md) | How `card()` lays out a worktree: what folds together, the sticky header, the actions menu |
-| [Agents view](docs/agents-view.md) | The flat all-agents list: the switch, what a row adds, ordering, subagents without cards |
+| [Agents view](docs/agents-view.md) | The flat all-agents list: the switch, what a row adds, ordering and pinning, subagents without cards |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the two status tiers, the agent-only path, why there is no `**/*` watcher, and the Performance tab |

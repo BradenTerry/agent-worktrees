@@ -14,7 +14,8 @@ and its running agents in one view.
 - Live agent status: active, waiting, idle. Activity Bar badge when one is
   blocked on you.
 - Switch the panel to an agents view: every agent in the repo in one list,
-  waiting ones first, each row naming the branch it is working on.
+  waiting ones first, each row naming the branch it is working on. Pin the one
+  you are shepherding and it stays at the top.
 - PR state, CI checks and reviews on the card. No browser tab.
 - Run or debug a worktree's launch configuration without opening a second window.
 - Search a worktree, or open a file from it, in your current window.
@@ -31,6 +32,8 @@ and its running agents in one view.
   Stop hit the right session. One in another VS Code window says so.
 - The agent whose terminal is open is highlighted, so you never type to the wrong
   one.
+- In the agents list, pin the sessions you are watching: they hold the top of the
+  list however busy the rest of it gets, and unpin themselves when they end.
 - Terminal tabs are titled by Claude Code itself and track each session's current
   topic. Background tabs included, and the tab you are reading is never pulled
   away.
@@ -59,9 +62,15 @@ Rows are grouped by status, waiting first out of the box. That order is yours:
 watch what is running than what is blocked, put **active** on top. The panel
 remembers which view you were in.
 
+The pin on a row beats the grouping. Pin the one or two sessions you are actually
+shepherding and they hold the top of the list, whatever they are doing and
+however busy the rest of it gets, with a rule marking where the pinned ones end.
+Click the pin again to let a row drop back into its group; an agent that ends
+takes its pin with it.
+
 | Every agent in one list | Choosing the order |
 | :--- | :--- |
-| <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/agents-view.png" alt="The agents view: every agent in the repository in one list, waiting first, each row naming its branch" width="380"> | <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/preferences.png" alt="Settings, Preferences tab: the agent statuses in the order the agents view groups them, with up and down controls" width="380"> |
+| <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/agents-view.png" alt="The agents view: every agent in the repository in one list, a pinned one held at the top, waiting next, each row naming its branch" width="380"> | <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/preferences.png" alt="Settings, Preferences tab: the agent statuses in the order the agents view groups them, with up and down controls" width="380"> |
 
 ### Status
 

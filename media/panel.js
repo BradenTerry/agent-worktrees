@@ -97,6 +97,12 @@
     // node, so a subagent reads as belonging to the agent above it.
     subagent:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4 2.5v5.5a2.5 2.5 0 0 0 2.5 2.5H8.7"/><circle cx="11.4" cy="10.5" r="1.9"/></svg>',
+    // Pin / unpin an agent in the agents view. A thumbtack, drawn head-on: the
+    // outline is the offer, the filled one is the state, so a pinned row says so
+    // with the same glyph in the same place rather than with a second marker.
+    pin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1.9h4l-.6 3.3 2.1 2.1H4.5l2.1-2.1z"/><path d="M8 7.3v6.8"/></svg>',
+    pinFilled:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1.9h4l-.6 3.3 2.1 2.1H4.5l2.1-2.1z" fill="currentColor"/><path d="M8 7.3v6.8"/></svg>',
     // Reorder controls in Settings → Preferences. Plain arrows, not the card's
     // chevrons: these move a row one place, they do not open anything.
     arrowUp:
@@ -205,11 +211,23 @@
   // where they live. Persisted, so reopening the panel returns to the last view.
   let panelView = savedState.panelView === "agents" ? "agents" : "worktrees";
 
+  // Session ids the user pinned to the top of the agents view. Webview state
+  // alongside `expanded`, not a VS Code setting: unlike the status order (which
+  // is a standing preference about how the list reads), a pin names one live
+  // session. The id means nothing in another window and nothing at all once that
+  // session is gone, so it belongs with the rest of this panel's view state.
+  const pinned = new Set(
+    (Array.isArray(savedState.pinnedAgents) ? savedState.pinnedAgents : []).filter(
+      (id) => typeof id === "string" && id
+    )
+  );
+
   function persist() {
     vscode.setState({
       expanded: Array.from(expanded),
       settingsNavCollapsed,
       panelView,
+      pinnedAgents: Array.from(pinned),
       branchPrune: branchFilters.prune,
       branchUsers: branchFilters.users.slice(),
       branchLocations: branchFilters.locations.slice(),
@@ -515,6 +533,35 @@
         "</span>"
       : "";
     return subChip + skillChip;
+  }
+
+  /**
+   * Pin/unpin one agent, on agents-view rows only: a pin decides where a row
+   * sorts in that list, and on a card a row's place is already decided by the
+   * worktree it belongs to, so the control would be an offer with no effect.
+   *
+   * Outside `.row-actions` deliberately. That group is hidden until the row is
+   * hovered, and a pinned row has to explain why it is at the top when nothing
+   * is pointing at it - so this one stays visible on its own terms (see the
+   * `.pin-btn` rules in panel.css).
+   */
+  function pinAgentBtn(a) {
+    const on = pinned.has(a.sessionId);
+    return (
+      '<button class="iconbtn pin-btn" data-action="togglePin" data-session="' +
+      esc(a.sessionId) +
+      '" data-tip="' +
+      (on
+        ? "Pinned to the top of this list. Click to unpin"
+        : "Pin this agent to the top of this list") +
+      '" aria-label="' +
+      (on ? "Unpin this agent" : "Pin this agent") +
+      '" aria-pressed="' +
+      (on ? "true" : "false") +
+      '">' +
+      (on ? icons.pinFilled : icons.pin) +
+      "</button>"
+    );
   }
 
   /** Stop one agent. Same button on a card row and an agents-view row. */
@@ -1380,7 +1427,7 @@
    *  a worktree of their own are rows on THAT card; here the parent is the row
    *  they hang off wherever they are working, so each carries the worktree it
    *  was handed instead. */
-  function agentListRow(data, a, wt) {
+  function agentListRow(data, a, wt, boundary) {
     const s = statusOf(a);
     const chips = agentChips(a);
     const subs = (a.subagents || [])
@@ -1397,6 +1444,8 @@
     return (
       '<div class="agent-row' +
       (s === "waiting" ? " attention" : "") +
+      (pinned.has(a.sessionId) ? " pinned" : "") +
+      (boundary ? " pin-boundary" : "") +
       (a.sessionId === activeSessionId ? " terminal-open" : "") +
       '" data-action="focusAgent" data-session="' +
       esc(a.sessionId) +
@@ -1412,6 +1461,7 @@
       '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
       icons.terminal +
       "</span>" +
+      pinAgentBtn(a) +
       stopAgentBtn(a) +
       // The branch and the counters share the row's second line: the summary
       // above them gets the full width it needs, and the two readings of the row
@@ -1436,9 +1486,22 @@
       }
     }
     const order = statusOrder(data);
+    // Pinned agents first, whatever their status: a pin is the user overriding
+    // the grouping for one row, so it has to outrank the group order rather than
+    // sort inside it. Below that the status order applies as it always did, and
+    // it still applies among the pinned rows themselves. Stable, so a row moves
+    // only when it is pinned or its status actually changes.
+    const rank = (e) => (pinned.has(e.a.sessionId) ? 0 : 1);
     entries.sort(
-      (x, y) => order.indexOf(statusOf(x.a)) - order.indexOf(statusOf(y.a))
+      (x, y) =>
+        rank(x) - rank(y) ||
+        order.indexOf(statusOf(x.a)) - order.indexOf(statusOf(y.a))
     );
+    // Where the pinned run ends, so the list can draw a rule there. Only when
+    // there is something on both sides of it: a boundary above the first row, or
+    // below the last, separates nothing.
+    const firstUnpinned = entries.findIndex((e) => rank(e) === 1);
+    const boundaryAt = firstUnpinned > 0 ? firstUnpinned : -1;
 
     // A subagent whose parent session is not itself listed — its agent is
     // running somewhere this panel is not showing. On the cards it has a row of
@@ -1458,7 +1521,9 @@
     }
     return (
       '<div class="agents">' +
-      entries.map((e) => agentListRow(data, e.a, e.wt)).join("") +
+      entries
+        .map((e, i) => agentListRow(data, e.a, e.wt, i === boundaryAt))
+        .join("") +
       orphans
         .map((o) =>
           subagentRow(
@@ -1719,6 +1784,62 @@
     else for (const w of wts) expanded.add(w.path);
     persist();
     if (lastData) render(lastData);
+  }
+
+  /**
+   * Pin or unpin one agent in the agents view, then redraw the list it reorders.
+   *
+   * Pinning scrolls the list back to the top; unpinning does not. Pinning is a
+   * request to keep that row in sight, and it has just moved somewhere the user
+   * may not be looking - whereas unpinning from the top of the list is done
+   * while looking straight at it, and would only lose their place.
+   */
+  function togglePin(sessionId) {
+    if (!sessionId) return;
+    const adding = !pinned.has(sessionId);
+    if (adding) pinned.add(sessionId);
+    else pinned.delete(sessionId);
+    persist();
+    if (!lastData) return;
+    render(lastData);
+    if (!adding) return;
+    const list = root.querySelector(".cards");
+    if (list) list.scrollTop = 0;
+  }
+
+  // Pinned ids whose session was missing from the last payload. A pin is only
+  // dropped once its session has been absent from two payloads running: the
+  // registry file a session is read from is rewritten in place on every status
+  // transition, so a single gather can miss one that is still very much running,
+  // and one unlucky read must not silently unpin it. Not persisted - a reload
+  // starts the count again, which at worst delays a dead pin's cleanup by one
+  // payload.
+  let missingPins = new Set();
+
+  /** Forget pins whose agent is gone, so the stored list cannot grow without
+   *  bound as sessions come and go. */
+  function prunePins(data) {
+    if (!pinned.size) {
+      if (missingPins.size) missingPins = new Set();
+      return;
+    }
+    const live = new Set();
+    for (const wt of (data && data.worktrees) || []) {
+      for (const a of wt.agents || []) live.add(a.sessionId);
+    }
+    const stillMissing = new Set();
+    let dropped = false;
+    for (const id of Array.from(pinned)) {
+      if (live.has(id)) continue;
+      if (missingPins.has(id)) {
+        pinned.delete(id);
+        dropped = true;
+      } else {
+        stillMissing.add(id);
+      }
+    }
+    missingPins = stillMissing;
+    if (dropped) persist();
   }
 
   // Minimal attribute-selector escaping for paths in querySelector.
@@ -3460,6 +3581,12 @@
         openSkills(btn.getAttribute("data-session"));
         return;
       }
+      // Pin/unpin an agents-view row. Webview-only, like the view switch: the
+      // pin only decides how the payload the panel already has is ordered.
+      if (action === "togglePin") {
+        togglePin(btn.getAttribute("data-session") || "");
+        return;
+      }
       // Settings is a webview-only page — no round trip to the extension.
       if (action === "openSettings") {
         openSettings();
@@ -3683,6 +3810,10 @@
     // Sidebar. Ignore any {type:"branches"} meant for the branches tab.
     if (msg.type === "update") {
       activeSessionId = (msg.data && msg.data.activeSessionId) || "";
+      // Only here, not in render: this is the one place a fresh payload lands,
+      // and a re-render from the cached one (a view switch, a pin) says nothing
+      // new about which sessions are still alive.
+      prunePins(msg.data);
       render(msg.data);
       maybeRefreshSettings(msg.data);
     } else if (msg.type === "activeTerminal") {

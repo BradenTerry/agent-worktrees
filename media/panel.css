@@ -589,6 +589,13 @@ body {
   color: var(--vscode-foreground);
   background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
 }
+/* A hovered row repaints itself in the selection colours, which these buttons'
+   own descriptionForeground does not survive - in a light theme it is dark gray
+   on a solid blue fill. They take the row's foreground there instead. */
+.agent-row:hover .iconbtn,
+.agent-row:hover .iconbtn:hover {
+  color: inherit;
+}
 .iconbtn svg {
   width: 13px;
   height: 13px;
@@ -654,8 +661,43 @@ body {
 .agents-list .agent-row .terminal-chip {
   margin-top: calc((var(--first-line) - 13px) / 2); /* .terminal-chip svg */
 }
-.agents-list .agent-row .row-actions {
+.agents-list .agent-row .row-actions,
+.agents-list .agent-row .pin-btn {
   margin-top: calc((var(--first-line) - 20px) / 2); /* .iconbtn */
+}
+/* Pin: keep one agent at the top of the list whatever its status. Its own
+   control rather than a member of .row-actions, which is invisible until the row
+   is hovered - a pinned row has to say why it is at the top when nothing is
+   pointing at it, and opacity on the group cannot be undone by a child. */
+.pin-btn {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.agent-row:hover .pin-btn,
+.agent-row:focus-within .pin-btn,
+.agent-row.attention .pin-btn,
+.agent-row.pinned .pin-btn {
+  opacity: 1;
+}
+/* The filled glyph is the state, so it reads in full foreground: the outline one
+   is an offer that appears on hover and stays in the quieter action colour with
+   the stop button beside it. */
+.agent-row.pinned .pin-btn {
+  color: var(--vscode-foreground);
+}
+/* Where the pinned run ends. The hairline above every agent already says "next
+   agent", so a slightly darker one in the same place says nothing: the break
+   itself is what separates the groups, and the rule is drawn at full strength
+   in the middle of it. Deliberately not the accent - this is structure, and the
+   panel spends its accent on state (the open terminal, the selected tab). */
+.agents > .agent-row.pin-boundary {
+  --pin-break: 6px;
+  margin-top: var(--pin-break);
+}
+.agents > .agent-row.pin-boundary::before {
+  top: calc((var(--agent-gap) + var(--pin-break)) * -0.5);
+  background: rgba(127, 127, 127, 0.9);
 }
 /* Second line: the branch on the left, the counters held against the right
    edge. Indented past the status dot so both hang under the summary. */
