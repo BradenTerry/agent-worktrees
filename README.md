@@ -26,10 +26,11 @@ its running agents in one view.
 - Every worktree (primary + linked) as a card, with `Primary` / `detached` /
   `locked` badges and a per-card refresh that re-reads just that worktree.
 - **[Compact view](docs/compact-view.md)**, a second card density toggled from the
-  toolbar and persisted with the expand state. It folds the header, git summary
-  and PR rollup into two lines, moves the per-worktree actions inside the card,
-  and makes the header both the expand toggle and a sticky one, so an agent row
-  is never scrolled away from the name of the worktree it belongs to.
+  toolbar and persisted with the expand state. It folds the header and git summary
+  into two lines and tightens the PR block (which keeps its frame) to three, moves
+  the per-worktree actions inside the card, and makes the header both the expand
+  toggle and a sticky one, so an agent row is never scrolled away from the name of
+  the worktree it belongs to.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
   upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file

@@ -183,17 +183,21 @@ density button folds every card down.
 
 <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/compact.png" alt="The same four worktrees at compact density: one header line with agent counts and status, one line with git status and the PR rollup, then the agent rows" width="380">
 
-- **The same worktrees in about half the height**, and roughly a quarter of it
-  once you collapse them. Nothing is dropped: the branch, its badges, the agent
-  and subagent counts, the status dots, the git totals and the whole PR rollup
-  are all still there, just on two lines instead of seven.
+- **The same worktrees in well under half the height** once you collapse them.
+  Nothing is dropped: the branch, its badges, the agent and subagent counts, the
+  status dots and the git totals fit on two lines instead of seven.
+- **The pull request stays one block.** Title, state, auto-merge or out-of-date,
+  reviews and CI checks are still framed together as one thing about the branch,
+  just tighter - reviews and checks share a line, split by a rule so the two sets
+  of checkmarks never blur together.
 - **Worktree names stay put while you scroll.** A card's header pins itself above
   its own agent rows, so the row you are about to click always has the name of
   its worktree directly above it. No more revealing a terminal from the card
   below the one you meant.
-- **New agent is always one click**, right in the header. The rest of a
-  worktree's buttons - search, find file, Debug, branch, refresh, new window,
-  delete - move inside the card and appear when you open it.
+- **Delete stays in the header**, so a finished worktree goes away without
+  opening it first. The rest of a worktree's buttons - New agent, search, find
+  file, Debug, branch, refresh, new window - move inside the card and appear when
+  you open it.
 - **Your choice sticks**, and so does whichever cards you had open. Press the
   button again for the roomier layout.
 

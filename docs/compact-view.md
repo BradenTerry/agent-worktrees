@@ -23,12 +23,18 @@ two failures follow from the scrolling that causes:
 
 Same data, same actions, three structural changes.
 
-**Two lines at rest.** The card header carries the branch name, its badges, and
-the summary that used to live in the Agents bar (agent count, live subagents,
-per-status dots). One meta line underneath carries the git summary and the whole
-PR rollup - state badge, merge flags, reviews and CI - which the comfortable
-layout spends a four-row bordered block on. A worktree with no git changes and
-no PR is a single line.
+**Two lines at rest, plus the PR block.** The card header carries the branch
+name, its badges, and the summary that used to live in the Agents bar (agent
+count, live subagents, per-status dots). One meta line underneath carries the git
+summary. A worktree with no git changes is a single line.
+
+The PR rollup keeps its frame. It is one thing about the branch and the border is
+what says so; unpacked into the meta line beside the git totals it reads as more
+unrelated chips. Compact buys its rows back inside the block instead: tighter
+padding, and the labelled "Reviews" and "Checks" rows merged onto one line as two
+runs with a rule between them - so the CI checkmarks and the review checkmarks
+still cannot be read as one ambiguous sequence, which is what the two labels
+exist to prevent. Four rows become three.
 
 **The header is the toggle, and it sticks.** There is no separate Agents bar to
 click; the header carries `data-toggle` and expands the card. It is
@@ -40,16 +46,22 @@ from its worktree's name. The header repaints the card's own background tint
 carries a vertical rail back up to it.
 
 **Per-worktree actions live inside the card.** Source-control scope, search,
-find file, Debug, change branch, the GitHub link, refresh, open window and
-delete are one icon row revealed by expanding the card, rather than two rows on
-every card all the time. They are one click away rather than hover-only, so they
-stay keyboard-reachable and discoverable. The exception is **New agent**, which
-stays in the header as an icon button: it is the primary action, and it should
-not cost an expand first.
+find file, Debug, change branch, the GitHub link, refresh, open window and **New
+agent** are one row revealed by expanding the card, rather than two rows on every
+card all the time. They are one click away rather than hover-only, so they stay
+keyboard-reachable and discoverable. New agent keeps its label and its filled
+treatment and is pinned right, so the icon actions beside it can come and go
+(Debug only exists on a worktree with launch configs, the GitHub link only on a
+github.com remote) without it moving.
 
-Net effect on the screenshot fixture (four worktrees, everything expanded): 1186
-device pixels tall against 2280. Collapsed, the four cards take about a quarter
-of the height of the comfortable ones.
+**Delete** is the exception, pinned in the header so a worktree can be removed
+without opening it. It keeps the divider and extra gap the comfortable header
+gives it, and the confirmation modal is what actually guards a near-miss on the
+toggle.
+
+Net effect on the screenshot fixture (four worktrees, everything expanded): 1420
+device pixels tall against 2280. Collapsed, the four cards take about a third of
+the height of the comfortable ones.
 
 ## Implementation notes
 
@@ -65,7 +77,7 @@ of the height of the comfortable ones.
 - `data-toggle` is what the click and keydown handlers look for, so both the
   Agents bar and the compact header work through the same path. The keydown
   handler ignores events from a `button`/`a` inside the header, since the header
-  now contains the New agent button and a button fires its own click on
+  now contains the Delete button and a button fires its own click on
   Enter/Space.
 - `applyActiveTerminal` marks the card-level "this worktree holds the terminal
   you are talking to" glyph on whichever of `.agents-bar` / `.card-head` exists.

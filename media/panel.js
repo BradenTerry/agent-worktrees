@@ -391,9 +391,7 @@
       // elsewhere handed it to a subagent. The rows say so; the empty line is
       // only for a worktree where nothing at all is happening.
       if (!away) {
-        return isCompact()
-          ? '<div class="agents-empty">No agents yet.</div>'
-          : '<div class="agents-empty">No agents yet. Use “New Agent” to start one.</div>';
+        return '<div class="agents-empty">No agents yet. Use “New Agent” to start one.</div>';
       }
       return '<div class="agents">' + foreignSubagentRows(foreign) + "</div>";
     }
@@ -669,10 +667,9 @@
    * the state badge, then separate "Checks" and "Reviews" rows so the CI rollup
    * and the review decision don't read as one ambiguous run of checkmarks.
    * Rendered only when PR data is present (the integration is on and a PR
-   * exists). `compact` collapses the whole thing to a single run of segments
-   * that shares a line with the git summary; see the branch below for what it
-   * gives up. The branches view calls this without the flag, so its rows keep
-   * the block form.
+   * exists). `compact` keeps the framed block but folds the two labelled rows
+   * into one and tightens the padding (see the branch below and the compact
+   * section of panel.css). The branches view calls this without the flag.
    */
   function prLine(pr, compact) {
     if (!pr) return "";
@@ -795,29 +792,6 @@
           "Auto-merge</span>"
       );
 
-    // Compact: the whole rollup on one line. The PR title moves to the link's
-    // tooltip (the card already names the branch), and the "Reviews"/"Checks"
-    // labels are dropped — each segment's own icon and title says which it is.
-    if (compact)
-      return (
-        '<a class="prline compact" href="' +
-        esc(pr.url) +
-        '" title="' +
-        esc(pr.title) +
-        ' — open on GitHub">' +
-        '<span class="pr-state ' +
-        st.cls +
-        '">' +
-        st.label +
-        " #" +
-        pr.number +
-        "</span>" +
-        flagSegs.join("") +
-        reviewSegs.join("") +
-        checkSegs.join("") +
-        "</a>"
-      );
-
     const rows = [];
     if (pr.title)
       rows.push(
@@ -841,21 +815,49 @@
         "</span>" +
         "</div>"
     );
-    if (reviewSegs.length)
-      rows.push(
-        '<div class="pr-row"><span class="pr-row-label">Reviews</span>' +
-          reviewSegs.join("") +
-          "</div>"
-      );
-    if (checkSegs.length)
-      rows.push(
-        '<div class="pr-row"><span class="pr-row-label">Checks</span>' +
-          checkSegs.join("") +
-          "</div>"
-      );
+    // Compact keeps the block — the rollup reads as one thing, which is the
+    // point of framing it — and buys its two saved rows by merging the review
+    // and check runs onto one line. They stay two runs, separated by a rule, so
+    // the CI checkmarks and the review checkmarks still cannot be read as one
+    // ambiguous sequence; the labels move to the segments' own titles.
+    if (compact) {
+      if (reviewSegs.length || checkSegs.length)
+        rows.push(
+          '<div class="pr-row pr-rollup">' +
+            (reviewSegs.length
+              ? '<span class="pr-group" title="Reviews">' +
+                reviewSegs.join("") +
+                "</span>"
+              : "") +
+            (reviewSegs.length && checkSegs.length
+              ? '<span class="pr-group-sep"></span>'
+              : "") +
+            (checkSegs.length
+              ? '<span class="pr-group" title="Checks">' +
+                checkSegs.join("") +
+                "</span>"
+              : "") +
+            "</div>"
+        );
+    } else {
+      if (reviewSegs.length)
+        rows.push(
+          '<div class="pr-row"><span class="pr-row-label">Reviews</span>' +
+            reviewSegs.join("") +
+            "</div>"
+        );
+      if (checkSegs.length)
+        rows.push(
+          '<div class="pr-row"><span class="pr-row-label">Checks</span>' +
+            checkSegs.join("") +
+            "</div>"
+        );
+    }
 
     return (
-      '<a class="prline" href="' +
+      '<a class="prline' +
+      (compact ? " compact" : "") +
+      '" href="' +
       esc(pr.url) +
       '" title="' +
       esc(pr.title) +
@@ -900,22 +902,13 @@
 
     const compact = isCompact();
 
-    // The primary action. Compact drops the label and moves the button into the
-    // card header, so starting a session never costs an expand first — it is
-    // the one per-worktree control a collapsed compact card still shows.
-    const agentBtn = compact
-      ? '<button class="act ghost iconact head-agent" data-action="agent" data-path="' +
-        esc(wt.path) +
-        '" data-tip="Start a Claude session in this worktree" aria-label="New agent">' +
-        '<span class="agent-plus">+</span>' +
-        icons.agentMark +
-        "</button>"
-      : '<button class="act agent" data-action="agent" data-path="' +
-        esc(wt.path) +
-        '" title="Start a Claude session in this worktree">' +
-        '<span class="agent-plus">+</span>' +
-        icons.agentMark +
-        "<span>New agent</span></button>";
+    const agentBtn =
+      '<button class="act agent" data-action="agent" data-path="' +
+      esc(wt.path) +
+      '" title="Start a Claude session in this worktree">' +
+      '<span class="agent-plus">+</span>' +
+      icons.agentMark +
+      "<span>New agent</span></button>";
 
     // This worktree's branch on GitHub. Only when origin is a github.com remote
     // (data.repoUrl) and the worktree is on a branch: a detached HEAD has no
@@ -1067,8 +1060,7 @@
             agents.length +
             "</span>"
           : "";
-      const meta =
-        gitLine(wt.git, wt.path, wt.scmActive, true) + prLine(wt.pr, true);
+      const git = gitLine(wt.git, wt.path, wt.scmActive, true);
 
       return shell(
         '<div class="card-head' +
@@ -1098,21 +1090,24 @@
           subStat +
           stats +
           "</span>" +
-          agentBtn +
+          // Delete is the one action pinned to the header. It is destructive, so
+          // it keeps the divider and extra gap the comfortable header gives it,
+          // and the confirmation modal is what actually guards a near-miss.
+          deleteBtn +
           "</div>" +
-          (meta ? '<div class="card-meta">' + meta + "</div>" : "") +
+          (git ? '<div class="card-meta">' + git + "</div>" : "") +
+          prLine(wt.pr, true) +
           '<div class="card-body">' +
           '<div class="card-actions">' +
           scmScopeBtn(wt.path, wt.scmActive, true) +
           searchBtn +
           findFileBtn +
           debugBtn +
-          '<span class="actions-gap"></span>' +
           editBranchBtn +
           ghLink +
           refreshBtn +
           openWindowBtn +
-          deleteBtn +
+          agentBtn +
           "</div>" +
           debugRows +
           agentRows(agents, foreign) +
