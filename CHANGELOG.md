@@ -2,6 +2,12 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.4.2
+
+### Changes
+
+- **Minor bug fixes and improvements.**
+
 ## 4.4.1
 
 ### Changes
