@@ -76,7 +76,9 @@ its running agents in one view.
   by a class toggle, with no re-render and no git spawns. Titles are left to
   Claude Code on purpose (see [Terminal tab titles](docs/terminal-titles.md)).
 - A row finds its terminal by process ancestry, not by the launch id, since a
-  session can register an id that is not in its own argv (see
+  session can register an id that is not in its own argv. The link is made on the
+  refresh that first draws the row rather than on the click that needs it, so
+  Reveal is a lookup and not a process-table read (see
   [Agent status](docs/agent-status.md)).
 - **Agent & Worktree** creates a worktree with `claude -w` and starts an agent in
   it in one step. The new worktree gets its card without a manual refresh: a
@@ -97,7 +99,9 @@ its running agents in one view.
   (`agentWorktrees.agentStatusOrder`, waiting first by default), normalized on
   every read so a hand-edited value can never hide a status's agents. A pin per
   row outranks that grouping and keeps one agent at the top; the pins are
-  webview state, swept as the sessions they name end.
+  webview state, swept as the sessions they name end. Each row also carries the
+  cards' own Source Control scope button, for the worktree that agent is
+  working in.
 - **[Subagents](docs/subagents.md)** in flight appear as indented rows with their
   type, description and elapsed time, read from the files Claude writes for them,
   and land on the card for the worktree they were actually given.

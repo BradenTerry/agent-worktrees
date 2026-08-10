@@ -15,7 +15,8 @@ and its running agents in one view.
   blocked on you.
 - Switch the panel to an agents view: every agent in the repo in one list,
   waiting ones first, each row naming the branch it is working on. Pin the one
-  you are shepherding and it stays at the top.
+  you are shepherding and it stays at the top, or point Source Control at the
+  worktree it is working in without leaving the list.
 - PR state, CI checks and reviews on the card. No browser tab.
 - Run or debug a worktree's launch configuration without opening a second window.
 - Search a worktree, or open a file from it, in your current window.
@@ -56,6 +57,11 @@ Each row names the branch it is working on, so two agents with similar summaries
 are still easy to tell apart, and keeps everything the card row has - click to
 reveal its terminal, stop it, see its subagents and skills. Subagents hang under the
 agent that spawned them, each naming its own worktree when it was given one.
+
+A row also carries the Source Control button the cards have, so "show me what
+this one is changing" is one click on the agent you are reading rather than a
+trip back to its card. The worktree the Source Control view is currently on is
+filled in, on whichever view you are looking at.
 
 Rows are grouped by status, waiting first out of the box. That order is yours:
 **Settings → Preferences** moves the statuses up and down, so if you would rather
@@ -212,7 +218,8 @@ A worktree is not part of your open workspace, so **Find in Files** and
   (agents, uncommitted changes, unpushed commits) and can delete the branch too.
   Leftover folders git could not remove are cleaned up.
 - **Stale lock cleanup** for dead sessions. Locks you placed are never touched.
-- **Source Control scoping**, so the SCM view follows the worktree you pick.
+- **Source Control scoping**, so the SCM view follows the worktree you pick -
+  from a worktree's card or from any agent row in the agents view.
 - **A Performance tab**: git's `status` accelerators for this repo, with a switch
   for each, plus how often the panel rechecks worktrees.
 - **A Preferences tab**: the order the agents view groups its statuses in, moved

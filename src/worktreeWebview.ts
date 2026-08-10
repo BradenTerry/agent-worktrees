@@ -354,6 +354,18 @@ export class WorktreeWebviewProvider
   private lastSubagentCount = 0;
   /** Terminals we launched, keyed by the session id we started Claude with. */
   private terminals = new Map<string, vscode.Terminal>();
+  /** Sessions we have looked for a terminal for and not found: their agent is
+   *  running in another window (or outside the extension), so the process-table
+   *  read that proves it is not worth repeating on every click. Only recorded
+   *  when both readings behind that answer succeeded — a transient failure is
+   *  retried rather than cached. */
+  private readonly unresolvedSessions = new Set<string>();
+  /** Sessions the warm pass has already tried, so linking costs one attempt per
+   *  session rather than one per refresh. */
+  private readonly warmedSessions = new Set<string>();
+  /** True while the warm pass is running, so the 1s agent poll cannot stack a
+   *  second one behind it. */
+  private warming = false;
   /** Env var stamped on each agent terminal carrying its session id. VS Code
    *  preserves a terminal's creationOptions (env included) across an
    *  extension-host reload, so this is what lets us re-link a restored terminal
@@ -471,7 +483,14 @@ export class WorktreeWebviewProvider
       // nothing about any of them.
       this.prService.onChange(() => this.postPrState()),
       // Re-link a terminal restored after activation to its session.
-      vscode.window.onDidOpenTerminal((t) => this.reclaimTerminal(t)),
+      vscode.window.onDidOpenTerminal((t) => {
+        this.reclaimTerminal(t);
+        // A terminal appearing is the only thing that can turn "this session is
+        // not in this window" into a match, so both caches of that answer are
+        // dropped here and the warm pass re-runs on the next post.
+        this.unresolvedSessions.clear();
+        this.warmedSessions.clear();
+      }),
       // Clean up our terminal handle when its terminal is closed by any means.
       vscode.window.onDidCloseTerminal((t) => this.forgetTerminal(t)),
       // Highlight the agent whose terminal the user is looking at. A
@@ -741,6 +760,11 @@ export class WorktreeWebviewProvider
   private postData(data: WorktreeData, seq: number): void {
     if (!this.view || seq !== this.updateSeq) return;
     this.lastData = data;
+    // Find each new agent's terminal now, while nobody is waiting on it, so the
+    // click that reveals it does not have to. Not awaited: it is an
+    // optimization for a click that has not happened yet and must never hold up
+    // a render (see warmTerminalLinks).
+    void this.warmTerminalLinks(data);
     // Before the unchanged-payload early return below: the poll follows what is
     // on the cards, which is now this payload whether or not it is re-posted.
     this.syncAgentPoll();
@@ -2244,16 +2268,28 @@ export class WorktreeWebviewProvider
    * So when the id misses, ask the OS instead: the session's registry pid runs
    * somewhere beneath exactly one terminal's shell, and only in this window.
    * The answer is cached under the registry's id, so the process listing is paid
-   * once per session rather than once per click.
+   * once per session rather than once per click — and warmTerminalLinks pays it
+   * off the click path entirely, so the answer is usually already here.
+   *
+   * Both readings are started together. The process table is the expensive half
+   * (a PowerShell cold start on Windows) and it does not depend on the pid, so
+   * running it after the registry read only added the two waits together, which
+   * the user felt as a Reveal that did nothing for a second.
    */
   private async resolveTerminal(
     sessionId: string
   ): Promise<vscode.Terminal | undefined> {
     const known = this.terminals.get(sessionId);
     if (known) return known;
-    const pid = await this.claudePidFor(sessionId);
+    // Asked before and answered "not here": say so now rather than re-reading
+    // the process table on every click of a row whose agent is in another
+    // window. Cleared when a terminal opens, the only thing that can change it.
+    if (this.unresolvedSessions.has(sessionId)) return undefined;
+    const [pid, parents] = await Promise.all([
+      this.claudePidFor(sessionId),
+      parentMapSnapshot(),
+    ]);
     if (pid === undefined) return undefined;
-    const parents = await parentMapSnapshot();
     if (!parents.size) return undefined; // no process listing: id lookup is all we have
     for (const terminal of vscode.window.terminals) {
       const shell = await terminal.processId;
@@ -2276,7 +2312,63 @@ export class WorktreeWebviewProvider
       this.terminals.set(sessionId, terminal);
       return terminal;
     }
+    // Nothing in this window is running it, and both readings that could have
+    // said otherwise succeeded, so the miss is worth remembering. A failed
+    // registry read or an unreadable process table returned above instead, so a
+    // transient failure is retried rather than cached as an answer.
+    this.unresolvedSessions.add(sessionId);
     return undefined;
+  }
+
+  /**
+   * Link the sessions on the panel to the terminals they run in *before* the
+   * user clicks one.
+   *
+   * Resolving a row's terminal can mean reading the whole process table (see
+   * resolveTerminal), and every `claude -w` agent needs it exactly once: the id
+   * we launched with is not the id the registry reports, so the first Reveal on
+   * each agent used to pay for a process listing while the user waited on it.
+   * Paying it here instead - on the refresh that first shows the row, seconds
+   * before anyone clicks it - is what makes the click itself instant.
+   *
+   * Bounded, because this runs on every post: one attempt per session, and a
+   * session already linked or already known to be running in another window is
+   * skipped outright. Both of those caches are dropped when a terminal opens,
+   * which is the only event that can change either answer. Best effort - a
+   * failure here costs nothing, since the click path resolves the same way.
+   */
+  private async warmTerminalLinks(data: WorktreeData): Promise<void> {
+    if (this.warming) return;
+    const pending: string[] = [];
+    const live = new Set<string>();
+    for (const wt of data.worktrees) {
+      for (const a of wt.agents ?? []) {
+        live.add(a.sessionId);
+        if (this.terminals.has(a.sessionId)) continue;
+        if (this.warmedSessions.has(a.sessionId)) continue;
+        pending.push(a.sessionId);
+      }
+    }
+    // Session ids are never reused, so both sets would otherwise grow for as
+    // long as the window is open. Neither holds anything a re-read cannot
+    // recover: dropping one costs at most one more attempt for a session this
+    // payload did not list and the next one does.
+    for (const set of [this.warmedSessions, this.unresolvedSessions]) {
+      for (const id of set) if (!live.has(id)) set.delete(id);
+    }
+    if (!pending.length) return;
+    this.warming = true;
+    try {
+      for (const sessionId of pending) {
+        this.warmedSessions.add(sessionId);
+        await this.resolveTerminal(sessionId);
+      }
+    } finally {
+      this.warming = false;
+    }
+    // A newly linked session may be the one whose terminal is already active,
+    // which nothing else would notice until the next terminal switch.
+    this.postActiveTerminal();
   }
 
   /**
@@ -2313,6 +2405,11 @@ export class WorktreeWebviewProvider
       terminal.show();
       return;
     }
+    // The panel lit the row on click rather than waiting for this round trip
+    // (see revealAgent in panel.js), so a reveal that found nothing has to say
+    // so: repost the highlight, which puts it back on whichever agent actually
+    // owns the active terminal.
+    this.postActiveTerminal();
     // The agent list comes from global storage shared across every VS Code
     // window, but terminal handles are per-window. A terminal started in another
     // window (or manually, outside the extension) can't be revealed from here.

@@ -2,6 +2,18 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.4.31
+
+### Changes
+
+- **Point Source Control at an agent's worktree from the agents view.** Every
+  row carries the button the worktree cards have, so seeing what one agent is
+  changing no longer means switching tabs to find its card.
+- **Revealing an agent's terminal is immediate.** The panel works out which
+  terminal is behind a row before you click it rather than while you wait, and
+  the row highlights the moment you do.
+- **Minor bug fixes and improvements.**
+
 ## 4.4.30
 
 ### Changes

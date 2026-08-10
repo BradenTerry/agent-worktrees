@@ -564,6 +564,49 @@
     );
   }
 
+  /**
+   * Show only this agent's worktree in Source Control, from an agents-view row.
+   *
+   * The cards carry the same control in their header, where it belongs to the
+   * worktree. In this view there are no cards, so the agent you are reading is
+   * the only thing naming a worktree - and "show me what this one is changing"
+   * meant switching to the other tab, finding its card and clicking there.
+   *
+   * Deliberately the card's own `.scm-scope`, glyph and fill included, rather
+   * than a second control that happens to do the same thing: it is driven by the
+   * same `wt.scmActive`, so the two can never disagree about which worktree the
+   * diff view is on, and one click lights every button naming that worktree.
+   * Opt-in exactly as the card's is (Settings -> Integrations), which is what the
+   * `scmEnabled` gate is.
+   *
+   * Outside `.row-actions` for the reason the pin is: that group is invisible
+   * until the row is hovered, and the worktree Source Control is currently on has
+   * to be readable when nothing is pointing at the row.
+   */
+  function agentScmBtn(wt) {
+    if (!lastData || !lastData.scmEnabled || !wt || !wt.path) return "";
+    const on = !!wt.scmActive;
+    const where = wt.branch || wt.name || baseName(wt.path);
+    return (
+      '<button class="iconbtn scm-scope' +
+      (on ? " active" : "") +
+      '" data-action="scopeScm" data-path="' +
+      esc(wt.path) +
+      '" data-tip="' +
+      esc(
+        on
+          ? "Source Control is showing " + where + ". Click to re-scope."
+          : "Show only this agent's worktree (" + where + ") in Source Control"
+      ) +
+      '" aria-label="Show only this agent&#39;s worktree in Source Control"' +
+      ' aria-pressed="' +
+      (on ? "true" : "false") +
+      '">' +
+      icons.branch +
+      "</button>"
+    );
+  }
+
   /** Stop one agent. Same button on a card row and an agents-view row. */
   function stopAgentBtn(a) {
     return (
@@ -714,7 +757,12 @@
       (scmActive
         ? "This worktree is shown in Source Control. Click to re-scope."
         : "Show only this worktree in Source Control") +
-      '" aria-label="Show only this worktree in Source Control">' +
+      '" aria-label="Show only this worktree in Source Control"' +
+      // The fill is the only thing that says which worktree the diff view is on,
+      // and a fill is not readable by a screen reader.
+      ' aria-pressed="' +
+      (scmActive ? "true" : "false") +
+      '">' +
       icons.branch +
       "</button>"
     );
@@ -1461,6 +1509,7 @@
       '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
       icons.terminal +
       "</span>" +
+      agentScmBtn(wt) +
       pinAgentBtn(a) +
       stopAgentBtn(a) +
       // The branch and the counters share the row's second line: the summary
@@ -3634,6 +3683,12 @@
         send("refreshGithub");
         return;
       }
+      // Reveal an agent's terminal. Marked here rather than when the extension
+      // answers: see revealAgent.
+      if (action === "focusAgent") {
+        revealAgent(btn.getAttribute("data-session"));
+        return;
+      }
       // Scope button: move the blue pill immediately. The extension's
       // confirmation follows on a later post, but the Git extension can take
       // seconds to register the repo swap (Windows, many worktrees) and the
@@ -3641,10 +3696,14 @@
       // too so a webview-local re-render keeps the optimistic state.
       if (action === "scopeScm") {
         const path = btn.getAttribute("data-path");
-        root.querySelectorAll(".scm-scope.active").forEach(function (b) {
-          b.classList.remove("active");
+        // Every button naming this worktree, not only the one clicked: the
+        // agents view draws one per agent row, so a worktree running three
+        // agents has three of them and they all report the one scope.
+        root.querySelectorAll(".scm-scope").forEach(function (b) {
+          const on = b.getAttribute("data-path") === path;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-pressed", on ? "true" : "false");
         });
-        btn.classList.add("active");
         if (lastData && lastData.worktrees) {
           lastData.worktrees.forEach(function (wt) {
             wt.scmActive = wt.path === path;
@@ -3777,11 +3836,31 @@
     // fire their own click on Enter/Space.
     if (e.target.matches && e.target.matches(".agent-row, .subagent-row")) {
       e.preventDefault();
-      send("focusAgent", {
-        sessionId: e.target.getAttribute("data-session") || undefined,
-      });
+      revealAgent(e.target.getAttribute("data-session"));
     }
   });
+
+  /**
+   * Reveal an agent's terminal, and mark the row now instead of when the
+   * extension answers.
+   *
+   * Finding the terminal a session runs in is not always a lookup: the id we
+   * launched Claude with is not the id its row carries, so the first reveal of
+   * an agent reads the OS process table to match them (resolveTerminal in the
+   * extension). The panel now links them ahead of the click, but the round trip
+   * is still a round trip, and until it landed a click on a row did nothing
+   * visible at all - which read as the click being missed rather than as work in
+   * progress. So the row takes the highlight immediately and the extension's
+   * activeTerminal push confirms it, the same trick the Source Control scope
+   * pill uses. A reveal that finds nothing is corrected by that push, which
+   * carries whichever agent actually owns the active terminal.
+   */
+  function revealAgent(sessionId) {
+    if (!sessionId) return;
+    activeSessionId = sessionId;
+    applyActiveTerminal();
+    send("focusAgent", { sessionId: sessionId });
+  }
 
   window.addEventListener("message", (e) => {
     const msg = e.data;

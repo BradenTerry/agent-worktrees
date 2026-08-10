@@ -24,9 +24,11 @@ import * as cp from "child_process";
  * running in that terminal, and of nothing else. That is also inherently
  * per-window, which is exactly the question being asked.
  *
- * This is only ever run from a click (Reveal, Stop), never from the refresh
- * path, so one process-table read per click is an acceptable price - which is
- * why it takes a whole snapshot rather than walking parent by parent.
+ * This is read at most once per session: on the click that needs it (Reveal,
+ * Stop), or on the refresh that first shows the row, which links it ahead of the
+ * click so the click itself costs nothing (see warmTerminalLinks). Either way it
+ * is one read per session and never one per refresh, which is why it takes a
+ * whole snapshot rather than walking parent by parent.
  */
 
 /** Child pid -> parent pid, for every process the user can see. */
