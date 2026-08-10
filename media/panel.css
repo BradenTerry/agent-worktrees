@@ -662,8 +662,57 @@ body {
   margin-top: calc((var(--first-line) - 13px) / 2); /* .terminal-chip svg */
 }
 .agents-list .agent-row .row-actions,
-.agents-list .agent-row .pin-btn {
+.agents-list .agent-row .pin-btn,
+.agents-list .agent-row .scm-scope {
   margin-top: calc((var(--first-line) - 20px) / 2); /* .iconbtn */
+}
+/* Source Control scope, per agent row. The card's header carries the same
+   control and this is deliberately the same button: same glyph, same outline,
+   same blue fill for the worktree the diff view is on, so the two views agree at
+   a glance about where Source Control is pointing.
+
+   Outside .row-actions, like the pin beside it - that group is invisible until
+   the row is hovered, and the active scope has to be readable when nothing is
+   pointing at the row. So: fades in on hover, and stays put once it is on. */
+.agent-row .scm-scope {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 20px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.agent-row:hover .scm-scope,
+.agent-row:focus-within .scm-scope,
+.agent-row.attention .scm-scope,
+.agent-row .scm-scope.active {
+  opacity: 1;
+}
+/* Declared after the row's `.iconbtn { color: inherit }` hover rule, which would
+   otherwise repaint the white glyph in the row's own foreground the moment the
+   pointer entered the row - dark on a solid blue fill in a light theme. */
+.agent-row .scm-scope.active,
+.agent-row:hover .scm-scope.active {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+  border-color: transparent;
+}
+/* A hovered row paints itself in the selection colour, which is a blue - in a
+   light theme, near enough to the button's own fill that the filled state
+   disappears into the row exactly when the pointer is on it. The button's
+   foreground is the one colour guaranteed to read against that fill, so it
+   outlines the chip and keeps its edges. */
+.agent-row:hover .scm-scope.active {
+  border-color: currentColor;
+}
+.agent-row .scm-scope.active:hover,
+.agent-row:hover .scm-scope.active:hover {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(
+    --vscode-button-hoverBackground,
+    var(--vscode-button-background, #0e639c)
+  );
 }
 /* Pin: keep one agent at the top of the list whatever its status. Its own
    control rather than a member of .row-actions, which is invisible until the row

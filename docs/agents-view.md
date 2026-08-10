@@ -69,12 +69,46 @@ row reveals its terminal; a subagent row reveals its parent's.
 What the flat list has to add is **where the work is landing**, which a card gave
 for free by being the thing the row sat inside:
 
+- A **Source Control scope button** per row, scoping the Source Control view to
+  the worktree that agent is working in. See below.
 - Each agent row carries a branch chip (`.agent-where`): the worktree's branch,
   its path in the tooltip, a house glyph when it is the primary worktree, and the
   detached glyph in the warning colour when the worktree is on no branch. Without
   it two rows reading "Fix the flaky test" are indistinguishable.
 - The branch and the counters share the row's second line, so the summary keeps
   the full width and still wraps rather than clipping.
+
+## Source Control, per agent
+
+The cards carry a scope button in their header: *show only this worktree in
+Source Control*. In this view there are no cards, and the agent row is the only
+thing naming a worktree - so reading what an agent is doing and then asking to
+see its diff meant switching tabs, finding its card, and clicking there. The row
+carries the button instead.
+
+It is the **same control**, not a second one that does the same thing: the same
+`.scm-scope` button, the same glyph, the same blue fill, driven by the same
+`wt.scmActive` the card reads. So the two views cannot disagree about which
+worktree the diff view is on, and it is opt-in exactly as the card's is
+(Settings -> Integrations), which is what the `scmEnabled` gate is.
+
+- **Every** button naming the scoped worktree fills, not just the one clicked. A
+  worktree running three agents has three rows and three buttons, and they are
+  all reporting the one scope rather than each claiming it.
+- Outside `.row-actions`, beside the pin and for the same reason: that group is
+  transparent until the row is hovered, and where Source Control is currently
+  pointing has to be readable when nothing is pointing at the row. So the button
+  fades in on hover and then stays once it is on.
+- On a hovered row the fill gains an outline in the button's own foreground. A
+  hovered row paints in the selection colour, which in a light theme is a blue
+  near enough to the button's fill to swallow it - exactly when the pointer is on
+  it.
+- Clicking it does not reveal the agent's terminal: the button is inside the row,
+  and the row's own click is stopped at it.
+
+The click is optimistic like the card's - the fill moves at once and the
+extension's next push confirms it - because the Git extension can take seconds to
+register a repo swap.
 
 ## Subagents
 
@@ -185,6 +219,8 @@ flowchart LR
 ## What it does not have
 
 Everything about the worktree itself stays on the cards: git totals, the PR
-rollup, debug sessions, the per-worktree actions menu, Source Control scoping.
-This view is deliberately only the agents; the other tab is one click away when the
-question is about a worktree instead.
+rollup, debug sessions, the per-worktree actions menu. This view is deliberately
+only the agents; the other tab is one click away when the question is about a
+worktree instead. Source Control scoping is the exception, and it earns it by
+being about the *agent* here - "show me what this one is changing" is a question
+you ask of a row, not of a card you would have to go and find.

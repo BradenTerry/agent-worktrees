@@ -144,16 +144,44 @@ else, which also makes the test inherently per-window. The registry pid is what
 makes this possible, since it names the exact process behind the row.
 
 - The id map is still tried first, so a normally launched agent costs nothing.
-- The process table is read only on a click, never on a refresh, and the answer is
-  cached under the registry's id, so it is one listing per session per window.
-  `ps -Ao pid=,ppid=` on macOS and Linux, `Get-CimInstance Win32_Process` on
-  Windows (not `wmic`, which is removed in Windows 11 24H2).
+- The process table is read at most once per session, and the answer is cached
+  under the registry's id. `ps -Ao pid=,ppid=` on macOS and Linux,
+  `Get-CimInstance Win32_Process` on Windows (not `wmic`, which is removed in
+  Windows 11 24H2).
 - Stop kills the registry pid on **every** platform now (SIGTERM on POSIX,
   `taskkill /T /F` on Windows) and disposes the terminal after, rather than
   relying on an id match that a `-w` child never satisfies.
 
 A side effect worth having: an agent started by hand in a VS Code terminal, which
 the panel never had a handle for, is now revealable and stoppable too.
+
+### Paying for it before the click
+
+That listing used to be read **on the click**, and every `claude -w` agent needs
+it exactly once - so the first Reveal of each agent sat there reading the process
+table while the user waited on it. On Windows that is two PowerShell cold starts,
+because the registry read and the table read ran one after the other.
+
+Two changes, and the click stops waiting for either:
+
+- The two readings are **started together** (`Promise.all`). The table does not
+  depend on the pid, so running it second only added the waits up.
+- Every refresh **links the sessions it is about to draw** before anyone clicks
+  one (`warmTerminalLinks`). By the time a row can be clicked its terminal is
+  usually already in the map, and the click is a lookup.
+
+The warm pass is bounded, since it runs on every post: one attempt per session,
+skipping anything already linked, and remembering a session that resolved to no
+terminal in this window so its miss is not re-read either. A terminal opening is
+the only event that can turn a miss into a hit, so that is what clears both.
+A read that *failed* - an unreadable registry file, a machine that would not
+report its process table - is never cached as an answer and is retried.
+
+The webview does not wait for the answer to say something happened. Clicking a
+row highlights it immediately and the extension's `activeTerminal` push confirms
+it (the trick the Source Control scope pill uses); a reveal that found no
+terminal posts the highlight back so it lands on whichever agent really owns the
+active terminal.
 
 ## What this does not cover
 
