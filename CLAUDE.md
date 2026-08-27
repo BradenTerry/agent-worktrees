@@ -145,6 +145,14 @@ patch, a single line under a **Changes** heading is a perfectly good entry, and
 is an acceptable one when nothing in it needs the user to do or know anything
 different. Don't pad a patch out to match the shape of a feature release.
 
+The release **channel is the tag's suffix**, not the version: `vX.Y.Z` publishes
+to the regular channel and `vX.Y.Z-pre` publishes the same plain `X.Y.Z` to the
+pre-release one. The version itself is any `X.Y.Z` higher than the last release
+(the patch runs on into `v4.4.1001` if that suits) - nothing is reserved, and no
+minor is skipped. Both channels draw on one number line, so **a version is spent
+by whichever channel publishes it first**: preview `4.5.0` as `v4.5.0-pre` and the
+stable release of that work is `4.5.1`. See `.claude/skills/release/SKILL.md`.
+
 Releases are owner-only. `release.yml` has a `guard` job that fails unless
 `github.actor` is the repository owner, and its `publish` job targets the
 protected `release` environment (approval required, restricted to `main` and `v*`

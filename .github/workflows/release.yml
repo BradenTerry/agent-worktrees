@@ -5,20 +5,35 @@ name: Release
 # version is the single source of truth and is injected into package.json at build
 # time (the committed "version" is just a placeholder and is never edited by hand).
 #
-# The release channel is encoded in the version's MINOR number, the convention the
-# VS Code publishing docs recommend (the Marketplace rejects semver suffixes like
-# -pre.1, so the parity of the minor is the only standard way to keep the two
-# channels' version lines apart):
+# The release channel is chosen per release, not encoded in the version number:
 #
-#   odd minor   -> pre-release channel:  git tag v3.9.0 && git push origin v3.9.0
-#   even minor  -> regular channel:      git tag v4.0.0 && git push origin v4.0.0
+#   git tag v4.5.0     && git push origin v4.5.0       -> regular channel
+#   git tag v4.5.0-pre && git push origin v4.5.0-pre   -> pre-release channel
 #
-# So pre-release builds of an upcoming vX.EVEN.0 stack up on the odd line below it
-# (3.9.0, 3.9.1, ... previewing 4.0.0), never consuming a stable version. A
-# pre-release tag may point at a PR branch head - previewing unmerged work is the
-# point of the channel - while regular releases are only ever tagged on main. The
-# convention starts at 3.9/4.0; older tags predate it. The manual workflow_dispatch
-# run publishes the same way from a typed version instead of a pushed tag.
+# Both publish the plain version (4.5.0); the `-pre` suffix names the channel and
+# never reaches the manifest. The manual workflow_dispatch run takes the channel
+# as an input instead.
+#
+# So the version is free: any X.Y.Z that is higher than the last one. Bump the
+# patch as far as you like (4.4.31, 4.4.32, ... 4.4.1001), bump the minor by one,
+# whatever suits the change. This replaced a scheme where the minor's PARITY
+# picked the channel (odd = pre-release, even = regular), which is what the VS
+# Code docs recommend but nothing enforces: vsce validates only that the version
+# is valid semver with no prerelease suffix (see validateVersion /
+# validateManifestForPublishing in @vscode/vsce), so parity was costing every
+# stable minor a skipped number for a line that mostly went unused.
+#
+# What the parity bought, and what replaces it: the two channels shared no version
+# numbers, so a preview could never consume a stable one. Now they do share a
+# line, and the Marketplace is explicit that they cannot overlap - "if 1.2.3 is
+# uploaded as a pre-release, the next regular release must be uploaded with a
+# distinct version, such as 1.2.4"
+# (code.visualstudio.com/api/working-with-extensions/publishing-extension).
+# So **a pre-release of 4.5.0 means the stable release of that work is 4.5.1**. The "already released" check in the resolve step below catches the
+# mistake before anything is published rather than at the Marketplace.
+#
+# A pre-release tag may point at a PR branch head - previewing unmerged work is
+# the point of the channel - while regular releases are only ever tagged on main.
 #
 # Publishing any pre-release build is what makes the "Switch to Pre-Release Version"
 # button appear on the listing; users opt in per-install.
@@ -40,9 +55,17 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish, e.g. 1.2.3 (plain number, no v, no -suffix; an odd minor publishes to the pre-release channel, an even minor to the regular one)'
+        description: 'Version to publish, e.g. 4.5.0 (plain X.Y.Z, no v, no suffix)'
         required: true
         type: string
+      channel:
+        description: 'Which channel to publish to'
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - pre-release
 
 permissions:
   contents: write
@@ -79,42 +102,63 @@ jobs:
 
       - name: Resolve version and release channel
         id: channel
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          # The channel comes from the trigger, and the version never carries it.
+          # A tag ending -pre publishes the plain version to the pre-release
+          # channel; the suffix names the tag, not the build.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             version="${{ inputs.version }}"
             version="${version#v}"          # tolerate a leading v in the input
+            version="${version%-pre}"       # ... and a suffix the channel input already covers
+            channel="${{ inputs.channel }}"
             source="Manual run"
           else
             version="${GITHUB_REF_NAME#v}"
+            case "$version" in
+              *-pre) version="${version%-pre}"; channel="pre-release" ;;
+              *)     channel="release" ;;
+            esac
             source="Tag push $GITHUB_REF_NAME"
           fi
-          # Plain X.Y.Z only. The Marketplace rejects semver suffixes (-pre.1,
-          # -rc.2), so a suffixed tag can never publish; fail it here with the
-          # reason instead of deep inside vsce.
+          # What goes in the manifest is plain X.Y.Z. The Marketplace rejects
+          # semver prerelease suffixes outright (-pre.1, -rc.2), which is why the
+          # channel is a tag suffix stripped here rather than part of the version.
           #
           # Each part is a number with no leading zero. Multi-digit is fine and
-          # expected - the patch runs on into v4.4.10, v4.4.11 - but a padded
-          # one is not a version, and it fails quietly rather than loudly:
+          # expected - the patch runs on into v4.4.10, v4.4.31, v4.4.1001 - but a
+          # padded one is not a version, and it fails quietly rather than loudly:
           # `npm version 4.4.01` does not error, it normalizes to 4.4.1, so a
           # v4.4.01 tag would build and publish a .vsix claiming an ALREADY
-          # RELEASED version. The parity check is the same story one line down,
-          # where $((08 % 2)) is an invalid octal constant, not an even minor.
-          # Both are caught here, where the message can say which part is wrong.
+          # RELEASED version. Caught here, where the message can say what is wrong.
           if ! printf '%s' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
-            echo "::error::'$version' is not a plain X.Y.Z version. Each part must be a number with no leading zero (4.4.10, not 4.4.010), and the Marketplace does not accept semver suffixes; use an odd minor (e.g. 3.9.1) for a pre-release."
+            echo "::error::'$version' is not a plain X.Y.Z version. Each part must be a number with no leading zero (4.4.10, not 4.4.010). The only suffix a tag may carry is '-pre', which selects the pre-release channel (v4.5.0-pre publishes 4.5.0)."
             exit 1
           fi
-          # The channel is the minor's parity: odd = pre-release, even = regular.
-          minor="$(printf '%s' "$version" | cut -d. -f2)"
-          if [ "$((minor % 2))" -eq 1 ]; then
-            echo "$source -> pre-release channel (publishing $version)"
-            echo "pre_release_flag=--pre-release" >> "$GITHUB_OUTPUT"
+          if [ "$channel" = "pre-release" ]; then
+            tag="v$version-pre"
+            pre_release_flag="--pre-release"
           else
-            echo "$source -> regular channel (publishing $version)"
-            echo "pre_release_flag=" >> "$GITHUB_OUTPUT"
+            tag="v$version"
+            pre_release_flag=""
           fi
+          # A version can only be published once, and the two channels now share
+          # one number line, so the other channel may already have spent this one.
+          # vsce would reject it at the very last step, after the GitHub release
+          # exists; fail here instead, while nothing has been published.
+          for existing in "v$version" "v$version-pre"; do
+            [ "$existing" = "$tag" ] && continue
+            if gh release view "$existing" >/dev/null 2>&1; then
+              echo "::error::Version $version was already released as $existing. A version can only be published once, in either channel - pick a higher one."
+              exit 1
+            fi
+          done
+          echo "$source -> $channel channel (publishing $version as $tag)"
+          echo "pre_release_flag=$pre_release_flag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Set version
         run: npm version "${{ steps.channel.outputs.version }}" --no-git-tag-version --allow-same-version
