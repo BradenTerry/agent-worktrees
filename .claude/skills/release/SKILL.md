@@ -58,13 +58,16 @@ chosen ref for you.
 ### One number line, so a version is spent once
 
 This replaced a scheme where the minor's **parity** picked the channel (odd =
-pre-release, even = regular). That is what the VS Code docs recommend, but
-nothing enforces it - `vsce` validates only that the version is valid semver
-with no prerelease suffix - and it cost every stable minor a skipped number to
-reserve a line that mostly went unused.
+pre-release, even = regular). The VS Code docs word that as "we recommend",
+and nothing enforces it - `vsce` validates only that the version is valid semver
+with no prerelease suffix - so it was costing every stable minor a skipped number
+to reserve a line that mostly went unused.
 
 What the parity bought was that the channels shared no version numbers. They
-share one now, and **a version can only be published once, in either channel**:
+share one now, and the same docs are explicit that the two cannot overlap: "if
+`1.2.3` is uploaded as a pre-release, the next regular release must be uploaded
+with a distinct version, such as `1.2.4`". **A version is published once, in one
+channel:**
 
 > Preview `4.5.0` as `v4.5.0-pre`, and the stable release of that work is
 > `4.5.1`, not `4.5.0`.

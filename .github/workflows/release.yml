@@ -25,9 +25,11 @@ name: Release
 #
 # What the parity bought, and what replaces it: the two channels shared no version
 # numbers, so a preview could never consume a stable one. Now they do share a
-# line. A version can only be published once, in either channel, so
-# **a pre-release of 4.5.0 means the stable release of that work is 4.5.1** (or
-# higher). The "already released" check in the resolve step below catches the
+# line, and the Marketplace is explicit that they cannot overlap - "if 1.2.3 is
+# uploaded as a pre-release, the next regular release must be uploaded with a
+# distinct version, such as 1.2.4"
+# (code.visualstudio.com/api/working-with-extensions/publishing-extension).
+# So **a pre-release of 4.5.0 means the stable release of that work is 4.5.1**. The "already released" check in the resolve step below catches the
 # mistake before anything is published rather than at the Marketplace.
 #
 # A pre-release tag may point at a PR branch head - previewing unmerged work is
