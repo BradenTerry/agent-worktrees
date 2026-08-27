@@ -98,6 +98,21 @@ import {
 import { PrService, PrTarget } from "./prs";
 import { Coalescer } from "./scheduler";
 import { diag } from "./diagnostics";
+import {
+  GENERAL_GROUP_ID,
+  GroupState,
+  addGroup,
+  assignWorktree,
+  deleteGroup,
+  emptyGroupState,
+  groupIdFor,
+  groupList,
+  moveGroup,
+  normalizeGroups,
+  pruneGroups,
+  renameGroup,
+  MAX_GROUPS,
+} from "./groups";
 
 /** Quiet period (ms) before a burst of file/session events triggers a refresh.
  *  Refreshing spawns git per worktree, so coalescing keeps a flood of watcher
@@ -192,6 +207,21 @@ const TRACE_SETTING = "agentWorktrees.trace";
  *  (and syncs with them). Sanitized on every read - see agentOrder.ts. */
 const AGENT_STATUS_ORDER_SETTING = "agentWorktrees.agentStatusOrder";
 
+/** globalState key for the per-repo worktree groups (the sections the cards list
+ *  is divided into). Value is a map of repo root -> GroupState, the same shape
+ *  and for the same reason as LINKED_PATHS_KEY below: it is per-repo, it is
+ *  keyed by absolute paths that mean nothing on another machine, and it is
+ *  structure the user built rather than a preference, so it belongs in the
+ *  extension's own storage and not in settings.json. globalState (not
+ *  workspaceState) so a second window on the same repo shows the same sections. */
+const GROUPS_KEY = "agentWorktrees.groups";
+
+/** What a group is called between being created and being named. Placeholder
+ *  text in the field would be lost the moment the user typed anything and then
+ *  thought better of it; a real name means an abandoned rename still leaves a
+ *  group you can find and rename later. */
+const NEW_GROUP_NAME = "New group";
+
 /** globalState key for the per-repo lists of files symlinked into new worktrees
  *  (Settings → Linked Files). Value is a map of repo root → relative paths; a
  *  map (not a single array) keeps each repo's list separate while living in the
@@ -240,7 +270,12 @@ interface ActionMessage {
     | "deleteBranch"
     | "deleteGoneBranches"
     | "debugWorktree"
-    | "stopDebug";
+    | "stopDebug"
+    | "createGroup"
+    | "renameGroup"
+    | "deleteGroup"
+    | "moveGroup"
+    | "assignGroup";
   path?: string;
   sessionId?: string;
   /** Debug session id, for stopDebug. */
@@ -256,8 +291,12 @@ interface ActionMessage {
   seconds?: number;
   /** Which agent status to move, for moveAgentStatus. */
   status?: string;
-  /** Which way to move it: -1 up, +1 down. */
+  /** Which way to move it: -1 up, +1 down. Also moveGroup. */
   delta?: number;
+  /** Which worktree group the action is about (see src/groups.ts). */
+  groupId?: string;
+  /** The name typed into a group's header, for renameGroup. */
+  name?: string;
   /** Branch name, for worktreeFromBranch / deleteBranch. */
   branch?: string;
   /** Repo-relative file path, for addLinkedPath / removeLinkedPath. */
@@ -716,6 +755,7 @@ export class WorktreeWebviewProvider
     // Keyed by the primary worktree, not by data.repoRoot: in a window with a
     // linked worktree open the repo root *is* that worktree, so reading by it
     // would miss the list every writer stored under the primary's path.
+    await this.attachGroups(data);
     const linkKey = repoSettingsKey(data.repoRoot, data.worktrees);
     if (linkKey) {
       data.linkedPaths = this.getLinkedPaths(linkKey);
@@ -1282,6 +1322,16 @@ export class WorktreeWebviewProvider
         return this.stopDebug(msg.debugId);
       case "openBranches":
         return this.openBranchesPanel();
+      case "createGroup":
+        return this.createGroupAction(msg.path);
+      case "renameGroup":
+        return this.renameGroupAction(msg.groupId, msg.name);
+      case "deleteGroup":
+        return this.deleteGroupAction(msg.groupId);
+      case "moveGroup":
+        return this.moveGroupAction(msg.groupId, msg.delta);
+      case "assignGroup":
+        return this.assignGroupAction(msg.path, msg.groupId);
     }
   }
 
@@ -1552,6 +1602,198 @@ export class WorktreeWebviewProvider
       .update(TRACE_SETTING, !!value, vscode.ConfigurationTarget.Global);
     this.lastPosted = "";
     await this.refresh();
+  }
+
+  // --- Worktree groups -------------------------------------------------------
+
+  /** A group just created, for the panel to open its header field on. Carried
+   *  on exactly one payload (see editGroups): a new group is named in place, so
+   *  the host makes it with a placeholder name and the webview does the asking. */
+  private pendingEditGroup?: string;
+
+  /** The whole per-repo groups map from globalState (repo root → GroupState). */
+  private groupsMap(): Record<string, unknown> {
+    return this.context.globalState.get<Record<string, unknown>>(GROUPS_KEY, {});
+  }
+
+  /** This repo's groups, normalized so a hand-edited or older blob still
+   *  renders. Never throws and never returns a state without General. */
+  private getGroups(repoKey: string): GroupState {
+    return normalizeGroups(this.groupsMap()[normalize(repoKey)]);
+  }
+
+  /** Persist `state` for `repoKey`, dropping the entry entirely when it is back
+   *  to the default arrangement so the stored map does not accumulate blanks for
+   *  repos that were grouped once and then flattened again. */
+  private async setGroups(repoKey: string, state: GroupState): Promise<void> {
+    const key = normalize(repoKey);
+    const map = { ...this.groupsMap() };
+    const bare =
+      state.order.length === 1 &&
+      state.order[0] === GENERAL_GROUP_ID &&
+      !Object.keys(state.of).length;
+    if (bare) delete map[key];
+    else map[key] = state;
+    await this.context.globalState.update(GROUPS_KEY, map);
+  }
+
+  /** The repo whose groups apply to the payload being built, and its state.
+   *  Keyed by the primary worktree for the same reason linked files are: in a
+   *  window opened on a linked worktree, `repoRoot` is that worktree. */
+  private groupsFor(data: WorktreeData): { key?: string; state: GroupState } {
+    const key = repoSettingsKey(data.repoRoot, data.worktrees);
+    return { key, state: key ? this.getGroups(key) : emptyGroupState() };
+  }
+
+  /**
+   * Hang the group list and each card's membership on a payload, pruning
+   * memberships whose worktree is gone. The prune is here rather than on a timer
+   * because a full gather is exactly the moment the live set is known, and it
+   * writes only when something actually went (see pruneGroups).
+   */
+  private async attachGroups(data: WorktreeData): Promise<void> {
+    const { key, state } = this.groupsFor(data);
+    if (!key) return;
+    // The primary worktree is not one of these. It sits above the groups, so it
+    // is not in the filable set - which is also what drops a membership stored
+    // for it before that was the rule.
+    const filable = data.worktrees
+      .filter((wt) => !wt.isPrimary)
+      .map((wt) => normalize(wt.path));
+    const pruned = pruneGroups(state, filable);
+    if (pruned.changed) await this.setGroups(key, pruned.state);
+    data.groups = groupList(pruned.state);
+    delete data.editGroup;
+    for (const wt of data.worktrees) {
+      const id = wt.isPrimary
+        ? GENERAL_GROUP_ID
+        : groupIdFor(pruned.state, normalize(wt.path));
+      if (id === GENERAL_GROUP_ID) delete wt.group;
+      else wt.group = id;
+    }
+  }
+
+  /** Apply an edit to this repo's groups and re-render. Every group action funnels
+   *  through here so none of them can forget to persist or to repaint. */
+  private async editGroups(
+    edit: (state: GroupState) => GroupState
+  ): Promise<void> {
+    const data = this.lastData;
+    if (!data) return;
+    const { key, state } = this.groupsFor(data);
+    if (!key) return;
+    const next = edit(state);
+    await this.setGroups(key, next);
+    // Patch the cached payload rather than re-gathering: nothing about git or
+    // the agents changed, only which section each card is in (the same trick
+    // postDebugState uses).
+    data.groups = groupList(next);
+    for (const wt of data.worktrees) {
+      const id = wt.isPrimary
+        ? GENERAL_GROUP_ID
+        : groupIdFor(next, normalize(wt.path));
+      if (id === GENERAL_GROUP_ID) delete wt.group;
+      else wt.group = id;
+    }
+    // Cleared first, then set for this post only. `data` is the cached payload
+    // that the PR and debug posters re-send, so a flag left on it would reopen
+    // the field on an unrelated refresh.
+    delete data.editGroup;
+    if (this.pendingEditGroup) {
+      data.editGroup = this.pendingEditGroup;
+      this.pendingEditGroup = undefined;
+    }
+    this.lastPosted = "";
+    this.postData(data, ++this.updateSeq);
+  }
+
+  /**
+   * Create a group, optionally filing the worktree it was created from into it
+   * (the "New group from here" entry on a card menu).
+   *
+   * No prompt. It lands with a placeholder name and the panel opens the field in
+   * its header, so naming a group happens in the header the name will live in
+   * rather than in an input box at the top of the window.
+   */
+  private async createGroupAction(fsPath?: string): Promise<void> {
+    const data = this.lastData;
+    if (!data) return;
+    const { key, state } = this.groupsFor(data);
+    if (!key) return;
+    if (state.order.length >= MAX_GROUPS) {
+      vscode.window.showWarningMessage(
+        `You already have ${MAX_GROUPS} groups. Delete one before adding another.`
+      );
+      return;
+    }
+    const created = addGroup(
+      state,
+      NEW_GROUP_NAME,
+      fsPath ? normalize(fsPath) : undefined
+    );
+    if (!created.id) return;
+    this.pendingEditGroup = created.id;
+    await this.editGroups(() => created.state);
+  }
+
+  /** Store the name typed into a group's header. Trimming, capping and
+   *  de-duplicating are `renameGroup`'s, so the panel sends what was typed and
+   *  the next payload says what it became. */
+  private async renameGroupAction(
+    groupId?: string,
+    name?: string
+  ): Promise<void> {
+    if (!groupId || !name || groupId === GENERAL_GROUP_ID) return;
+    await this.editGroups((s) => renameGroup(s, groupId, name));
+  }
+
+  /**
+   * Delete a group. Modal, because the members moving to General is the part
+   * that is not obvious from the click, and it is the only group action that
+   * discards something the user made.
+   */
+  private async deleteGroupAction(groupId?: string): Promise<void> {
+    const data = this.lastData;
+    if (!data || !groupId || groupId === GENERAL_GROUP_ID) return;
+    const { state } = this.groupsFor(data);
+    if (!state.order.includes(groupId)) return;
+    const members = data.worktrees.filter((wt) => wt.group === groupId).length;
+    const ok = await vscode.window.showWarningMessage(
+      `Delete the group "${state.names[groupId]}"?`,
+      {
+        modal: true,
+        detail: members
+          ? `${members} worktree${members === 1 ? "" : "s"} will move to General. No worktree is removed.`
+          : "It is empty. No worktree is removed.",
+      },
+      "Delete"
+    );
+    if (ok !== "Delete") return;
+    await this.editGroups((s) => deleteGroup(s, groupId));
+  }
+
+  private async moveGroupAction(groupId?: string, delta?: number): Promise<void> {
+    if (!groupId || !delta) return;
+    await this.editGroups((s) => moveGroup(s, groupId, delta));
+  }
+
+  /**
+   * File one worktree into a group (or back to General). The primary worktree
+   * cannot be filed: it is the checkout the repo lives in and every other
+   * worktree hangs off, so it sits above the groups rather than in one. The
+   * panel does not offer it, and this is the guard behind that.
+   */
+  private async assignGroupAction(
+    fsPath?: string,
+    groupId?: string
+  ): Promise<void> {
+    if (!fsPath || !groupId) return;
+    const key = normalize(fsPath);
+    const wt = this.lastData?.worktrees.find(
+      (w) => normalize(w.path) === key
+    );
+    if (!wt || wt.isPrimary) return;
+    await this.editGroups((s) => assignWorktree(s, key, groupId));
   }
 
   // --- Linked files ----------------------------------------------------------

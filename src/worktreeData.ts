@@ -15,6 +15,7 @@ import { indexRegistry, RegistrySession } from "./sessionRegistry";
 import { TranscriptReader } from "./transcript";
 import { DebugSessionVM } from "./debugRun";
 import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
+import type { WorktreeGroupVM } from "./groups";
 import { diag } from "./diagnostics";
 
 /**
@@ -132,6 +133,9 @@ export interface WorktreeVM {
    *  offer a stop button for each (the Run and Debug view cannot be retargeted,
    *  so the panel owns both ends). */
   debugSessions?: DebugSessionVM[];
+  /** Which user-named group this worktree is filed under, as a group id from
+   *  `WorktreeData.groups`. Absent means General. See src/groups.ts. */
+  group?: string;
 }
 
 /**
@@ -167,6 +171,13 @@ export interface WorktreeData {
   github?: GithubConnection;
   /** Whether the PR integration is toggled on. */
   prEnabled?: boolean;
+  /** The user's worktree groups for this repository, in display order. Always
+   *  at least General; the panel draws no section headers at all until a second
+   *  group exists, so a user who never makes one sees the list it always had. */
+  groups?: WorktreeGroupVM[];
+  /** A group just created, whose header the panel should open its name field on.
+   *  Carried on exactly one payload; see the groups doc. */
+  editGroup?: string;
   /** Whether the Source Control scope button is enabled on worktrees. */
   scmEnabled?: boolean;
   /** Whether debug tracing (the diagnostics output channel) is enabled. */

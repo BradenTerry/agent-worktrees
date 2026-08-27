@@ -33,6 +33,14 @@ its running agents in one view.
   scrolled away from the name of the worktree it belongs to. The panel used to
   ship a second, roomier density with a toolbar toggle; it was removed rather than
   maintained twice.
+- **[Worktree groups](docs/groups.md)**: user-named, collapsible sections over the
+  cards list, for the worktrees you keep checked out until a PR merges. Filed by
+  hand from a card's menu; sections reorder by dragging a header and are named in
+  the header itself. The primary worktree sits above them all under a `Worktrees`
+  divider and cannot be filed; **General** is the always-drawn default, neither
+  renamable nor removable, and where a new worktree lands. Stored per repo in
+  `globalState`, and a collapsed section reports the agents waiting inside it so
+  folding one cannot hide an agent that needs you.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
   upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file
@@ -185,6 +193,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | Doc | Covers |
 | --- | --- |
 | [Card layout](docs/card-layout.md) | How `card()` lays out a worktree: what folds together, the sticky header, the actions menu |
+| [Worktree groups](docs/groups.md) | The user's sections over the cards list: where the state lives, why General is fixed and the primary worktree is unfilable, folding, in-header naming, drag reordering |
 | [Agents view](docs/agents-view.md) | The flat all-agents list: the switch, what a row adds, ordering and pinning, subagents without cards |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |

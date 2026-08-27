@@ -33,6 +33,249 @@ body {
   flex: 1 1 auto;
   overflow-y: auto;
   min-height: 0;
+  /* The containing block for the drop line while a section is being dragged. */
+  position: relative;
+}
+
+/* The rule between the primary worktree and the groups below it. A label rather
+   than a bare hairline: a line on its own says "these are apart" without saying
+   why. Sized and coloured like the tab strip's own labels - uppercase 11px in
+   the description colour - since it names a region of the panel rather than an
+   item in it, and the rule runs off to the right so the label reads as the head
+   of what follows rather than as a caption between two things. */
+.cards-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 2px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+  user-select: none;
+}
+.cards-divider::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(127, 127, 127, 0.3);
+}
+
+/* --- Worktree groups -----------------------------------------------------
+   The user's own sections over the cards list (see src/groups.ts). Drawn only
+   once a second group exists, so a panel nobody has grouped looks exactly as it
+   did before.
+
+   Quieter than a card by design: this labels the list, it is not an item in it.
+   No border, no fill, no card gutter - a name, a count and a fold, with the
+   cards keeping their own frame underneath. Give the header a card's treatment
+   and every group reads as a card containing cards, which is one nesting level
+   more than a sidebar can carry.
+
+   Both this header and the card headers under it are sticky in the same scroll
+   region, which needs the card headers offset by this one's height. That is
+   measured (syncGroupHeadHeight) rather than written down. */
+.group {
+  margin-bottom: 2px;
+}
+/* Pinned, and above the card headers that already pin here. Which group you are
+   looking at is what scrolling destroys - a run of cards whose header is three
+   screens up belongs to nothing - so the section header outranks them: a card
+   header pins under it, and the group's own header stays until the next group
+   pushes it off.
+   Opaque, since cards pass underneath. The sidebar's background rather than a
+   card's: this sits on the panel, not on a card. */
+.group-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* Flush left, so the chevron's centre line - which the rail below hangs on -
+     lands 6px in and still leaves the cards their width at 260px. */
+  padding: 6px 5px 4px 0;
+  user-select: none;
+  background: var(
+    --vscode-sideBar-background,
+    var(--vscode-editor-background)
+  );
+}
+/* Three classes deep on purpose: `.card .card-head` pins at top:0 further down
+   this file, and at equal specificity the later rule would win. Inside a group
+   the card headers stack under the section header instead. */
+.group .card .card-head {
+  top: var(--group-head-h, 31px);
+}
+/* The group's cards, held right of a rail that hangs off its header. The header
+   alone left them unattached: a full-width card under a full-width header is a
+   card next to a header, not a card inside a group.
+   This is the same bracket a card's expanded body draws back up to its own
+   header, in the same weight, for the same reason. The rail sits on the
+   chevron's centre line, so what it descends from is the control that folds
+   them. */
+/* 12px, which is the whole budget: at 14 the longest branch name in the panel
+   stops fitting on one line at 260px, and the cards not wrapping their names is
+   what the card layout spends its width on. */
+.group-cards {
+  position: relative;
+  padding-left: 12px;
+}
+.group-cards::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 0;
+  /* Ends at the last card's bottom edge rather than in the gutter below it, so
+     where the rail stops is where the group stops. */
+  bottom: var(--card-gap);
+  width: 1px;
+  background: rgba(127, 127, 127, 0.32);
+}
+/* The fold, which is the whole row bar the caret. Stretched over the header's
+   padding so the hover tint draws exactly what the click will hit, the same
+   rule the card header follows. */
+.group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 0;
+  min-width: 0;
+  margin: -6px -5px -4px 0;
+  padding: 6px 5px 4px 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.group-toggle:hover {
+  background: rgba(127, 127, 127, 0.14);
+}
+.group-toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+/* Scoped to this header's own chevron: the cards inside the section have one
+   each, and they answer to their own card's collapsed state. */
+.group.collapsed > .group-head .chevron {
+  transform: rotate(0deg);
+}
+.group.collapsed > .group-cards {
+  display: none;
+}
+/* Primary weight and colour: a section name is not secondary text, it is what
+   you scan the list by. */
+.group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+/* The name being typed, in the place the name lives. Sized and weighted like
+   the label it replaces so the header does not jump when the field opens or
+   closes, and given the input tokens so it reads as editable rather than as a
+   name that happens to have a box round it. */
+.group-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 5px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  background: var(--vscode-input-background, rgba(127, 127, 127, 0.18));
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+}
+.group-rename:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+/* While a name is being typed the header is a field, not a fold: no hover tint
+   and no pointer, so nothing suggests that clicking in the box will shut the
+   section under it. */
+.group-toggle.editing {
+  cursor: default;
+}
+.group-toggle.editing:hover {
+  background: transparent;
+}
+/* How many worktrees are filed here. Genuinely secondary - it qualifies the
+   name beside it - so it takes the description colour, at the 11px floor. */
+.group-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+}
+/* Agents waiting on you inside a folded group. The one thing a collapsed
+   section must not be able to swallow, so it takes the warning colour rather
+   than the count's gray, and it is hidden while the group is open - there the
+   rows themselves say it. */
+.group-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-charts-yellow, #cca700);
+  font-variant-numeric: tabular-nums;
+}
+.group:not(.collapsed) .group-alert {
+  display: none;
+}
+.group-alert svg {
+  width: 11px;
+  height: 11px;
+}
+.group-head .group-menu-btn {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  margin-left: auto;
+}
+/* --- Dragging a section to reorder --------------------------------------- */
+
+/* Held rather than pinned for the duration: a sticky header sits at the top of
+   the list while its group is somewhere else entirely, which makes both the
+   measuring and the picture wrong. */
+.cards.dragging .group-head {
+  position: static;
+}
+.cards.dragging {
+  cursor: grabbing;
+}
+/* The group being carried. It stays where it is - a group can be several screens
+   tall with its cards open, so moving the block under the pointer would be
+   motion sickness - and dims to say it is the one in flight. */
+.group.drag-source {
+  opacity: 0.45;
+}
+/* Where it would land. The accent colour, because this is the one thing on
+   screen that is about what happens when you let go. */
+.drop-line {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: var(--vscode-focusBorder);
+  pointer-events: none;
+}
+/* Back where it started, which is not a move. Drawn faintly rather than dropped:
+   a line that vanishes reads as "you cannot drop here", and you can. */
+.drop-line.noop {
+  background: rgba(127, 127, 127, 0.45);
+}
+/* A group with nothing in it keeps its header, so it needs a body that says the
+   header is not lying. */
+.group-empty {
+  padding: 2px 6px 8px 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
 }
 
 .repo-head {
@@ -2687,14 +2930,37 @@ button.busy {
     transparent
   );
 }
+/* A fixed column, not a shrink-to-fit slot: the move-to list leaves it empty on
+   every group but the one this worktree is in, and without a width those items
+   would sit a glyph to the left of the checked one. */
 .card-menu-ico {
   display: inline-flex;
+  justify-content: center;
   flex: 0 0 auto;
+  width: 14px;
   opacity: 0.9;
 }
 .card-menu-ico svg {
   width: 14px;
   height: 14px;
+}
+/* The heading over the move-to list. Not an item: it names what the run of
+   entries below it is, and must not look clickable or take focus. Indented to
+   the items' text rather than to their icon slot, so the list reads as one
+   block under it. */
+.card-menu-label {
+  padding: 4px 8px 2px 30px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--vscode-descriptionForeground);
+  user-select: none;
+}
+/* The group this worktree is already in. The check glyph in the icon slot is
+   what says so; the weight is the second signal, for the check being a thin
+   monochrome mark in a list of them. */
+.card-menu-item.checked {
+  font-weight: 600;
 }
 .card-menu-sep {
   height: 1px;
@@ -2844,13 +3110,15 @@ button.busy {
 
 /* --- Body: actions, then the agents, on a rail back to the header --------- */
 .card .card-body {
-  position: relative;
   /* A rule where the fold is. Everything above it is on the card at rest;
      everything below it is what expanding the card got you. Without it the body
      just continued the header's stack of lines and the boundary was only
-     inferable from having watched it open. The vertical rail below starts at this
-     rule and hangs off it, so the two read as one bracket around the body rather
-     than as two unrelated hairlines. */
+     inferable from having watched it open.
+     It used to hang a vertical rail off itself down the side of the body. That
+     went when groups arrived: the group's own rail already brackets the card
+     from outside, and two parallel hairlines a few pixels apart say the same
+     thing twice - beside the Agents heading they read as a gutter rather than as
+     anything about the card. The rule alone marks the fold. */
   border-top: 1px solid rgba(127, 127, 127, 0.25);
   padding-top: 7px;
   margin-top: 5px;
@@ -2858,15 +3126,6 @@ button.busy {
 }
 /* The rail runs the height of the expanded body, aligned under the header's
    chevron: everything to its right belongs to the worktree named above it. */
-.card .card-body::before {
-  content: "";
-  position: absolute;
-  left: 10px;
-  top: 0;
-  bottom: 5px;
-  width: 1px;
-  background: rgba(127, 127, 127, 0.32);
-}
 
 
 /* New agent keeps its label - it is the primary action and the only one here

@@ -20,6 +20,7 @@ and its running agents in one view.
 - PR state, CI checks and reviews on the card. No browser tab.
 - Run or debug a worktree's launch configuration without opening a second window.
 - Search a worktree, or open a file from it, in your current window.
+- Group the worktrees you are done with into your own collapsible sections.
 - A Branches tab for every branch in the repo.
 - Four worktrees in the height one card used to take.
 
@@ -164,6 +165,36 @@ instead, shown only on worktrees that have launch configurations.
   the worktree, so you debug what you just changed. A failed build launches
   nothing.
 - Stop it from the same card: each session gets a row on the worktree it runs in.
+
+## Groups
+
+Half the worktrees in a busy repo are finished: pushed, waiting on a review, and
+still taking up the list. File them into a section and fold it.
+
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/groups.png" alt="The panel with its cards filed into three named sections, Working, In review and On ice, one of them folded and showing a waiting-agent count" width="380">
+
+- **Your main worktree stays on top**, above a `Worktrees` divider and outside
+  the sections. It is the one every other worktree hangs off, so it is not
+  something you file away.
+- **Name your own sections.** Make as many as you want, and **drag them into the
+  order you want** (or move them a place at a time from the header menu).
+- **General is the default section**, always there, and cannot be renamed or
+  removed. New worktrees land in it, anything you have not filed stays in it, and
+  so does anything left over when you delete a group.
+- **Named in the header itself**, not in a box at the top of the window. A new
+  group opens its own name field the moment you make one; `F2` renames an
+  existing one, Enter keeps it, Escape drops it.
+- **Move a worktree from its card menu.** The list of groups sits at the top of
+  the menu, with a check beside the one it is in now.
+- **Right-click a card or a section header** for the same menu its caret opens,
+  right where you clicked.
+- **Fold what you are done with.** Collapse state is remembered, so the panel
+  comes back the way you left it.
+- **Section headers stay put while you scroll**, with each card's own header
+  pinned underneath, so a card is never separated from the group it is in.
+- **A folded section still tells you when an agent needs you**, with a count on
+  its header, so putting work away is never the same as losing track of it.
+- **Deleting a group never deletes a worktree.** Its cards move back to General.
 
 ## Cards built to be scanned
 
