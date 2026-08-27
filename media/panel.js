@@ -136,6 +136,10 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5l3-3"/><path d="M8.2 4.8l1-1a2.4 2.4 0 0 1 3.4 3.4l-1 1"/><path d="M7.8 11.2l-1 1a2.4 2.4 0 0 1-3.4-3.4l1-1"/></svg>',
     folderOpen:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12V4a1 1 0 0 1 1-1h3l1.4 1.6H12a1 1 0 0 1 1 1V7"/><path d="M2 12l2-4.6h10.5L12.4 12z"/></svg>',
+    // A worktree group: a titled bar with rows under it. A section of the list,
+    // not a folder - nothing is moved on disk when a worktree is filed into one.
+    group:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="4" rx="1"/><path d="M3.5 9.5h9M5 12.5h6"/></svg>',
     // A file with a strike through it: the "git ignores this" candidates list.
     ignored:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1.8H4.2a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1V5.6z"/><path d="M9 1.8v3.8h3.8"/><path d="M3.6 13.6L12.4 2.4"/></svg>',
@@ -222,12 +226,38 @@
     )
   );
 
+  // Group ids the user folded shut. Webview state alongside `expanded`, and for
+  // the same reason: which sections are open is how this panel is being looked
+  // at right now, where the groups themselves (their names, order and members)
+  // are structure the user built and live in the extension's storage.
+  //
+  // Collapsed is the point of the feature - a group is where you put the
+  // worktrees you are no longer reading - so this survives a reload, and a
+  // collapsed header carries a count of the agents waiting inside it so folding
+  // one can never hide an agent that needs you.
+  const collapsedGroups = new Set(
+    (Array.isArray(savedState.collapsedGroups)
+      ? savedState.collapsedGroups
+      : []
+    ).filter((id) => typeof id === "string" && id)
+  );
+
+  // The group whose name is being typed, if any. Renaming happens in the header
+  // itself rather than in a VS Code input box: the box takes focus to the top of
+  // the window to edit one word on a thing you are already looking at, and it
+  // cannot show you the name in the place the name lives.
+  //
+  // Not persisted. A half-typed name is not a state to come back to, and the
+  // group already has a name to fall back on.
+  let editingGroup = "";
+
   function persist() {
     vscode.setState({
       expanded: Array.from(expanded),
       settingsNavCollapsed,
       panelView,
       pinnedAgents: Array.from(pinned),
+      collapsedGroups: Array.from(collapsedGroups),
       branchPrune: branchFilters.prune,
       branchUsers: branchFilters.users.slice(),
       branchLocations: branchFilters.locations.slice(),
@@ -1384,6 +1414,8 @@
         // on the rare path and gives the name back the width on every card.
         '<button class="act ghost iconact card-menu-btn" data-tool="cardMenu" data-path="' +
         esc(wt.path) +
+        '" data-menu-key="card:' +
+        esc(wt.path) +
         '" data-tip="More actions for this worktree" aria-label="More actions"' +
         ' aria-haspopup="menu" aria-expanded="false">' +
         icons.caret +
@@ -1725,6 +1757,158 @@
   }
 
   /**
+   * The cards, divided into the user's groups.
+   *
+   * General is always drawn, even when it is the only group and a user has never
+   * made one. It is where a new worktree lands, so it is the thing you drag out
+   * of and the header you reach for New group on; a panel that only grew
+   * sections once you already had two of them made the first one hard to find
+   * and moved every card the moment you did.
+   *
+   * A card whose group is gone (deleted in another window between this payload
+   * and the last) falls to General rather than vanishing, which is the same rule
+   * the host applies when it reads the stored state - see src/groups.ts.
+   */
+  function cardsBody(data) {
+    const wts = data.worktrees || [];
+    if (!wts.length) return '<div class="empty">No worktrees found.</div>';
+    const groups = (data.groups || []).filter((g) => g && g.id);
+    // A group deleted (here or in another window) leaves its fold behind. Drop
+    // it, so an id reused later cannot arrive already collapsed.
+    if (groups.length) {
+      let dropped = false;
+      for (const id of collapsedGroups) {
+        if (!groups.some((g) => g.id === id)) {
+          collapsedGroups.delete(id);
+          dropped = true;
+        }
+      }
+      if (dropped) persist();
+    }
+    // No groups at all means a payload from before they were attached (a repo
+    // with no settings key of its own). Everything else has at least General.
+    if (!groups.length) return wts.map(card).join("");
+    // The primary worktree is not in any group. It is the checkout the repo
+    // itself lives in and every other worktree hangs off, so it is not one of
+    // the things you file - it is what they are filed under. It leads the list,
+    // above the sections, and a labelled rule separates the two.
+    const primary = wts.filter((wt) => wt.isPrimary);
+    const rest = wts.filter((wt) => !wt.isPrimary);
+    const members = new Map(groups.map((g) => [g.id, []]));
+    for (const wt of rest) {
+      const list = members.get(wt.group) || members.get("general");
+      if (list) list.push(wt);
+    }
+    return (
+      primary.map(card).join("") +
+      (primary.length ? divider("Worktrees") : "") +
+      groups.map((g) => groupSection(g, members.get(g.id) || [])).join("")
+    );
+  }
+
+  /**
+   * The rule between the primary worktree and the groups. A label rather than a
+   * bare line: a hairline on its own says "these are apart" without saying why,
+   * and what is below it is every other worktree in the repository, however the
+   * user has since divided them up.
+   */
+  function divider(label) {
+    return (
+      '<div class="cards-divider"><span>' + esc(label) + "</span></div>"
+    );
+  }
+
+  /**
+   * One section: its header, and its cards under it.
+   *
+   * The header is a fold, a name, a count and a caret - deliberately quieter
+   * than a card header, since it labels the list rather than being an item in
+   * it. An empty group keeps its header: it is a place the user made to put
+   * things in, and one that disappeared when the last card left it would look
+   * like the panel had deleted it.
+   *
+   * Collapsed, it carries the number of agents waiting inside. That is what
+   * stops a group from becoming somewhere work rots: the whole point of the
+   * section is that you stop reading it, so folding one must not be able to
+   * hide an agent that needs you. It reads the same status the Activity Bar
+   * badge counts.
+   */
+  function groupSection(g, wts) {
+    const collapsed = collapsedGroups.has(g.id);
+    const editing = editingGroup === g.id;
+    let waiting = 0;
+    for (const wt of wts) {
+      for (const a of wt.agents || []) if (statusOf(a) === "waiting") waiting++;
+    }
+    // Rendered whenever there is one to report, and hidden by CSS while the
+    // group is open (where the rows themselves say it). That keeps folding a
+    // class flip: a badge that only exists in the collapsed markup would need a
+    // re-render to appear, and a re-render costs the list its scroll position.
+    const alert =
+      waiting
+        ? '<span class="group-alert" data-tip="' +
+          waiting +
+          " agent" +
+          (waiting === 1 ? "" : "s") +
+          ' in this group need' +
+          (waiting === 1 ? "s" : "") +
+          ' you">' +
+          icons.agentMark +
+          waiting +
+          "</span>"
+        : "";
+    return (
+      '<div class="group' +
+      (collapsed ? " collapsed" : "") +
+      '">' +
+      '<div class="group-head">' +
+      '<div class="group-toggle' +
+      (editing ? " editing" : "") +
+      '" data-group-toggle="' +
+      esc(g.id) +
+      '" role="button" tabindex="0" aria-controls="group-cards-' +
+      esc(g.id) +
+      '" aria-expanded="' +
+      (collapsed ? "false" : "true") +
+      '">' +
+      '<span class="chevron">' +
+      icons.chevron +
+      "</span>" +
+      (editing
+        ? // Rendered with the name as its value, selected on mount, so typing
+          // replaces it and a click puts the caret where you clicked.
+          '<input class="group-rename" type="text" data-group-rename="' +
+          esc(g.id) +
+          '" maxlength="40" spellcheck="false" aria-label="Group name" value="' +
+          esc(g.name) +
+          '">'
+        : '<span class="group-name">' + esc(g.name) + "</span>") +
+      '<span class="group-count">' +
+      wts.length +
+      "</span>" +
+      alert +
+      "</div>" +
+      '<button class="act ghost iconact group-menu-btn" data-tool="groupMenu" data-group="' +
+      esc(g.id) +
+      '" data-menu-key="group:' +
+      esc(g.id) +
+      '" data-tip="Rename, reorder or delete this group" aria-label="Group actions"' +
+      ' aria-haspopup="menu" aria-expanded="false">' +
+      icons.caret +
+      "</button>" +
+      "</div>" +
+      '<div class="group-cards" id="group-cards-' +
+      esc(g.id) +
+      '">' +
+      (wts.length
+        ? wts.map(card).join("")
+        : '<div class="group-empty">Empty. Move a worktree here from its menu.</div>') +
+      "</div>" +
+      "</div>"
+    );
+  }
+
+  /**
    * The expand/collapse control. One button doing both, because the two are
    * never both useful: with anything open the only thing left to ask for is
    * closing them, and with everything shut, opening them. It says which of the
@@ -1772,8 +1956,18 @@
   function render(data) {
     // The caret this was positioned against is about to be replaced.
     closeCardMenu();
+    const holding = (editingGroup || drag) && data !== lastData;
     lastData = data;
     hideTip(); // a re-render replaces the hovered node; drop any open tooltip
+    // A routine payload must not wipe a name being typed, or pull the list out
+    // from under a section being dragged - both would be lost to a refresh the
+    // user did not ask for, and agents push these constantly. Same guard the
+    // settings view uses for the token field, and the same shape: the data is
+    // kept, the paint is not. endGroupRename and endDrag paint as soon as the
+    // gesture is over, so the panel is at most one refresh stale and only while
+    // a gesture is in flight. `data !== lastData` is what tells a push apart
+    // from the internal re-render that ends one, which must still paint.
+    if (holding) return;
     if (settingsOpen) {
       // Settings owns the whole window; routine data pushes must not wipe the
       // token field mid-type, so only re-render when GitHub state changed.
@@ -1789,19 +1983,309 @@
     // refresh doesn't bounce the user back to the top (see renderBranches).
     const prevCards = root.querySelector(".cards");
     const y = prevCards ? prevCards.scrollTop : 0;
-    const wts = data.worktrees || [];
     // Both views scroll in the same `.cards` region, so the toolbar stays put and
     // the scroll restore above works for either.
     const body =
       panelView === "agents"
         ? '<div class="cards agents-list">' + agentsList(data) + "</div>"
-        : '<div class="cards">' +
-          (wts.map(card).join("") ||
-            '<div class="empty">No worktrees found.</div>') +
-          "</div>";
+        : '<div class="cards">' + cardsBody(data) + "</div>";
     root.innerHTML = toolbar(data) + body;
     const nextCards = root.querySelector(".cards");
     if (nextCards) nextCards.scrollTop = y;
+    syncGroupHeadHeight();
+    openFlaggedRename(data);
+  }
+
+  /**
+   * Tell the stylesheet how tall a section header actually is, so the card
+   * headers that pin under it land against it rather than 2px into or short of
+   * it. Both are sticky in the same scroll region, and the offset is the only
+   * thing that keeps them from being drawn on top of each other.
+   *
+   * Measured rather than written down: the header is one line of fixed-size text
+   * beside an icon button, so it is stable, but "stable" is not "known", and a
+   * theme or a font that changed it would leave a hairline gap that nothing in
+   * the source explains. One read per render, and only when sections are drawn.
+   */
+  function syncGroupHeadHeight() {
+    const head = root.querySelector(".group-head");
+    if (!head) return;
+    const h = Math.round(head.getBoundingClientRect().height);
+    if (h > 0) root.style.setProperty("--group-head-h", h + "px");
+  }
+
+  /**
+   * Put one group's header into edit mode: the name becomes a field in place,
+   * with the current name selected so typing replaces it.
+   *
+   * A full re-render, because the header's markup changes. That is fine here -
+   * it happens once per rename, on a deliberate click - and `render` is what
+   * restores the list's scroll offset.
+   */
+  function startGroupRename(id) {
+    if (!id || id === "general") return;
+    closeCardMenu();
+    editingGroup = id;
+    render(lastData);
+    const input = root.querySelector(
+      '[data-group-rename="' + cssEscape(id) + '"]'
+    );
+    if (!input) {
+      editingGroup = "";
+      return;
+    }
+    // A group made from a card menu is appended at the end of the list, which
+    // may be below the fold: there is no point opening a field nobody can see.
+    input.scrollIntoView({ block: "nearest" });
+    input.focus();
+    input.select();
+  }
+
+  /**
+   * A group the host has just created arrives flagged, and the panel opens its
+   * header field: created and named are one gesture, so the placeholder name is
+   * never what you are left with unless you walk away from it.
+   *
+   * Guarded by the last id acted on as well as by the host clearing the flag,
+   * since the cached payload passes through several posters.
+   */
+  let lastEditFlag = "";
+  function openFlaggedRename(data) {
+    const id = data && data.editGroup;
+    if (!id || id === lastEditFlag) return;
+    lastEditFlag = id;
+    startGroupRename(id);
+  }
+
+  /**
+   * Leave edit mode. `commit` sends the typed name to the host; anything else
+   * (Escape, an empty field) drops it and the group keeps the name it had.
+   *
+   * The host is the one that trims, caps and de-duplicates the name - the same
+   * code path a stored blob goes through - so this sends what was typed and lets
+   * the next payload say what it became.
+   */
+  function endGroupRename(commit) {
+    const id = editingGroup;
+    if (!id) return;
+    const input = root.querySelector(
+      '[data-group-rename="' + cssEscape(id) + '"]'
+    );
+    const name = input ? input.value.trim() : "";
+    editingGroup = "";
+    if (commit && name) send("renameGroup", { groupId: id, name });
+    // Paint the payload that was held back while the field was open. When the
+    // rename went through, the host's own update lands a moment later and
+    // replaces this with the name it actually stored.
+    render(lastData);
+  }
+
+  // --- Dragging a section to reorder ----------------------------------------
+  //
+  // Pointer events rather than HTML5 drag and drop: this needs a drop indicator,
+  // autoscroll at the edges of a short sidebar, and a cancel key, and the native
+  // API gives none of those while taking over the cursor and the drag image.
+  //
+  // The group being dragged stays where it is and dims; a line shows where it
+  // would land. A group can be several screens tall with its cards open, so
+  // carrying the whole block under the pointer, or swapping neighbours as their
+  // midpoints pass, would both be motion sickness. The line is the whole answer:
+  // it is the only thing the drop actually decides.
+  let drag = null;
+  // Set when a drag ends, and read once by the click that follows it: releasing
+  // the pointer over a header fires a click, and that click must not fold the
+  // section the user just moved.
+  let dragSuppressedClick = false;
+
+  function dragCards() {
+    return root.querySelector(".cards");
+  }
+
+  /**
+   * Where a drop at `y` would insert: an index into the group list, 0..n, being
+   * the boundary the pointer is nearest. Measured off the `.group` elements and
+   * not their headers, which are sticky and so are not where they say they are.
+   */
+  function dropIndexAt(y) {
+    const els = drag.els;
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i <= els.length; i++) {
+      const r =
+        i < els.length
+          ? els[i].getBoundingClientRect().top
+          : els[els.length - 1].getBoundingClientRect().bottom;
+      const d = Math.abs(y - r);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /** The index the dragged group would end up at, which is one less than the
+   *  boundary when it is moving down past its own slot. */
+  function dragTargetIndex() {
+    return drag.insert > drag.from ? drag.insert - 1 : drag.insert;
+  }
+
+  function beginDrag() {
+    const cards = dragCards();
+    if (!cards) return;
+    drag.els = Array.from(root.querySelectorAll(".group"));
+    drag.from = drag.els.indexOf(drag.el);
+    if (drag.from === -1 || drag.els.length < 2) {
+      drag = null;
+      return;
+    }
+    drag.moved = true;
+    // Sticky headers are pinned somewhere other than where their group is, which
+    // makes both the measuring and the picture wrong. Off for the duration.
+    cards.classList.add("dragging");
+    drag.el.classList.add("drag-source");
+    drag.line = document.createElement("div");
+    drag.line.className = "drop-line";
+    cards.appendChild(drag.line);
+    closeCardMenu();
+  }
+
+  function updateDrag(y) {
+    const cards = dragCards();
+    if (!cards || !drag.line) return;
+    drag.insert = dropIndexAt(y);
+    const els = drag.els;
+    const i = drag.insert;
+    const r =
+      i < els.length
+        ? els[i].getBoundingClientRect().top
+        : els[els.length - 1].getBoundingClientRect().bottom;
+    const box = cards.getBoundingClientRect();
+    // Content coordinates: an absolutely positioned child of a scroll container
+    // scrolls with its content, so the line has to be placed against the scroll
+    // offset rather than against the viewport.
+    drag.line.style.top = Math.round(r - box.top + cards.scrollTop) + "px";
+    // Nothing to draw when the drop would put it back where it started.
+    drag.line.classList.toggle("noop", dragTargetIndex() === drag.from);
+    autoScroll(y, box, cards);
+  }
+
+  /**
+   * Scroll the list while the pointer is held near either end of it. On a rAF
+   * loop rather than on pointermove: a pointer held still at the edge is the
+   * case that needs it most, and that fires no move events at all.
+   */
+  function autoScroll(y, box, cards) {
+    const zone = 28;
+    const speed =
+      y < box.top + zone ? -8 : y > box.bottom - zone ? 8 : 0;
+    drag.scrollBy = speed;
+    if (speed && !drag.raf) {
+      const step = () => {
+        if (!drag || !drag.scrollBy) {
+          if (drag) drag.raf = 0;
+          return;
+        }
+        const before = cards.scrollTop;
+        cards.scrollTop += drag.scrollBy;
+        // The list moved under the pointer, so the drop target did too.
+        if (cards.scrollTop !== before) updateDrag(drag.y);
+        drag.raf = requestAnimationFrame(step);
+      };
+      drag.raf = requestAnimationFrame(step);
+    }
+  }
+
+  /**
+   * Finish. `commit` false is a cancel (Escape, or a pointer lost mid-drag) and
+   * leaves the order alone.
+   *
+   * A committed move is sent as the delta `moveGroup` already takes, so dragging
+   * and the menu's Move up and Move down are one action at the host - which
+   * matters more than it looks: the ordering is what rule precedence will be
+   * built on, and two ways to write it would be two things to keep in step.
+   */
+  function endDrag(commit) {
+    if (!drag) return;
+    const { el, line, raf, id, from, moved } = drag;
+    if (raf) cancelAnimationFrame(raf);
+    const target = moved ? dragTargetIndex() : from;
+    drag = null;
+    const cards = dragCards();
+    if (cards) cards.classList.remove("dragging");
+    if (el) el.classList.remove("drag-source");
+    if (line) line.remove();
+    if (!moved) return;
+    dragSuppressedClick = true;
+    if (commit && target !== from) {
+      send("moveGroup", { groupId: id, delta: target - from });
+    }
+    // Paint whatever landed while the drag held the list still. A committed move
+    // is replaced by the host's own payload a moment later; this is what covers
+    // the cancel, and the refresh that arrived mid-drag either way.
+    render(lastData);
+  }
+
+  root.addEventListener("pointerdown", (e) => {
+    // Left button only, and never on the caret, a link, or the rename field.
+    if (e.button !== 0 || drag) return;
+    const head = e.target.closest(".group-head");
+    if (!head || e.target.closest("button, a, input")) return;
+    const toggle = head.querySelector("[data-group-toggle]");
+    const id = toggle && toggle.getAttribute("data-group-toggle");
+    if (!id) return;
+    // Armed, not started. A press that never moves is a click, and clicking a
+    // header folds it.
+    drag = {
+      id,
+      el: head.closest(".group"),
+      startY: e.clientY,
+      y: e.clientY,
+      moved: false,
+      insert: 0,
+      from: 0,
+      raf: 0,
+    };
+  });
+
+  document.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    drag.y = e.clientY;
+    if (!drag.moved) {
+      if (Math.abs(e.clientY - drag.startY) < 4) return;
+      beginDrag();
+      if (!drag) return;
+    }
+    // Held once a drag is real, so the list does not select text or fire hovers
+    // under the pointer.
+    e.preventDefault();
+    updateDrag(e.clientY);
+  });
+
+  document.addEventListener("pointerup", () => endDrag(true));
+  // A pointer that leaves the window, or is taken by something else, is a cancel
+  // rather than a drop at wherever it was last seen.
+  document.addEventListener("pointercancel", () => endDrag(false));
+
+  /**
+   * Fold or unfold one group. Same trick as `toggle` below: flip a class on the
+   * section that is already there. Its cards are unchanged, only whether they
+   * are shown, and a re-render would cost the list its scroll position on every
+   * click - which matters more here, since folding a group is what you do to
+   * get back to the top of the list.
+   */
+  function toggleGroup(id) {
+    if (collapsedGroups.has(id)) collapsedGroups.delete(id);
+    else collapsedGroups.add(id);
+    persist();
+    const head = root.querySelector(
+      '[data-group-toggle="' + cssEscape(id) + '"]'
+    );
+    if (!head) return;
+    const collapsed = collapsedGroups.has(id);
+    head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    const section = head.closest(".group");
+    if (section) section.classList.toggle("collapsed", collapsed);
   }
 
   /**
@@ -1897,48 +2381,129 @@
   }
 
   // --- Card overflow menu ----------------------------------------------------
-  // The rarely-reached per-worktree actions, behind the caret in a card header.
-  // Mounted on document.body rather than inside the card: `.cards` is the scroll
-  // region and the card header is sticky, so a menu positioned inside one is
-  // clipped by the first and stacked under the second. On the body it is also
-  // untouched by a data re-render, which the skills modal needs for the same
-  // reason.
+  // The rarely-reached actions behind a caret: per worktree in a card header,
+  // per group in a section header. Mounted on document.body rather than inside
+  // the list: `.cards` is the scroll region and both headers are sticky, so a
+  // menu positioned inside one is clipped by the first and stacked under the
+  // second. On the body it is also untouched by a data re-render, which the
+  // skills modal needs for the same reason.
+  //
+  // One element and one owner for both kinds of menu. Two of them would have
+  // meant two of everything that shuts one - the outside click, the scroll, the
+  // resize, Escape, a re-render - and the only thing that actually differs
+  // between them is which items they hold. The owner is a key rather than a
+  // path so the button to un-expand can be found either way.
   let cardMenuEl = null;
-  let cardMenuPath = "";
+  let cardMenuKey = "";
 
   function closeCardMenu() {
     if (!cardMenuEl) return;
     cardMenuEl.remove();
     cardMenuEl = null;
     const btn = root.querySelector(
-      "[data-tool='cardMenu'][data-path=\"" + cssEscape(cardMenuPath) + '"]'
+      '[data-menu-key="' + cssEscape(cardMenuKey) + '"]'
     );
     if (btn) btn.setAttribute("aria-expanded", "false");
-    cardMenuPath = "";
+    cardMenuKey = "";
   }
 
-  function openCardMenu(btn, path) {
+  /**
+   * One menu entry. Whatever the action needs back - the worktree path, the
+   * group id, a direction - rides as a data attribute and is read off the item
+   * on click, so the menu itself holds no state.
+   *
+   * `checked` (when given) makes the item a radio: that is what the move-to
+   * list is, one of n and exactly one true.
+   */
+  function menuItem(action, glyph, label, opts) {
+    const o = opts || {};
+    const radio = typeof o.checked === "boolean";
+    return (
+      '<button class="card-menu-item' +
+      (o.extra || "") +
+      (o.checked ? " checked" : "") +
+      '" role="' +
+      (radio ? "menuitemradio" : "menuitem") +
+      '"' +
+      (radio ? ' aria-checked="' + (o.checked ? "true" : "false") + '"' : "") +
+      ' data-action="' +
+      action +
+      '"' +
+      (o.path ? ' data-path="' + esc(o.path) + '"' : "") +
+      (o.group ? ' data-group="' + esc(o.group) + '"' : "") +
+      (o.delta ? ' data-delta="' + o.delta + '"' : "") +
+      '><span class="card-menu-ico">' +
+      (glyph || "") +
+      "</span>" +
+      label +
+      "</button>"
+    );
+  }
+
+  /**
+   * Put `items` on the body, anchored either to the caret that owns `key` or -
+   * when `at` is given - to the pointer that right-clicked. Shuts the menu
+   * instead when `key` is the one already showing: a menu button should toggle,
+   * and a second right-click on the same thing means the same.
+   *
+   * The caret is found from `key` rather than passed in, so a right-click can
+   * open the very same menu without having a button to hand.
+   */
+  function mountMenu(key, items, at) {
+    const already = cardMenuKey === key && cardMenuEl;
+    closeCardMenu();
+    if (already) return;
+
+    const btn = root.querySelector(
+      '[data-menu-key="' + cssEscape(key) + '"]'
+    );
+    cardMenuEl = document.createElement("div");
+    cardMenuEl.className = "card-menu";
+    cardMenuEl.setAttribute("role", "menu");
+    cardMenuEl.innerHTML = items;
+    document.body.appendChild(cardMenuEl);
+    cardMenuKey = key;
+    if (btn) btn.setAttribute("aria-expanded", "true");
+
+    // Under the anchor, flipped above when there is not room below. Measured
+    // after mounting, since the height depends on what is in the list (whether
+    // Delete is there, how many groups exist).
+    //
+    // A pointer anchor is a zero-size box at the cursor, and opens to its right
+    // the way a context menu should; a caret opens right-aligned under itself,
+    // so the menu hangs inside the card rather than off its edge.
+    const r = at
+      ? { top: at.y, bottom: at.y, left: at.x, right: at.x, width: 0, height: 0 }
+      : btn && btn.getBoundingClientRect();
+    if (!r) return;
+    const m = cardMenuEl.getBoundingClientRect();
+    const gap = 4;
+    const edge = 4;
+    const roomBelow = window.innerHeight - r.bottom - gap - edge;
+    const roomAbove = r.top - gap - edge;
+    // The panel is often a short sidebar pane, so neither side has room for the
+    // whole menu. Rather than let it run off the bottom with entries unreachable,
+    // take the taller side and cap the menu to it - .card-menu scrolls.
+    const flip = m.height > roomBelow && roomAbove > roomBelow;
+    const room = Math.max(0, flip ? roomAbove : roomBelow);
+    cardMenuEl.style.maxHeight = room + "px";
+    const height = Math.min(m.height, room);
+    cardMenuEl.style.top = (flip ? r.top - gap - height : r.bottom + gap) + "px";
+    const left = at ? r.left : r.right - m.width;
+    cardMenuEl.style.left =
+      Math.max(edge, Math.min(left, window.innerWidth - m.width - edge)) + "px";
+    const first = cardMenuEl.querySelector(".card-menu-item");
+    if (first) first.focus();
+  }
+
+  function openCardMenu(path, at) {
     const wt = ((lastData && lastData.worktrees) || []).find(
       (w) => w.path === path
     );
     if (!wt) return;
-    const already = cardMenuPath === path && cardMenuEl;
-    closeCardMenu();
-    // A second click on the same caret shuts it, as a menu button should.
-    if (already) return;
 
     const item = (action, glyph, label, extra) =>
-      '<button class="card-menu-item' +
-      (extra || "") +
-      '" role="menuitem" data-action="' +
-      action +
-      '" data-path="' +
-      esc(path) +
-      '"><span class="card-menu-ico">' +
-      glyph +
-      "</span>" +
-      label +
-      "</button>";
+      menuItem(action, glyph, label, { path, extra });
 
     // The branch on GitHub stays an <a>: the webview opens http(s) links in the
     // browser itself, so routing it through the extension host would be a round
@@ -1953,16 +2518,53 @@
         "</span>View branch on GitHub</a>"
       : "";
 
-    // Four groups: what changes the worktree, what reaches into it, where to
-    // open it, and the one thing that destroys it. Delete is also drawn in the
-    // error colour - in a list of plain rows nothing else marks it out, and the
-    // rule alone is easy to read past. The confirmation modal is still what
+    // Which section this card is in, and every other one it could go to. Inline
+    // rather than behind a submenu or a quick pick: with a handful of groups it
+    // is one click instead of three, and the menu already caps its height and
+    // scrolls when there are more than fit.
+    //
+    // It leads the menu. Filing a worktree is the one action here you may do to
+    // the same card repeatedly - everything below it you do to a worktree about
+    // once in its life - so it takes the cheapest target in the list. With no
+    // group but General there is nothing to choose between, and the entry
+    // becomes the one that makes the first group.
+    const groups = (lastData && lastData.groups) || [];
+    const current = wt.group || "general";
+    const groupItems = wt.isPrimary
+      ? // The primary worktree is never filed, so there is nowhere to move it
+        // to. It keeps the entry that makes a group, though: with no sections
+        // drawn yet there is no section header to make one from, and a repo
+        // whose only worktree is this one would otherwise have no way in.
+        menuItem("createGroup", icons.group, "New group&hellip;", {})
+      : groups.length > 1
+      ? '<div class="card-menu-label">Move to group</div>' +
+        groups
+          .map((g) =>
+            menuItem(
+              "assignGroup",
+              g.id === current ? icons.check : "",
+              esc(g.name),
+              { path, group: g.id, checked: g.id === current }
+            )
+          )
+          .join("") +
+        menuItem("createGroup", icons.add, "New group&hellip;", { path })
+      : menuItem("createGroup", icons.group, "New group from here&hellip;", {
+          path,
+        });
+
+    // Then four groups: what changes the worktree, what reaches into it, where
+    // to open it, and the one thing that destroys it. Delete is also drawn in
+    // the error colour - in a list of plain rows nothing else marks it out, and
+    // the rule alone is easy to read past. The confirmation modal is still what
     // actually guards it.
     //
     // Debug is here only when the worktree has launch configurations, the same
     // condition its button carried; a menu entry that cannot do anything is
     // worse than an absent one, since you have to open the menu to find out.
     const items =
+      groupItems +
+      '<div class="card-menu-sep"></div>' +
       item("changeBranch", icons.edit, "Switch branch&hellip;") +
       item("refreshWorktree", icons.refresh, "Refresh") +
       '<div class="card-menu-sep"></div>' +
@@ -1979,38 +2581,44 @@
         : '<div class="card-menu-sep"></div>' +
           item("removeWorktree", icons.trash, "Delete worktree&hellip;", " danger"));
 
-    cardMenuEl = document.createElement("div");
-    cardMenuEl.className = "card-menu";
-    cardMenuEl.setAttribute("role", "menu");
-    cardMenuEl.innerHTML = items;
-    document.body.appendChild(cardMenuEl);
-    cardMenuPath = path;
-    btn.setAttribute("aria-expanded", "true");
+    mountMenu("card:" + path, items, at);
+  }
 
-    // Under the caret and right-aligned to it, flipped above when there is not
-    // room below. Measured after mounting, since the height depends on whether
-    // Delete is in the list.
-    const r = btn.getBoundingClientRect();
-    const m = cardMenuEl.getBoundingClientRect();
-    const gap = 4;
-    const edge = 4;
-    const roomBelow = window.innerHeight - r.bottom - gap - edge;
-    const roomAbove = r.top - gap - edge;
-    // The panel is often a short sidebar pane, so neither side has room for the
-    // whole menu. Rather than let it run off the bottom with entries unreachable,
-    // take the taller side and cap the menu to it - .card-menu scrolls.
-    const flip = m.height > roomBelow && roomAbove > roomBelow;
-    const room = Math.max(0, flip ? roomAbove : roomBelow);
-    cardMenuEl.style.maxHeight = room + "px";
-    const height = Math.min(m.height, room);
-    cardMenuEl.style.top = (flip ? r.top - gap - height : r.bottom + gap) + "px";
-    cardMenuEl.style.left =
-      Math.max(
-        edge,
-        Math.min(r.right - m.width, window.innerWidth - m.width - edge)
-      ) + "px";
-    const first = cardMenuEl.querySelector(".card-menu-item");
-    if (first) first.focus();
+  /**
+   * The actions on one section header. Move up and down are always here, even
+   * on the first and last group where they do nothing: the host no-ops an out
+   * of range move, and a menu whose entries shift position depending on which
+   * group you opened it on is worse than one with a dead entry in it.
+   *
+   * Delete is absent on General, which cannot be removed - it is where an
+   * unfiled worktree lives and where a deleted group's members land.
+   */
+  function openGroupMenu(groupId, at) {
+    const groups = (lastData && lastData.groups) || [];
+    if (!groups.some((g) => g.id === groupId)) return;
+    const item = (action, glyph, label, opts) =>
+      menuItem(action, glyph, label, Object.assign({ group: groupId }, opts));
+
+    // General is the default, not a group the user made: it is where an unfiled
+    // worktree lives and where a deleted group's members land, so it can be
+    // moved but neither renamed nor removed. Both entries are absent rather than
+    // disabled - there is nothing to explain, and a menu of two live entries
+    // reads better than one of four with two dead.
+    const fixed = groupId === "general";
+    const items =
+      (fixed ? "" : item("renameGroup", icons.edit, "Rename")) +
+      item("moveGroup", icons.arrowUp, "Move up", { delta: -1 }) +
+      item("moveGroup", icons.arrowDown, "Move down", { delta: 1 }) +
+      '<div class="card-menu-sep"></div>' +
+      menuItem("createGroup", icons.add, "New group&hellip;", {}) +
+      (fixed
+        ? ""
+        : '<div class="card-menu-sep"></div>' +
+          item("deleteGroup", icons.trash, "Delete group&hellip;", {
+            extra: " danger",
+          }));
+
+    mountMenu("group:" + groupId, items, at);
   }
 
   // --- Skills modal ----------------------------------------------------------
@@ -3518,7 +4126,23 @@
     }
     const cardMenuBtn = e.target.closest("[data-tool='cardMenu']");
     if (cardMenuBtn) {
-      openCardMenu(cardMenuBtn, cardMenuBtn.getAttribute("data-path") || "");
+      openCardMenu(cardMenuBtn.getAttribute("data-path") || "");
+      return;
+    }
+    const groupMenuBtn = e.target.closest("[data-tool='groupMenu']");
+    if (groupMenuBtn) {
+      openGroupMenu(groupMenuBtn.getAttribute("data-group") || "");
+      return;
+    }
+    // Fold a section. Before the card toggle below, and its own target: the
+    // section header sits above the cards, not inside one.
+    const groupToggle = e.target.closest("[data-group-toggle]");
+    if (groupToggle && dragSuppressedClick) {
+      dragSuppressedClick = false;
+      return;
+    }
+    if (groupToggle && !e.target.closest("button, a, input")) {
+      toggleGroup(groupToggle.getAttribute("data-group-toggle") || "");
       return;
     }
     // Branches view: filter/sort dropdowns and selections (webview-only).
@@ -3745,14 +4369,78 @@
     if (item) {
       const action = item.getAttribute("data-action");
       const path = item.getAttribute("data-path") || undefined;
+      const groupId = item.getAttribute("data-group") || undefined;
+      const delta = Number(item.getAttribute("data-delta")) || undefined;
       closeCardMenu();
+      // Renaming is webview-only until the name is typed: the field opens in the
+      // header, and only the finished name goes to the host.
+      if (action === "renameGroup") {
+        startGroupRename(groupId);
+        return;
+      }
       // No action means the <a> among them, which navigates on its own.
-      if (action) send(action, { path });
+      if (action) send(action, { path, groupId, delta });
       return;
     }
-    // Anywhere else, including the caret itself - which then re-opens through
-    // root's handler only when it was not the click that shut this.
-    if (cardMenuEl && !e.target.closest("[data-tool='cardMenu']")) closeCardMenu();
+    // Anywhere else, including a caret itself - which then re-opens through
+    // root's handler only when it was not the click that shut this. Every caret
+    // that owns a menu is exempted, not just a card's: this listener runs after
+    // root's, so a caret it did not know about would have its menu opened and
+    // then shut again by the same click.
+    if (cardMenuEl && !e.target.closest("[data-menu-key]")) closeCardMenu();
+  });
+
+  // The rename field. Enter keeps the name, Escape drops it, and clicking away
+  // keeps it too - the field holds a name that already exists, so leaving it is
+  // not a reason to throw the edit away. On document, not root: the field can
+  // lose focus to anything.
+  document.addEventListener("keydown", (e) => {
+    if (!editingGroup || !e.target.closest("[data-group-rename]")) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      endGroupRename(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      // Before the panel-wide Escape handler below, which would otherwise also
+      // read this as "shut whatever is open".
+      e.stopPropagation();
+      endGroupRename(false);
+    }
+  });
+  document.addEventListener(
+    "focusout",
+    (e) => {
+      if (!editingGroup || !e.target.closest("[data-group-rename]")) return;
+      endGroupRename(true);
+    },
+    true
+  );
+
+  // Right-click anywhere on a card, or on a section header, opens the same menu
+  // its caret does - anchored at the pointer. The caret stays: this is the
+  // shortcut for people who reach for it, not a replacement for a visible
+  // control.
+  root.addEventListener("contextmenu", (e) => {
+    // Never over a text field: the native menu there is cut, copy and paste,
+    // which is the useful one.
+    if (e.target.closest("input, textarea, [contenteditable]")) return;
+    const head = e.target.closest(".group-head");
+    if (head) {
+      const toggle = head.querySelector("[data-group-toggle]");
+      const id = toggle && toggle.getAttribute("data-group-toggle");
+      if (id) {
+        e.preventDefault();
+        openGroupMenu(id, { x: e.clientX, y: e.clientY });
+      }
+      return;
+    }
+    const card = e.target.closest(".card");
+    if (!card) return;
+    const btn = card.querySelector("[data-tool='cardMenu']");
+    const path = btn && btn.getAttribute("data-path");
+    if (!path) return;
+    e.preventDefault();
+    openCardMenu(path, { x: e.clientX, y: e.clientY });
   });
 
   // A menu positioned against a button cannot follow it: the cards scroll under
@@ -3807,6 +4495,14 @@
       }
       return;
     }
+    if (drag) {
+      endDrag(false);
+      return;
+    }
+    if (editingGroup) {
+      endGroupRename(false);
+      return;
+    }
     if (cardMenuEl) {
       closeCardMenu();
       return;
@@ -3824,7 +4520,15 @@
   root.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
     // Not when a control inside the header has focus: it holds the scope button
-    // and the actions caret, which fire their own click on Enter/Space.
+    // and the actions caret, which fire their own click on Enter/Space - and,
+    // while a group is being renamed, a text field, where Space is a space and
+    // Enter is "keep this name", not "fold the section under me".
+    const section = e.target.closest("[data-group-toggle]");
+    if (section && !e.target.closest("button, a, input")) {
+      e.preventDefault();
+      toggleGroup(section.getAttribute("data-group-toggle") || "");
+      return;
+    }
     const bar = e.target.closest("[data-toggle]");
     if (bar && !e.target.closest("button, a")) {
       e.preventDefault();
@@ -3838,6 +4542,16 @@
       e.preventDefault();
       revealAgent(e.target.getAttribute("data-session"));
     }
+  });
+
+  // F2 on a focused section header, which is what renames things everywhere else
+  // in the editor.
+  root.addEventListener("keydown", (e) => {
+    if (e.key !== "F2" || editingGroup) return;
+    const section = e.target.closest("[data-group-toggle]");
+    if (!section) return;
+    e.preventDefault();
+    startGroupRename(section.getAttribute("data-group-toggle") || "");
   });
 
   /**

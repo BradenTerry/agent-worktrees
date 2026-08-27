@@ -7,7 +7,7 @@
 
 const path = require("path");
 const { test } = require("@playwright/test");
-const { OUT_DIR, overviewData, branchesData, mountPanel } = require("./fixtures");
+const { OUT_DIR, overviewData, groupedData, branchesData, mountPanel } = require("./fixtures");
 
 const shot = (name) => path.join(OUT_DIR, name);
 
@@ -36,6 +36,21 @@ test("collapsed - every card shut", async ({ page }) => {
   await page.locator("[data-tool='collapseAll']").click();
   await page.locator("#root").screenshot({
     path: shot("collapsed.png"),
+    animations: "disabled",
+  });
+});
+
+test("groups - the cards filed into user-named sections", async ({ page }) => {
+  const data = groupedData();
+  await mountPanel(page, { data });
+  // Shut the cards first: the sections are what this image is about, and four
+  // open cards push the last header off the bottom of it.
+  await page.locator("[data-tool='collapseAll']").click();
+  // One section folded, so the image carries both states and the waiting-agent
+  // count a folded header keeps showing.
+  await page.locator("[data-group-toggle='g1']").click();
+  await page.locator("#root").screenshot({
+    path: shot("groups.png"),
     animations: "disabled",
   });
 });

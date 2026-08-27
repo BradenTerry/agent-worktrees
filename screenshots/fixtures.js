@@ -72,6 +72,10 @@ function overviewData() {
     repoUrl: "https://github.com/acme/acme-web",
     hooksInstalled: true,
     prEnabled: true,
+    // Every repo the panel can store settings for gets at least General, and it
+    // is always drawn - so the listing images have to carry it, or they show a
+    // panel nobody actually gets.
+    groups: [{ id: "general", name: "General" }],
     // The Source Control scope button defaults to on in the extension, so the
     // listing images must show it too; without this the screenshots advertise a
     // panel missing a button every user actually gets.
@@ -529,6 +533,25 @@ function expandedPaths(data) {
 }
 
 /**
+ * The overview, filed into the user's own groups. A separate fixture rather than
+ * groups on `overviewData`, so the other listing images keep showing the panel a
+ * user who has never made a group gets - which is the flat list, with no section
+ * headers at all.
+ */
+function groupedData() {
+  const data = overviewData();
+  // General is the fixed default and is never renamed, so it is called what the
+  // panel calls it. The primary worktree is not filed into anything: it sits
+  // above the sections, under its own divider.
+  data.groups = [...data.groups, { id: "g1", name: "In review" }];
+  const wts = data.worktrees;
+  if (wts[1]) wts[1].group = "g1";
+  if (wts[2]) wts[2].group = "g1";
+  // wts[3] carries no group, which is what being in General looks like.
+  return data;
+}
+
+/**
  * Mount the real panel UI in `page` with the given data, then optionally send a
  * follow-up message (e.g. to open the settings view). Returns when rendered.
  */
@@ -573,6 +596,7 @@ module.exports = {
   OUT_DIR,
   THEME_DARK,
   overviewData,
+  groupedData,
   branchesData,
   mountPanel,
 };

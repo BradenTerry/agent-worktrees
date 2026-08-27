@@ -53,17 +53,20 @@ exactly what the click will hit. The header is
 `position: sticky` inside the cards scroll region, so while a card's agent rows
 scroll past, the name of the worktree they belong to stays pinned directly above
 them. This is the part that addresses the misclick: a row is never separated
-from its worktree's name. The header repaints the card's own background tint
-(it needs to be opaque, since rows pass under it) and the card's expanded body
-carries a vertical rail back up to it.
+from its worktree's name. The header repaints the card's own background tint,
+since rows pass under it.
 
 **The body opens on a horizontal rule**, so where the fold is is drawn rather
 than remembered: above it is what the card shows at rest, below it is what
 expanding got you. It sits on `.card-body` rather than on the Worktree line,
 which is the body's usual first row but is dropped on the primary worktree - the
-rule has to mark the boundary on every card, not on most of them. The rail starts
-at it and hangs off it, so the two read as one bracket around the body instead of
-two unrelated hairlines.
+rule has to mark the boundary on every card, not on most of them.
+
+The rule used to hang a vertical rail off itself down the side of the body. That
+went when [groups](groups.md) arrived: a group's rail already brackets its cards
+from outside, and a second hairline a few pixels in says the same thing twice.
+Beside the Agents heading the pair read as a gutter rather than as anything about
+the card. The rule alone marks the fold.
 
 **Two controls on the name line, and a menu.** The header holds the Source
 Control scope button - the one control there that is also a *reading* - and a
