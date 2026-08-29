@@ -71,11 +71,13 @@ its running agents in one view.
   caret menu (only where the worktree has launch configurations) opens its
   `.vscode/launch.json` targets as a second menu **in the same place**, each row
   starting with the debugger and its play button without, and rows underneath
-  stop the sessions it started. A menu rather than `showQuickPick`, which painted
-  at the top of the window when the control pressed was at the bottom of a
-  sidebar. The target is sent by name and the launch file re-read before anything
-  starts, so a list a refresh out of date can offer a stale target but never
-  launch one. The Run and Debug view itself cannot be retargeted
+  stop or restart the sessions it started (a restart re-runs the pre-launch task
+  in the worktree and relaunches the same configuration). A menu rather than
+  `showQuickPick`, which painted at the top of the window when the control
+  pressed was at the bottom of a sidebar. The target is sent by name and the
+  launch file re-read before anything starts, so a list a refresh out of date
+  can offer a stale target but never launch one. The Run and Debug view itself
+  cannot be retargeted
   by an extension, so the panel drives `debug.startDebugging` with the folder
   variables rewritten to the worktree and its `${input:...}` variables resolved
   from the worktree's own declarations.
