@@ -93,6 +93,12 @@
     // A running debug session, mirroring VS Code's debug-stop square.
     debugStop:
       '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>',
+    // Restart a running session, mirroring VS Code's debug-restart arrow. Its own
+    // entry rather than the toolbar's refresh glyph: same family of shape, but
+    // this one sits next to debugStop and is drawn to the same weight, so the two
+    // read as one pair of session controls.
+    debugRestart:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13 2.6v3h-3"/></svg>',
     // A running subagent: an elbow connector down from the parent row into a
     // node, so a subagent reads as belonging to the agent above it.
     subagent:
@@ -1251,15 +1257,39 @@
     const debugSessions = wt.debugSessions || [];
 
     // Rows for the sessions this panel started. VS Code's debug toolbar can stop
-    // them too, but it acts on the one session it considers active, so the card
-    // carries a stop button per session: that is the only place a specific
-    // worktree's session can be named and stopped.
+    // and restart them too, but it acts on the one session it considers active,
+    // so the card carries both buttons per session: that is the only place a
+    // specific worktree's session can be named and acted on.
+    //
+    // A session being restarted keeps its row, disabled and marked, until its
+    // replacement starts. The restart re-runs the pre-launch task, so there can
+    // be a build in the gap and an empty card would read as "it just died".
     const debugRows = debugSessions.length
       ? '<div class="debug-rows">' +
         debugSessions
-          .map(
-            (s) =>
-              '<div class="debug-row">' +
+          .map(function (s) {
+            const busy = !!s.restarting;
+            const btn = function (action, tip, glyph) {
+              return (
+                '<button class="iconbtn" data-action="' +
+                action +
+                '" data-debug="' +
+                esc(s.id) +
+                '" data-tip="' +
+                tip +
+                '" aria-label="' +
+                tip +
+                '"' +
+                (busy ? " disabled" : "") +
+                ">" +
+                glyph +
+                "</button>"
+              );
+            };
+            return (
+              '<div class="debug-row' +
+              (busy ? " restarting" : "") +
+              '">' +
               '<span class="debug-ico">' +
               icons.debug +
               "</span>" +
@@ -1271,15 +1301,20 @@
               (s.noDebug
                 ? '<span class="debug-chip" data-tip="Started without debugging (no breakpoints)">no debug</span>'
                 : "") +
+              (busy
+                ? '<span class="debug-chip" data-tip="Stopped, and starting again">restarting</span>'
+                : "") +
               '<span class="row-actions">' +
-              '<button class="iconbtn" data-action="stopDebug" data-debug="' +
-              esc(s.id) +
-              '" data-tip="Stop this debug session" aria-label="Stop this debug session">' +
-              icons.debugStop +
-              "</button>" +
+              btn(
+                "restartDebug",
+                "Restart this debug session",
+                icons.debugRestart
+              ) +
+              btn("stopDebug", "Stop this debug session", icons.debugStop) +
               "</span>" +
               "</div>"
-          )
+            );
+          })
           .join("") +
         "</div>"
       : "";
@@ -4336,11 +4371,12 @@
         send("scopeScm", { path: path || undefined });
         return;
       }
-      // Stop one debug session by its VS Code session id. The row is removed by
-      // the extension's terminate event, not here, so a session that refuses to
-      // die keeps its stop button.
-      if (action === "stopDebug") {
-        send("stopDebug", {
+      // Stop or restart one debug session by its VS Code session id. Neither
+      // touches the row here: the extension's session events do that, so a
+      // session that refuses to die keeps its buttons and a restart marks its
+      // row until the replacement starts.
+      if (action === "stopDebug" || action === "restartDebug") {
+        send(action, {
           debugId: btn.getAttribute("data-debug") || undefined,
         });
         return;

@@ -271,6 +271,7 @@ interface ActionMessage {
     | "deleteGoneBranches"
     | "debugWorktree"
     | "stopDebug"
+    | "restartDebug"
     | "createGroup"
     | "renameGroup"
     | "deleteGroup"
@@ -278,7 +279,7 @@ interface ActionMessage {
     | "assignGroup";
   path?: string;
   sessionId?: string;
-  /** Debug session id, for stopDebug. */
+  /** Debug session id, for stopDebug and restartDebug. */
   debugId?: string;
   /** GitHub PAT, for setGithubToken. */
   token?: string;
@@ -1320,6 +1321,8 @@ export class WorktreeWebviewProvider
         return this.debugWorktree(msg.path);
       case "stopDebug":
         return this.stopDebug(msg.debugId);
+      case "restartDebug":
+        return this.restartDebug(msg.debugId);
       case "openBranches":
         return this.openBranchesPanel();
       case "createGroup":
@@ -1348,13 +1351,24 @@ export class WorktreeWebviewProvider
     const wt = this.lastData?.worktrees.find(
       (w) => normalize(w.path) === normalize(fsPath)
     );
-    await startWorktreeDebug(fsPath, wt?.name ?? path.basename(fsPath));
+    await startWorktreeDebug(
+      fsPath,
+      wt?.name ?? path.basename(fsPath),
+      this.debugSessions
+    );
   }
 
   /** Stop one debug session the panel started. */
   private async stopDebug(id?: string): Promise<void> {
     if (!id) return;
     await this.debugSessions.stop(id);
+  }
+
+  /** Restart one debug session the panel started: the tracker stops it, re-runs
+   *  its pre-launch task in the worktree and launches it again (see debugRun). */
+  private async restartDebug(id?: string): Promise<void> {
+    if (!id) return;
+    await this.debugSessions.restart(id);
   }
 
   /**

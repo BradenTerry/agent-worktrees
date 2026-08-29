@@ -539,6 +539,11 @@ body {
   width: 100%;
   height: 100%;
 }
+/* The green glyph means "running", so a session that has been stopped by a
+   restart and not come back yet drops out of it until it has. */
+.debug-row.restarting .debug-ico {
+  color: var(--vscode-descriptionForeground);
+}
 .debug-label {
   flex: 1 1 auto;
   min-width: 0;
@@ -555,9 +560,10 @@ body {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
 }
-/* Unlike an agent row, the stop button is always visible: these sessions were
-   started from the card rather than the debug view, so the card has to carry the
-   way to stop them. Hover-to-reveal would hide the only obvious exit. */
+/* Unlike an agent row, the restart and stop buttons are always visible: these
+   sessions were started from the card rather than the debug view, so the card has
+   to carry the way to act on them. Hover-to-reveal would hide the only obvious
+   exit. */
 .debug-row .row-actions {
   flex: 0 0 auto;
   opacity: 1;
@@ -565,8 +571,20 @@ body {
 .debug-row .iconbtn {
   color: var(--vscode-foreground);
 }
-.debug-row .iconbtn:hover {
+/* Only stopping goes red on hover. Restarting is not the destructive one of the
+   pair, and colouring both would stop the red saying anything. */
+.debug-row .iconbtn[data-action="stopDebug"]:hover {
   color: var(--vscode-errorForeground, #f14c4c);
+}
+/* Both buttons are disabled while a restart is in flight: the session is already
+   stopped, and a second click would only queue another round trip. */
+.debug-row .iconbtn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.debug-row .iconbtn:disabled:hover {
+  color: var(--vscode-foreground);
+  background: transparent;
 }
 /* Git working-tree summary line. */
 .gitline {

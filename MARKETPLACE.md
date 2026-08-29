@@ -164,7 +164,10 @@ instead, shown only on worktrees that have launch configurations.
 - `${workspaceFolder}`, the working directory and any `preLaunchTask` all point at
   the worktree, so you debug what you just changed. A failed build launches
   nothing.
-- Stop it from the same card: each session gets a row on the worktree it runs in.
+- Stop or restart it from the same card: each session gets a row on the worktree
+  it runs in. Restart rebuilds the worktree and launches the same configuration
+  again, without asking the prompts a second time, so a code change is one click
+  away from running.
 
 ## Groups
 

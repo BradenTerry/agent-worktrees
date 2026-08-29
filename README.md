@@ -66,7 +66,8 @@ its running agents in one view.
 - **[Run and Debug](docs/debug-sessions.md)** per worktree: a Debug button (only on
   cards whose worktree has launch configurations) picks one of its
   `.vscode/launch.json` targets, with or without the debugger, and rows underneath
-  stop the sessions it started. The Run and Debug view itself cannot be retargeted
+  stop or restart the sessions it started (a restart re-runs the pre-launch task
+  in the worktree and relaunches the same configuration). The Run and Debug view itself cannot be retargeted
   by an extension, so the panel drives `debug.startDebugging` with the folder
   variables rewritten to the worktree and its `${input:...}` variables resolved
   from the worktree's own declarations.

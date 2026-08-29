@@ -10,7 +10,13 @@
  *
  * Because the sessions are started outside the debug view, the panel also has to
  * offer the way back: `DebugSessionTracker` follows the sessions this extension
- * started and the card renders a stop button per session.
+ * started and the card renders stop and restart buttons per session. Restart is
+ * the panel's own stop-then-start, because `workbench.action.debug.restart` acts
+ * on the session VS Code considers active, which is the wrong one as soon as two
+ * worktrees are running something. The tracker keeps the recipe each session was
+ * started from (the prepared configuration and the already-resolved pre-launch
+ * task), so a restart rebuilds the worktree and re-launches without asking for
+ * the `${input:...}` answers again.
  */
 
 import * as vscode from "vscode";
@@ -55,6 +61,10 @@ export interface DebugSessionVM {
   label: string;
   /** Started with "Run without debugging". */
   noDebug: boolean;
+  /** Stopped by a restart and not back yet: the row stays on the card, marked,
+   *  so a restart that has a build to run first does not look like the session
+   *  just vanished. */
+  restarting?: boolean;
 }
 
 /** Read and parse a worktree's launch.json. Missing or unreadable is not an
@@ -467,19 +477,25 @@ async function runLaunchTask(spec: ResolvedTask): Promise<boolean> {
 }
 
 /**
- * Handle a configuration's task labels before launching: run the pre-launch task
- * in the worktree, and say so when a task had to be skipped. Returns false when
- * the launch should be abandoned.
+ * Handle a configuration's task labels before launching: resolve the pre-launch
+ * task against the worktree, and say so when a task had to be skipped. Returns
+ * the task to run, undefined when there is nothing to run, or CANCELLED when the
+ * launch should be abandoned.
+ *
+ * The task is returned rather than run here so the launch can keep it: restarting
+ * a session re-runs the same resolved task, which is both what makes a restart
+ * pick the change up and what stops it re-asking for the `${input:...}` answers
+ * the task was resolved with.
  *
  * prepareConfig strips both labels from what we hand VS Code, because VS Code
  * would resolve them against the *workspace folder* and build the primary
  * worktree instead of this one.
  */
-async function runPreLaunch(
+async function preparePreLaunch(
   config: DebugConfigLike,
   worktreePath: string,
   worktreeName: string
-): Promise<boolean> {
+): Promise<ResolvedTask | undefined | typeof CANCELLED> {
   const { preLaunchTask, postDebugTask } = launchTasksOf(config);
   if (postDebugTask) {
     // Running it would mean holding state until the session ends and resolving
@@ -490,12 +506,12 @@ async function runPreLaunch(
       `Skipped postDebugTask "${postDebugTask}": the panel does not run it in a worktree.`
     );
   }
-  if (!preLaunchTask) return true;
+  if (!preLaunchTask) return undefined;
 
   const spec = await resolveLaunchTask(worktreePath, worktreeName, preLaunchTask);
   // A dismissed input prompt is a deliberate "not now": abandon the launch
   // without a warning of its own, as VS Code does.
-  if (spec === CANCELLED) return false;
+  if (spec === CANCELLED) return CANCELLED;
   if (!spec) {
     // Better to launch with a warning than to refuse: the user may have built
     // the worktree already, and refusing would make the button useless for any
@@ -504,18 +520,112 @@ async function runPreLaunch(
       `Could not run "${preLaunchTask}" in this worktree, so it was skipped. ` +
         `Build the worktree yourself, or the session may run stale output.`
     );
-    return true;
+    return undefined;
   }
-  return runLaunchTask(spec);
+  return spec;
+}
+
+/**
+ * Everything needed to start one session, kept by the tracker for as long as the
+ * session runs so it can be started again.
+ *
+ * It holds the configuration as VS Code will get it - prepared for the worktree,
+ * with every `${input:...}` already substituted - so a restart neither re-reads a
+ * launch.json that may have changed under it nor re-asks for the answers that
+ * produced the running session.
+ */
+interface LaunchRecipe {
+  /** The worktree, as `git worktree list` spells it. */
+  worktreePath: string;
+  /** Its display name, for the warnings a failed launch shows. */
+  worktreeName: string;
+  /** The configuration name without the worktree suffix, which is how a starting
+   *  session is matched back to the recipe that started it. */
+  baseName: string;
+  /** Prepared for the worktree; ready to hand to startDebugging as it is. */
+  config: DebugConfigLike;
+  /** Started with "Run without debugging". */
+  noDebug: boolean;
+  /** Configured from an input answer, so nothing about it is logged. */
+  fromInput: boolean;
+  /** The pre-launch task, resolved once and re-run on every restart. */
+  task?: ResolvedTask;
+  /** The session id this launch replaces, set only by a restart. */
+  restartOf?: string;
+}
+
+/**
+ * Build the worktree and start one configuration in it. Shared by the Debug
+ * button and by a restart, so both run the same task and log the same way.
+ * Returns false when nothing started: a compound stops there rather than
+ * launching the rest against a half-built setup, and a restart drops the row it
+ * was holding.
+ */
+async function launchRecipe(
+  recipe: LaunchRecipe,
+  tracker?: DebugSessionTracker
+): Promise<boolean> {
+  // Build the worktree, not the primary, before the session starts.
+  if (recipe.task && !(await runLaunchTask(recipe.task))) return false;
+
+  // A configuration filled in from a prompt stays out of the log entirely: its
+  // name, program and arguments hold what the user typed. The tag travels with
+  // the session so stopping and restarting it are not logged either.
+  if (!recipe.fromInput) {
+    trace(
+      `debug: ${recipe.restartOf ? "restart" : "start"} ${recipe.config.name} ` +
+        `in ${recipe.worktreePath}` +
+        (recipe.noDebug ? " (no debug)" : "")
+    );
+  }
+  // Registered before the session can exist, so the start event can pair it with
+  // what launched it - and, on a restart, with the row it takes over.
+  tracker?.expect(recipe);
+
+  const folder = folderFor(recipe.worktreePath);
+  let ok = false;
+  try {
+    ok = await vscode.debug.startDebugging(folder, recipe.config, {
+      noDebug: recipe.noDebug,
+    });
+  } catch (e) {
+    // An input-fed configuration is not named, and neither is the adapter's
+    // message, which can quote the arguments the answer went into. A failure
+    // still has to be visible in the log, so it is marked without either.
+    diag(
+      recipe.fromInput
+        ? "debug: startDebugging threw for a configuration using ${input:...}"
+        : `debug: startDebugging threw for ${recipe.config.name}: ${String(e)}`
+    );
+  }
+  if (!ok) {
+    tracker?.forget(recipe);
+    // startDebugging resolves false when the adapter refuses (a missing
+    // program, an uninstalled debug extension). VS Code has already shown its
+    // own error, so only say which configuration it was.
+    diag(
+      recipe.fromInput
+        ? "debug: a configuration using ${input:...} did not start"
+        : `debug: ${recipe.config.name} did not start`
+    );
+    vscode.window.showWarningMessage(
+      `Could not start "${recipe.baseName}" in ${recipe.worktreeName}.`
+    );
+  }
+  return ok;
 }
 
 /**
  * Ask which target to run in `worktreePath`, then start it. A compound starts
  * its members in order, as VS Code does. Returns the number of sessions started.
+ *
+ * The tracker is passed in so each started session keeps the recipe it was
+ * launched from, which is what its row's restart button re-runs.
  */
 export async function startWorktreeDebug(
   worktreePath: string,
-  worktreeName: string
+  worktreeName: string,
+  tracker?: DebugSessionTracker
 ): Promise<number> {
   const file = await readLaunchFile(worktreePath);
   if (!file) {
@@ -549,13 +659,12 @@ export async function startWorktreeDebug(
     values = resolved;
   }
 
-  const folder = folderFor(worktreePath);
   const basename = path.basename(worktreePath);
   let started = 0;
   for (const raw of configs) {
     const config = applyInputValues(raw, values) as DebugConfigLike;
-    // Build the worktree, not the primary, before the session starts.
-    if (!(await runPreLaunch(config, worktreePath, worktreeName))) break;
+    const task = await preparePreLaunch(config, worktreePath, worktreeName);
+    if (task === CANCELLED) break;
     const prepared = prepareConfig(
       config,
       worktreePath,
@@ -563,53 +672,55 @@ export async function startWorktreeDebug(
       basename,
       choice.noDebug
     );
-    // A configuration filled in from a prompt stays out of the log entirely: its
-    // name, program and arguments hold what the user typed. The tag travels with
-    // the session so stopping it is not logged either.
     const fromInput = inputRefs(raw).length > 0;
-    if (fromInput) {
-      prepared[FROM_INPUT_KEY] = true;
-    } else {
-      trace(
-        `debug: start ${prepared.name} in ${worktreePath}` +
-          (choice.noDebug ? " (no debug)" : "")
-      );
-    }
-    let ok = false;
-    try {
-      ok = await vscode.debug.startDebugging(folder, prepared, {
+    if (fromInput) prepared[FROM_INPUT_KEY] = true;
+    const ok = await launchRecipe(
+      {
+        worktreePath,
+        worktreeName,
+        baseName: taggedBaseName(prepared, prepared.name),
+        config: prepared,
         noDebug: choice.noDebug,
-      });
-    } catch (e) {
-      // An input-fed configuration is not named, and neither is the adapter's
-      // message, which can quote the arguments the answer went into. A failure
-      // still has to be visible in the log, so it is marked without either.
-      diag(
-        fromInput
-          ? "debug: startDebugging threw for a configuration using ${input:...}"
-          : `debug: startDebugging threw for ${prepared.name}: ${String(e)}`
-      );
-    }
-    if (ok) {
-      started++;
-    } else {
-      // startDebugging resolves false when the adapter refuses (a missing
-      // program, an uninstalled debug extension). VS Code has already shown its
-      // own error, so only say which configuration it was.
-      diag(
-        fromInput
-          ? "debug: a configuration using ${input:...} did not start"
-          : `debug: ${prepared.name} did not start`
-      );
-      vscode.window.showWarningMessage(
-        `Could not start "${config.name}" in ${worktreeName}.`
-      );
-      // A compound whose first member fails would otherwise start the rest
-      // against a half-built setup.
-      break;
-    }
+        fromInput,
+        ...(task ? { task } : {}),
+      },
+      tracker
+    );
+    // A compound whose first member fails would otherwise start the rest
+    // against a half-built setup.
+    if (!ok) break;
+    started++;
   }
   return started;
+}
+
+/** How long a registered launch waits for its session before it is treated as
+ *  never having produced one. A launch that starts nothing normally cleans itself
+ *  up (see forget); this only stops an adapter that starts a session the tracker
+ *  cannot recognize from leaving the entry behind for the window's lifetime. */
+const PENDING_TTL_MS = 60_000;
+
+/** How long a restart waits for the stopped session to actually terminate before
+ *  giving up on it. Long enough for an adapter that runs a graceful shutdown,
+ *  short enough that a session which will never die does not hold the row for
+ *  good. */
+const RESTART_STOP_MS = 10_000;
+
+/** A session the tracker is following, and what it took to start it. */
+interface LiveSession {
+  session: vscode.DebugSession;
+  /** Normalized worktree path, so it compares equal to a card's. */
+  worktree: string;
+  vm: DebugSessionVM;
+  /** Configured from an input answer, so it is never named in the log. */
+  fromInput: boolean;
+  /** What started it, when the tracker saw the launch. */
+  recipe?: LaunchRecipe;
+  /** A restart is in flight for this session. */
+  restarting?: boolean;
+  /** It has terminated, and is only still listed because the restart that
+   *  stopped it has not produced its replacement yet. */
+  dead?: boolean;
 }
 
 /**
@@ -617,19 +728,14 @@ export async function startWorktreeDebug(
  *
  * A session is claimed by reading the worktree back off its own configuration,
  * so a session started from the Run and Debug view (or by another extension) is
- * never listed: the panel only offers to stop what it started.
+ * never listed: the panel only offers to stop and restart what it started.
  */
 export class DebugSessionTracker implements vscode.Disposable {
-  private readonly live = new Map<
-    string,
-    {
-      session: vscode.DebugSession;
-      worktree: string;
-      vm: DebugSessionVM;
-      /** Configured from an input answer, so it is never named in the log. */
-      fromInput: boolean;
-    }
-  >();
+  private readonly live = new Map<string, LiveSession>();
+  /** Launches that have been started but whose session has not appeared yet,
+   *  with the time they were registered. Two cards can be launching at once, so
+   *  it is a list matched on tags rather than a single slot. */
+  private readonly pending: { recipe: LaunchRecipe; at: number }[] = [];
   private readonly emitter = new vscode.EventEmitter<void>();
   /** Fires when a tracked session starts or ends, so the panel can re-render. */
   readonly onDidChange = this.emitter.event;
@@ -640,22 +746,65 @@ export class DebugSessionTracker implements vscode.Disposable {
       vscode.debug.onDidStartDebugSession((session) => {
         const worktree = taggedWorktree(session.configuration);
         if (!worktree) return;
+        const key = normalizePath(worktree);
+        const label = taggedBaseName(session.configuration, session.name);
+        const recipe = this.claim(key, label);
+        // A restart's replacement takes over the row its old session left
+        // behind, so the card never shows the same configuration twice.
+        if (recipe?.restartOf) this.live.delete(recipe.restartOf);
         this.live.set(session.id, {
           session,
-          worktree: normalizePath(worktree),
+          worktree: key,
           fromInput: taggedFromInput(session.configuration),
+          recipe,
           vm: {
             id: session.id,
-            label: taggedBaseName(session.configuration, session.name),
+            label,
             noDebug: taggedNoDebug(session.configuration),
           },
         });
         this.emitter.fire();
       }),
       vscode.debug.onDidTerminateDebugSession((session) => {
-        if (this.live.delete(session.id)) this.emitter.fire();
+        const entry = this.live.get(session.id);
+        if (!entry) return;
+        // A session a restart stopped keeps its row until the replacement
+        // starts: a restart with a build in front of it would otherwise empty
+        // the card for several seconds and read as "the click killed it".
+        if (entry.restarting) entry.dead = true;
+        else this.live.delete(session.id);
+        this.emitter.fire();
       })
     );
+  }
+
+  /** Register a launch that is about to start, so the session it produces can be
+   *  paired with it. Called by launchRecipe, not by the panel. */
+  expect(recipe: LaunchRecipe): void {
+    const cutoff = Date.now() - PENDING_TTL_MS;
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      if (this.pending[i].at < cutoff) this.pending.splice(i, 1);
+    }
+    this.pending.push({ recipe, at: Date.now() });
+  }
+
+  /** Drop a launch that produced no session, and with it any restart it was
+   *  standing in for: the row it was holding has nothing left behind it. */
+  forget(recipe: LaunchRecipe): void {
+    const i = this.pending.findIndex((p) => p.recipe === recipe);
+    if (i >= 0) this.pending.splice(i, 1);
+    if (recipe.restartOf) this.endRestart(recipe.restartOf);
+  }
+
+  /** Take the recipe a starting session was launched from, matched on the
+   *  worktree and the configuration name its own tags carry. */
+  private claim(worktree: string, baseName: string): LaunchRecipe | undefined {
+    const i = this.pending.findIndex(
+      (p) =>
+        normalizePath(p.recipe.worktreePath) === worktree &&
+        p.recipe.baseName === baseName
+    );
+    return i < 0 ? undefined : this.pending.splice(i, 1)[0].recipe;
   }
 
   /** Sessions running in this worktree, in start order. */
@@ -679,17 +828,109 @@ export class DebugSessionTracker implements vscode.Disposable {
    */
   async stop(id: string): Promise<void> {
     const entry = this.live.get(id);
-    if (!entry) return;
+    // A row whose session has already terminated is a restart's placeholder:
+    // there is nothing to stop, and removing it here would only take the row
+    // away from the replacement that is on its way.
+    if (!entry || entry.dead) return;
     // The session's own name, not the row's: the log spans every worktree, so it
     // wants the suffix the card row drops.
     if (!entry.fromInput) trace(`debug: stop ${entry.session.name}`);
     await vscode.debug.stopDebugging(entry.session);
   }
 
+  /**
+   * Restart one session: stop it, re-run its pre-launch task in the worktree and
+   * start the same configuration again.
+   *
+   * VS Code's own restart command acts on the session it considers active, which
+   * is the wrong one as soon as two worktrees are running something, so the panel
+   * does the round trip itself. It is a real relaunch rather than an adapter
+   * restart because the build has to run again: picking up the change just made
+   * in the worktree is the reason to restart at all.
+   */
+  async restart(id: string): Promise<void> {
+    const entry = this.live.get(id);
+    if (!entry || entry.restarting) return;
+    if (!entry.fromInput) trace(`debug: restart ${entry.session.name}`);
+    // Mark the row before anything slow happens: stopping, then a build, then
+    // the launch is seconds in which the click needs to have visibly landed.
+    entry.restarting = true;
+    entry.vm = { ...entry.vm, restarting: true };
+    this.emitter.fire();
+
+    await vscode.debug.stopDebugging(entry.session);
+    if (!(await this.waitForEnd(entry.session))) {
+      // Starting a second copy against whatever the first still holds open (a
+      // port, a lock file) is worse than not restarting.
+      diag("debug: a session did not stop, so it was not restarted");
+      vscode.window.showWarningMessage(
+        `"${entry.vm.label}" did not stop, so it was not restarted.`
+      );
+      this.endRestart(id);
+      return;
+    }
+    const recipe: LaunchRecipe = { ...this.recipeFor(entry), restartOf: id };
+    // launchRecipe drops the row itself when the launch fails after registering;
+    // this covers the pre-launch task failing before that.
+    if (!(await launchRecipe(recipe, this))) this.endRestart(id);
+  }
+
+  /** The recipe to start a session again from. One the tracker never saw launch
+   *  (a match that did not land) still restarts, from the configuration VS Code
+   *  is running - only its pre-launch task is lost, since the label was stripped
+   *  before VS Code ever saw it. */
+  private recipeFor(entry: LiveSession): LaunchRecipe {
+    if (entry.recipe) return entry.recipe;
+    return {
+      worktreePath: entry.worktree,
+      worktreeName: path.basename(entry.worktree),
+      baseName: entry.vm.label,
+      config: entry.session.configuration as DebugConfigLike,
+      noDebug: entry.vm.noDebug,
+      fromInput: entry.fromInput,
+    };
+  }
+
+  /** Give up on a restart: the placeholder row goes if its session is already
+   *  gone, and otherwise stops claiming to be restarting. */
+  private endRestart(id: string): void {
+    const entry = this.live.get(id);
+    if (!entry || !entry.restarting) return;
+    if (entry.dead) {
+      this.live.delete(id);
+    } else {
+      entry.restarting = false;
+      entry.vm = { ...entry.vm, restarting: false };
+    }
+    this.emitter.fire();
+  }
+
+  /** Wait for a stopped session to actually terminate, so a restart never has
+   *  two copies of one configuration alive at once. False when it is still
+   *  running after RESTART_STOP_MS. */
+  private waitForEnd(session: vscode.DebugSession): Promise<boolean> {
+    const entry = this.live.get(session.id);
+    // It can be gone already: stopDebugging is awaited, and the terminate event
+    // often lands before it resolves.
+    if (!entry || entry.dead) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const done = (ended: boolean): void => {
+        sub.dispose();
+        clearTimeout(timer);
+        resolve(ended);
+      };
+      const sub = vscode.debug.onDidTerminateDebugSession((s) => {
+        if (s.id === session.id) done(true);
+      });
+      const timer = setTimeout(() => done(false), RESTART_STOP_MS);
+    });
+  }
+
   dispose(): void {
     for (const d of this.disposables) d.dispose();
     this.disposables.length = 0;
     this.live.clear();
+    this.pending.length = 0;
     this.emitter.dispose();
   }
 }

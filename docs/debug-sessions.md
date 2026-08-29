@@ -1,7 +1,8 @@
 # Run and Debug in a worktree
 
 The **Debug** button on a card runs one of that worktree's launch configurations,
-with or without the debugger, and the rows underneath it stop what it started.
+with or without the debugger, and the rows underneath it stop and restart what it
+started.
 
 ## Why the panel has to own both ends
 
@@ -24,7 +25,8 @@ with or without the debugger, and the rows underneath it stop what it started.
   every debug type carry paths.
 
 Because the sessions start outside the debug view, the card is also the only place
-they can be named per worktree and stopped, which is what the session rows are for.
+they can be named per worktree and acted on, which is what the session rows are
+for.
 
 ## Parsing launch.json
 
@@ -198,23 +200,62 @@ them against a half-built setup is worse than stopping with one warning.
 an uninstalled debug extension) and VS Code has already shown its own error, so
 the panel only names the configuration.
 
-## Stopping
+## Stopping and restarting
 
 `DebugSessionTracker` follows `onDidStartDebugSession` / `onDidTerminateDebugSession`
 and claims a session only when it carries the worktree tag.
 
 - A session started from the Run and Debug view, or by another extension, is never
-  listed. The panel offers to stop only what it started.
-- The stop button on a row is **always visible**, unlike an agent row's
+  listed. The panel offers to stop and restart only what it started.
+- Both buttons on a row are **always visible**, unlike an agent row's
   hover-revealed actions: these sessions were started from the card, so the card
   has to carry the obvious way out. VS Code's debug toolbar also works, but it acts
   on the session it considers active, which is the wrong one as soon as two
-  worktrees are running something.
+  worktrees are running something - and that is exactly why restart cannot be
+  `workbench.action.debug.restart` either.
 - Stopping removes the row via the terminate event, not optimistically. A session
-  that refuses to die keeps its row and its stop button.
+  that refuses to die keeps its row and its buttons.
 - Disposing the tracker (extension-host shutdown) stops tracking, not the
   sessions. They keep running exactly as if they had been started from the debug
   view.
+
+### What a restart actually does
+
+A relaunch, not an adapter restart: stop the session, wait for it to terminate,
+run the pre-launch task in the worktree again, start the same configuration.
+Rebuilding is the point - the reason to restart is the change you just made in
+that worktree, and an adapter-level restart would run the old output.
+
+- Each launch is kept as a **recipe** (the prepared configuration, the resolved
+  pre-launch task, `noDebug`, the worktree), so a restart re-reads nothing. It
+  does not re-parse launch.json, which may have been edited since, and it does not
+  re-ask the `${input:...}` questions: the session comes back as the session that
+  was running, with the answers it was running with. A launch.json change is
+  picked up by the Debug button, which is where a *different* launch belongs.
+- The recipe is paired with its session by the worktree and configuration-name
+  tags the configuration already carries, since `startDebugging` does not hand
+  back the session it started. Two cards can be launching at once, so the pending
+  launches are a list, matched, rather than one slot.
+- The row **stays on the card while the restart runs**, marked "restarting" with
+  both buttons disabled and the green run glyph dropped, because the session is
+  genuinely not running. With a build in the gap the card would otherwise sit
+  empty for several seconds and read as "the click killed it".
+- A session that does not terminate within ten seconds is **not** restarted, with
+  a warning naming it. Starting a second copy against whatever the first still
+  holds open (a port, a lock file) is worse than not restarting.
+- A restart whose build fails, or whose launch the adapter refuses, drops the row:
+  the old session is gone and nothing replaced it. The warnings are the same ones
+  the Debug button shows, and a session configured from an `${input:...}` answer
+  stays out of the log here too.
+- A session the tracker somehow has no recipe for still restarts, from the
+  configuration VS Code is running. Only its pre-launch task is lost - the label
+  was stripped before VS Code ever saw it.
+
+`test/debugRestart.test.js` drives the whole round trip against a stubbed
+extension host: it asserts that the relaunch is byte-for-byte the configuration
+that was running, that the build ran again and the prompts did not, and that the
+row behaves at each step (held while the restart runs, dropped when the relaunch
+is refused, un-marked when the session will not stop).
 
 ## Refresh cost
 

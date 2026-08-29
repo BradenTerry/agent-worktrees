@@ -151,8 +151,8 @@ function overviewData() {
           behind: 0,
           upstream: "origin/feat/checkout-redesign",
         },
-        // A debug session the panel started in this worktree, with the stop
-        // button that is the way back out of it.
+        // A debug session the panel started in this worktree, with the restart
+        // and stop buttons that are the way back out of it.
         canDebug: true,
         debugSessions: [
           {
