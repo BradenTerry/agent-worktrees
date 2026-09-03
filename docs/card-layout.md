@@ -340,6 +340,12 @@ four cards take roughly a third of that again.
   button/segment builders. There is no density flag: the one place a shape is
   still chosen is `prLine`, whose `stacked` argument gives the branches view its
   two labelled rows while a card gets the side-by-side rollup.
+- The header's buttons live in `openCardMenu`, not in `card()`. When the caret
+  menu took them over, `card()` kept building its own copies of five of them
+  (the GitHub link, switch branch, refresh, open in a new window, delete) and
+  never emitting any: dead string concatenation per card per render. They are
+  gone, along with `githubBranchLink` and the `.ghlink` rule, which had no other
+  caller. `branchOnGitHub` stays; the menu still uses it.
 - `data-toggle` is what the click and keydown handlers look for. It sits on
   `.head-toggle`, not on the header, so the header's action buttons are outside
   it by structure rather than by exclusion. Both handlers still ignore events

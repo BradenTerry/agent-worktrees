@@ -411,7 +411,7 @@
       esc(
         (type ? type + ": " : "") +
           (task || "subagent") +
-          " — " +
+          ", " +
           state +
           (via ? ", spawned by " + via : "") +
           (where ? ", working in " + where : "") +
@@ -637,6 +637,38 @@
     );
   }
 
+  /**
+   * The role, focusability and accessible name an agent row carries. Shared by
+   * both views so the two cannot drift apart on it.
+   *
+   * `role="group"`, not `role="button"`. The row holds real buttons (stop, pin,
+   * Source Control) and ARIA forbids interactive descendants of a button:
+   * screen readers flatten them, so the controls on the row were not reachable.
+   * The row is still activated with Enter or Space - that handler matches on
+   * class, not on role - and the label says so, since without the button role
+   * nothing else would.
+   *
+   * The name is the full summary rather than the truncated label, and it used to
+   * be a native `title`. That was two bugs at once: it duplicated the panel's
+   * own tooltip on the label inside (both appeared, at different delays), and
+   * the summary was mouse-only, so the one reading that says what an agent is
+   * doing never reached anybody navigating by keyboard.
+   */
+  function agentRowA11y(a, status) {
+    const summary = a.summary || a.label || "Agent";
+    const said =
+      status === "waiting"
+        ? "waiting for you"
+        : status === "active"
+        ? "working"
+        : "idle";
+    return (
+      'role="group" tabindex="0" aria-label="' +
+      esc(summary + ", " + said + ". Press Enter to reveal its terminal.") +
+      '"'
+    );
+  }
+
   /** Stop one agent. Same button on a card row and an agents-view row. */
   function stopAgentBtn(a) {
     return (
@@ -657,7 +689,10 @@
       // elsewhere handed it to a subagent. The rows say so; the empty line is
       // only for a worktree where nothing at all is happening.
       if (!away) {
-        return '<div class="agents-empty">No agents yet. Use “New Agent” to start one.</div>';
+        // Names what is on screen, not a label nothing wears: the control is the
+        // icon-only button beside the Agents heading directly above this line,
+        // and there is no text anywhere in the panel reading "New Agent".
+        return '<div class="agents-empty">No agents yet. Use the + button above to start one.</div>';
       }
       return '<div class="agents">' + foreignSubagentRows(foreign) + "</div>";
     }
@@ -677,7 +712,9 @@
             (a.sessionId === activeSessionId ? " terminal-open" : "") +
             '" data-action="focusAgent" data-session="' +
             esc(a.sessionId) +
-            '" role="button" tabindex="0" title="Click to reveal terminal">' +
+            '" ' +
+            agentRowA11y(a, s) +
+            ">" +
             '<span class="status-dot ' +
             s +
             '"></span>' +
@@ -688,7 +725,7 @@
             "</span>" +
             // Present on every row but shown (via CSS) only on .terminal-open,
             // so the live class toggle needs no structural DOM changes.
-            '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
+            '<span class="terminal-chip" data-tip="This agent\'s terminal is open. It is the one you are talking to">' +
             icons.terminal +
             "</span>" +
             // The counters go on a line of their own under the summary, which
@@ -1017,7 +1054,7 @@
       );
     if (pr.autoMerge)
       flagSegs.push(
-        '<span class="pr-flag automerge" title="Auto-merge is enabled — GitHub will merge once requirements pass">' +
+        '<span class="pr-flag automerge" title="Auto-merge is enabled. GitHub will merge once requirements pass">' +
           icons.autoMerge +
           "Auto-merge</span>"
       );
@@ -1085,7 +1122,7 @@
       esc(pr.url) +
       '" title="' +
       esc(pr.title) +
-      ' — open on GitHub">' +
+      '. Open on GitHub">' +
       rows.join("") +
       "</a>"
     );
@@ -1142,21 +1179,6 @@
     );
   }
 
-  function githubBranchLink(wt) {
-    const url = branchOnGitHub(wt);
-    if (!url) return "";
-    return (
-      '<a class="ghlink" href="' +
-      esc(url) +
-      '" data-tip="View ' +
-      esc(wt.branch) +
-      ' on GitHub" aria-label="View this branch on GitHub"' +
-      ' target="_blank" rel="noopener noreferrer">' +
-      icons.github +
-      "</a>"
-    );
-  }
-
   function card(wt) {
     const isCollapsed = !expanded.has(wt.path);
     // The repository's own working directory, marked beside the name rather than
@@ -1206,45 +1228,6 @@
       icons.agentMark +
       "</button>";
 
-    // This worktree's branch on GitHub. Only when origin is a github.com remote
-    // (data.repoUrl) and the worktree is on a branch: a detached HEAD has no
-    // branch page to open. A plain anchor, as the branches view uses - the
-    // webview opens http(s) links in the browser itself, with no round trip
-    // through the extension host.
-    const ghLink = githubBranchLink(wt);
-
-    // Change the branch this worktree has checked out: pick an existing branch
-    // or create a new one. Detached worktrees have no branch to swap from, but
-    // the action still lets you switch onto one, so it is always offered.
-    // data-tip (the snappy custom tooltip) rather than title: the native
-    // tooltip's long delay makes an icon-only button feel unlabeled.
-    const editBranchBtn =
-      '<button class="act ghost iconact" data-action="changeBranch" data-path="' +
-      esc(wt.path) +
-      '" data-tip="Switch this worktree to another branch (or create one)" aria-label="Switch branch">' +
-      icons.edit +
-      "</button>";
-
-    // Refresh just this worktree's git status (and its PR/CI when the GitHub
-    // integration is on). Does not run a git fetch - that's the toolbar Refresh.
-    const refreshBtn =
-      '<button class="act ghost iconact" data-action="refreshWorktree" data-path="' +
-      esc(wt.path) +
-      '" data-tip="Refresh this worktree' +
-      (lastData && lastData.prEnabled ? " (git and PR status)" : " (git status)") +
-      '" aria-label="Refresh this worktree">' +
-      icons.refresh +
-      "</button>";
-
-    // Open this worktree in its own VS Code window (focuses an existing one if
-    // already open). Available for every worktree, including the primary.
-    const openWindowBtn =
-      '<button class="act ghost iconact" data-action="openWindow" data-path="' +
-      esc(wt.path) +
-      '" data-tip="Open this worktree in a new VS Code window" aria-label="Open this worktree in a new VS Code window">' +
-      icons.window +
-      "</button>";
-
     // Searching a worktree, finding a file in it and running its launch configs
     // are all menu entries now (see openCardMenu). The sessions this panel
     // started still get their own rows, so the list is still needed here.
@@ -1283,15 +1266,6 @@
           .join("") +
         "</div>"
       : "";
-
-    // Delete (git worktree remove) — never for the primary worktree.
-    const deleteBtn = wt.isPrimary
-      ? ""
-      : '<button class="act ghost danger" data-action="removeWorktree" data-path="' +
-        esc(wt.path) +
-        '" data-tip="Delete this worktree from disk" aria-label="Delete this worktree">' +
-        icons.trash +
-        "</button>";
 
     // The worktree holding the terminal you are typing into. This is what the
     // card outline marks now: it changes as you work and it is the thing you can
@@ -1486,7 +1460,7 @@
         : wt.branch
         ? "On branch " + wt.branch
         : "No branch") +
-      " — " +
+      ". " +
       wt.path;
     return (
       '<span class="agent-where' +
@@ -1533,7 +1507,9 @@
       (a.sessionId === activeSessionId ? " terminal-open" : "") +
       '" data-action="focusAgent" data-session="' +
       esc(a.sessionId) +
-      '" role="button" tabindex="0" title="Click to reveal terminal">' +
+      '" ' +
+      agentRowA11y(a, s) +
+      ">" +
       '<span class="status-dot ' +
       s +
       '"></span>' +
@@ -1542,7 +1518,7 @@
       '">' +
       esc(a.label) +
       "</span>" +
-      '<span class="terminal-chip" data-tip="This agent\'s terminal is open — it is the one you are talking to">' +
+      '<span class="terminal-chip" data-tip="This agent\'s terminal is open. It is the one you are talking to">' +
       icons.terminal +
       "</span>" +
       agentScmBtn(wt) +
@@ -1600,8 +1576,12 @@
 
     if (!entries.length && !orphans.length) {
       return (
+        // Same reason as the card's empty line: the toolbar control is
+        // icon-only, so it is pointed at by position rather than by a name it
+        // does not display.
         '<div class="empty">No agents running.<br/>' +
-        "Start one from a worktree, or with “New Agent &amp; Worktree”.</div>"
+        "Start one from a worktree, or with the new-worktree button at the top " +
+        "of the panel.</div>"
       );
     }
     return (
@@ -1742,10 +1722,13 @@
       // primary action, which made it the one saturated block in a row of quiet
       // outlines - and the panel's accent now means "this is the worktree you are
       // typing into", which this button is not.
-      '<button class="tbtn ghost icon" data-action="agentWorktree" data-tip="New Agent &amp; Worktree: create a worktree with Claude (claude -w) and start an agent in it">' +
+      // aria-label as well as data-tip on both: the tip is a div this script
+      // positions on hover, which assistive technology never reads, so these two
+      // were the only controls in the panel with no accessible name at all.
+      '<button class="tbtn ghost icon" data-action="agentWorktree" aria-label="New agent and worktree" data-tip="New Agent &amp; Worktree: create a worktree with Claude (claude -w) and start an agent in it">' +
       icons.agentWorktree +
       "</button>" +
-      '<button class="tbtn ghost" data-action="openBranches" data-tip="Branches: list every branch and create a worktree from one">' +
+      '<button class="tbtn ghost" data-action="openBranches" aria-label="Branches" data-tip="Branches: list every branch and create a worktree from one">' +
       icons.branch +
       "</button>" +
       "</span>" +
@@ -1798,6 +1781,15 @@
     // above the sections, and a labelled rule separates the two.
     const primary = wts.filter((wt) => wt.isPrimary);
     const rest = wts.filter((wt) => !wt.isPrimary);
+    // A repository with only its primary worktree has nothing to file, so the
+    // sections are three rows of chrome about a feature that has not been used
+    // and cannot yet do anything: a `Worktrees` divider, a `General 0` header,
+    // and an empty-section line inviting a move from a menu that would not
+    // offer it (the primary cannot be filed). Only when General is still the
+    // only group - once the user has made one of their own, their structure is
+    // shown whether or not anything is in it.
+    const onlyGeneral = groups.length === 1 && groups[0].id === "general";
+    if (!rest.length && onlyGeneral) return primary.map(card).join("");
     const members = new Map(groups.map((g) => [g.id, []]));
     for (const wt of rest) {
       const list = members.get(wt.group) || members.get("general");
@@ -2068,6 +2060,27 @@
       if (el && typeof el.focus === "function") el.focus({ preventScroll: true });
     }
     resyncOpenMenu();
+    markScrollableLists();
+  }
+
+  /**
+   * Flag each bounded agent list that still has rows below the fold, which is
+   * what draws the fade at its bottom edge (see the `data-more` rule).
+   *
+   * Measured rather than assumed: the list's height is a fixed max, but whether
+   * it overflows depends on how many agents a card has and how far each summary
+   * wraps, and it changes as the user scrolls to the end.
+   */
+  function markScrollableLists(within) {
+    const scope = within || root;
+    const lists = within
+      ? [within]
+      : [...scope.querySelectorAll(".card .agent-list .agents")];
+    for (const el of lists) {
+      const more = el.scrollHeight - el.clientHeight - el.scrollTop > 1;
+      if (more) el.setAttribute("data-more", "1");
+      else el.removeAttribute("data-more");
+    }
   }
 
   /**
@@ -2470,16 +2483,59 @@
   let cardMenuEl = null;
   let cardMenuKey = "";
 
-  function closeCardMenu() {
+  /**
+   * Shut the open menu. `restoreFocus` hands focus back to the caret that
+   * opened it, which is what a menu owes a keyboard user: the menu is mounted on
+   * <body>, so removing it while focus is inside drops focus to <body> and the
+   * next Tab starts again from the top of the panel. Not done when the paint
+   * that closed it is about to move focus itself, or when the close is a click
+   * somewhere else entirely (which has its own focus target).
+   */
+  function closeCardMenu(restoreFocus) {
     if (!cardMenuEl) return;
+    const held = cardMenuEl.contains(document.activeElement);
     cardMenuEl.remove();
     cardMenuEl = null;
     const btn = root.querySelector(
       '[data-menu-key="' + cssEscape(cardMenuKey) + '"]'
     );
-    if (btn) btn.setAttribute("aria-expanded", "false");
+    if (btn) {
+      btn.setAttribute("aria-expanded", "false");
+      if (restoreFocus && held) btn.focus();
+    }
     cardMenuKey = "";
   }
+
+  /**
+   * The keyboard model a `role="menu"` is supposed to come with.
+   *
+   * The menu had the role and the focus-on-open, and nothing else: no arrow
+   * keys, and Tab walked straight out of a body-mounted element into whatever
+   * followed it in the document, leaving the menu open behind. Up/Down wrap,
+   * Home/End jump the ends, Tab is treated as "leave", and Escape is handled by
+   * the panel-wide handler which now restores focus too.
+   */
+  function onMenuKey(e) {
+    if (!cardMenuEl || !cardMenuEl.contains(e.target)) return;
+    const items = [...cardMenuEl.querySelectorAll(".card-menu-item")];
+    if (!items.length) return;
+    const at = items.indexOf(document.activeElement);
+    const go = (i) => {
+      e.preventDefault();
+      items[(i + items.length) % items.length].focus();
+    };
+    if (e.key === "ArrowDown") return go(at + 1);
+    if (e.key === "ArrowUp") return go(at - 1);
+    if (e.key === "Home") return go(0);
+    if (e.key === "End") return go(items.length - 1);
+    if (e.key === "Tab") {
+      // A menu is a dead end for Tab: close it and put focus back on the caret,
+      // so the next Tab continues from where the user actually is.
+      e.preventDefault();
+      closeCardMenu(true);
+    }
+  }
+  document.addEventListener("keydown", onMenuKey);
 
   /**
    * Re-attach an open menu to the caret a repaint just rebuilt.
@@ -2733,12 +2789,58 @@
     return null;
   }
 
+  /** What had focus before the modal opened, so it can be handed back. */
+  let modalReturnFocus = null;
+
   function closeModal() {
     if (modalEl) {
       modalEl.remove();
       modalEl = null;
     }
+    // Back to the chip that opened it. Without this, dismissing the dialog left
+    // focus on <body> and a keyboard user restarted from the top of the panel.
+    const back = modalReturnFocus;
+    modalReturnFocus = null;
+    if (back && back.isConnected && typeof back.focus === "function") {
+      back.focus();
+    }
   }
+
+  /**
+   * Hold Tab inside an open dialog.
+   *
+   * `aria-modal` tells assistive technology the rest is inert; it does nothing
+   * about Tab, which happily walked out of the dialog and on through the panel
+   * behind it while the backdrop still covered everything. Wraps at both ends,
+   * and Escape closes (which the panel-wide handler also does, but a dialog
+   * should not depend on that being reached first).
+   */
+  function onModalKey(e) {
+    if (!modalEl) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      return closeModal();
+    }
+    if (e.key !== "Tab") return;
+    const focusable = [
+      ...modalEl.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      ),
+    ].filter((el) => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const on = document.activeElement;
+    if (e.shiftKey && (on === first || !modalEl.contains(on))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (on === last || !modalEl.contains(on))) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+  document.addEventListener("keydown", onModalKey, true);
 
   function openSkills(sessionId) {
     const a = findAgent(sessionId);
@@ -2757,15 +2859,25 @@
           .join("")
       : '<li class="skill-empty">No skills used yet.</li>';
     closeModal();
+    // Captured before the dialog exists, so closeModal can hand focus back to
+    // the skill chip that opened it.
+    modalReturnFocus =
+      document.activeElement && document.activeElement !== document.body
+        ? document.activeElement
+        : null;
     modalEl = document.createElement("div");
     modalEl.className = "modal-backdrop";
     modalEl.innerHTML =
-      '<div class="modal" role="dialog" aria-modal="true">' +
+      // aria-labelledby, so the dialog announces as "Skills, <agent>" rather
+      // than as an unnamed dialog.
+      '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="skills-title">' +
       '<div class="modal-head">' +
-      '<span class="modal-title">Skills · ' +
+      '<span class="modal-title" id="skills-title">Skills · ' +
       esc(a.label) +
       "</span>" +
-      '<button class="iconbtn modal-close" title="Close">' +
+      // aria-label, not title: the glyph is an X and the accessible name was
+      // coming from a tooltip attribute that screen readers treat as optional.
+      '<button class="iconbtn modal-close" aria-label="Close" data-tip="Close">' +
       icons.stop +
       "</button>" +
       "</div>" +
@@ -2779,6 +2891,9 @@
       }
     });
     document.body.appendChild(modalEl);
+    // Into the dialog, so the next Tab is inside it and Escape is heard.
+    const close = modalEl.querySelector(".modal-close");
+    if (close) close.focus();
   }
 
   // --- Settings modal --------------------------------------------------------
@@ -2994,15 +3109,15 @@
       classicUrl +
       '">Classic</a></p>' +
       '<div class="gh-perms">' +
-      '<div class="gh-perms-h">Fine-grained — Repository permissions (Read):</div>' +
+      '<div class="gh-perms-h">Fine-grained, Repository permissions (Read):</div>' +
       "<ul>" +
       "<li>Pull requests</li>" +
       "<li>Checks</li>" +
-      '<li>Commit statuses <span class="dim">— optional, for legacy CI status</span></li>' +
+      '<li>Commit statuses <span class="dim">optional, for legacy CI status</span></li>' +
       "<li>Contents</li>" +
-      '<li>Metadata <span class="dim">— required, added automatically</span></li>' +
+      '<li>Metadata <span class="dim">required, added automatically</span></li>' +
       "</ul>" +
-      '<div class="gh-perms-h">Classic — scope: <code>repo</code></div>' +
+      '<div class="gh-perms-h">Classic, scope: <code>repo</code></div>' +
       "</div>" +
       '<p class="gh-help dim">Choose the repositories you want under “Repository access”. ' +
       "The token is kept in VS Code Secret Storage and is only ever sent to the GitHub API.</p>";
@@ -3021,8 +3136,8 @@
       '<h3 class="gh-h">' +
       icons.pr +
       " GitHub PR status</h3>" +
-      '<p class="gh-lead">Tie GitHub into the panel to see each branch’s open PR — ' +
-      "state, CI checks, review status and comments — refreshed as your agents work.</p>" +
+      '<p class="gh-lead">Tie GitHub into the panel to see each branch’s open PR: ' +
+      "state, CI checks, review status and comments, refreshed as your agents work.</p>" +
       toggle +
       status +
       accountActions +
@@ -3051,7 +3166,7 @@
       "Source Control view to that worktree, so you only see its diffs.</p>" +
       toggle +
       '<p class="gh-help dim">When a single repository is open, choosing a worktree ' +
-      "swaps it into Source Control — the previous repo is removed from the view, " +
+      "swaps it into Source Control. The previous repo is removed from the view, " +
       "not from disk. When several are open, it reveals and focuses the selected one.</p>" +
       "</section>"
     );
@@ -4602,7 +4717,9 @@
       return;
     }
     if (cardMenuEl) {
-      closeCardMenu();
+      // Escape from a menu returns you to the control you opened it from, not
+      // to the top of the panel.
+      closeCardMenu(true);
       return;
     }
     if (settingsOpen) {
@@ -4707,6 +4824,7 @@
       // new about which sessions are still alive.
       prunePins(msg.data);
       render(msg.data);
+      announceWaiting(msg.data);
       maybeRefreshSettings(msg.data);
     } else if (msg.type === "activeTerminal") {
       // Terminal switch: retint the rows in place — no full re-render, so an
@@ -4726,6 +4844,39 @@
     }
   });
 
+  /** Last announced waiting count, so the same number is not read out again on
+   *  every payload. */
+  let announcedWaiting = 0;
+
+  /**
+   * Say, once, when more agents start needing you.
+   *
+   * The whole point of the panel is "an agent is blocked on you", and it was
+   * carried entirely by a colour, a pulse and a number badge on an icon. None of
+   * those reach a screen reader, and the badge is not in this document at all.
+   *
+   * Only on a rise, and only the total: announcing every payload would talk over
+   * everything else while agents work, and announcing a fall ("1 agent waiting")
+   * as you answer them is noise about work you just did.
+   */
+  function announceWaiting(data) {
+    const wts = (data && data.worktrees) || [];
+    let waiting = 0;
+    for (const wt of wts) {
+      for (const a of wt.agents || []) if (statusOf(a) === "waiting") waiting++;
+    }
+    if (waiting > announcedWaiting) {
+      const live = document.getElementById("awt-live");
+      if (live) {
+        live.textContent =
+          waiting === 1
+            ? "1 agent is waiting for you"
+            : waiting + " agents are waiting for you";
+      }
+    }
+    announcedWaiting = waiting;
+  }
+
   /**
    * A banner over the cards when a refresh failed.
    *
@@ -4740,6 +4891,22 @@
    * has. Written into a slot outside `root` so a re-render neither clears it
    * nor is needed to draw it.
    */
+  /**
+   * The one announcement channel, created once and never re-rendered. Outside
+   * `root` on purpose: a live region that is removed and rebuilt is a *new*
+   * region, and its contents are not announced.
+   */
+  (function mountLiveRegion() {
+    if (document.getElementById("awt-live")) return;
+    const live = document.createElement("div");
+    live.id = "awt-live";
+    live.className = "visually-hidden";
+    live.setAttribute("role", "status");
+    live.setAttribute("aria-live", "polite");
+    live.setAttribute("aria-atomic", "true");
+    (root.parentNode || document.body).insertBefore(live, root);
+  })();
+
   function showRefreshError(message) {
     let bar = document.getElementById("refresh-error");
     if (!message) {
@@ -4843,8 +5010,34 @@
     if (e.relatedTarget && t.contains(e.relatedTarget)) return;
     hideTip();
   });
+  // Keyboard focus shows the tip too. It was hover-only, so a keyboard user
+  // tabbing through the panel got none of it - and some of these tips are the
+  // only place a reading exists at all (an agent's full work summary, a
+  // worktree's path, which subagents are running where). Same delay would be
+  // wrong here: focus is deliberate, so it shows at once.
+  root.addEventListener("focusin", (e) => {
+    const t = e.target.closest("[data-tip]");
+    if (!t) return;
+    if (tipTimer) clearTimeout(tipTimer);
+    showTip(t);
+  });
+  root.addEventListener("focusout", (e) => {
+    if (e.target.closest("[data-tip]")) hideTip();
+  });
   // Scrolling moves the anchor out from under a fixed tooltip; just drop it.
   root.addEventListener("scroll", hideTip, true);
+  // ...and reaching the end of an agent list takes its fade with it. Capture,
+  // because these are inner regions and scroll does not bubble.
+  root.addEventListener(
+    "scroll",
+    (e) => {
+      const el = e.target;
+      if (el && el.classList && el.classList.contains("agents")) {
+        markScrollableLists(el);
+      }
+    },
+    true
+  );
 
   // Mount. The branches editor tab requests its own data; the sidebar asks for
   // a refresh in case it mounted after the first push.

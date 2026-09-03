@@ -391,6 +391,22 @@ body {
   line-height: 1.5;
 }
 
+/* Announced, never drawn. Clipped rather than `display: none` or
+   `visibility: hidden`, both of which take the element out of the accessibility
+   tree and so out of earshot too. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* A refresh failed, so what is below it is the last good state rather than the
    current one. Sits above the panel, outside #root, so a re-render neither
    clears it nor is needed to draw it. Full foreground, not the secondary gray:
@@ -471,30 +487,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* GitHub mark beside a card's name, linking that branch to its tree on GitHub.
-   Sized and colored like the icon actions next to it so the header row reads as
-   one set of controls, and it is a link rather than a button. */
-.ghlink {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 3px;
-  color: var(--vscode-descriptionForeground);
-  text-decoration: none;
-}
-.ghlink:hover {
-  color: var(--vscode-foreground);
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
-}
-.ghlink svg {
-  width: 13px;
-  height: 13px;
-}
-
-
 
 /* The repository's primary working directory, marked on the name rather than
    labelled beside it. Quiet on purpose: it is true of one card forever, so it is
@@ -1020,9 +1012,20 @@ body {
      a margin overflows the row, which pushed the right-aligned counters under
      the scrollbar. */
   flex: 0 0 calc(100% - 14px);
+  /* A flex item's default `min-width: auto` is its min-content width, so this
+     line grew to whatever the branch name needed (517px inside a 360px row)
+     instead of holding its basis. Every level between the row and the text has
+     to opt out of that or the ellipsis below never engages. */
+  min-width: 0;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  /* Deliberately nowrap. Wrapping let a long branch name take the whole line
+     and push the counters onto one of their own, below the row's clip, so a
+     `feature/JIRA-12345-...` branch made the subagent and skill counts vanish
+     entirely rather than merely shorten the name. The branch is the part with
+     somewhere to go: it truncates, and its tooltip still carries the full path.
+     The counters are already only a couple of glyphs wide. */
+  flex-wrap: nowrap;
   gap: 3px 8px;
   margin: 3px 0 0 14px;
 }
@@ -1031,6 +1034,8 @@ body {
   align-items: center;
   gap: 5px;
   margin-left: auto;
+  /* Never the item that gives way; see the nowrap note above. */
+  flex: 0 0 auto;
 }
 .agents-list .subagent-row {
   margin-left: 16px;
@@ -1043,7 +1048,12 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  /* Shrinkable, and allowed to shrink below its content: without both, the
+     ellipsis on the span inside never engages and a long branch name runs past
+     the row's edge instead of truncating. */
+  flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
   font-size: 11px;
   color: var(--vscode-foreground);
 }
@@ -1051,6 +1061,10 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* See .agent-meta: the last link in the chain that has to allow shrinking
+     below content, or this is the element that refuses and the name clips
+     instead of ellipsizing. */
+  min-width: 0;
 }
 .agent-where svg {
   flex: 0 0 auto;
@@ -1081,7 +1095,7 @@ body {
   align-items: flex-end;
   gap: 8px;
   padding: 0 4px;
-  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.25));
 }
 .view-tablist {
   display: flex;
@@ -1450,7 +1464,7 @@ button.busy {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.25));
   border-radius: 8px;
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -1460,7 +1474,7 @@ button.busy {
   align-items: center;
   gap: 8px;
   padding: 10px 8px 10px 12px;
-  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.25));
 }
 .modal-title {
   flex: 1;
@@ -1670,7 +1684,7 @@ button.busy {
   align-items: center;
   gap: 8px;
   padding: 8px 8px 10px;
-  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.25));
 }
 .settings-title {
   flex: 1;
@@ -1694,7 +1708,7 @@ button.busy {
   flex-direction: column;
   gap: 2px;
   padding: 8px 6px;
-  border-right: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  border-right: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.25));
 }
 .settings-tab {
   display: inline-flex;
@@ -1742,6 +1756,33 @@ button.busy {
   justify-content: center;
   padding: 6px;
 }
+/* Below this the rail folds whether or not the user asked it to.
+
+   The fold was a preference only, and the sidebar goes down to 240px: with
+   labels the rail took ~140px of it and left the body a ~75px column, where the
+   PR toggle clipped off the right edge and "FINE-GRAINED TOKEN" broke into five
+   lines. The setting was still there, at the very bottom of the rail, past the
+   content that was unreadable.
+
+   Deliberately a media query and not a class, so it never writes over what the
+   user chose: widen the panel again and their labels come back. The fold
+   control itself goes with it, since at this width it is an offer with no
+   effect. */
+@media (max-width: 340px) {
+  .settings-tabs .settings-tab span {
+    display: none;
+  }
+  .settings-tabs .settings-tab {
+    justify-content: center;
+    padding: 6px;
+  }
+  /* Scoped past `.settings-nav-fold`'s own display rule, which is declared
+     later in the file and would otherwise win on source order. */
+  .settings-tabs .settings-nav-fold {
+    display: none;
+  }
+}
+
 /* Pushed to the foot of the rail, away from the tabs, so it never reads as one
    of them. */
 .settings-nav-fold {
@@ -1882,6 +1923,12 @@ button.busy {
   background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.15));
 }
 .gh-type {
+  /* A pill that has broken across lines is not a pill: at a narrow sidebar
+     "FINE-GRAINED TOKEN" wrapped to three rows inside its own rounded
+     background. It is two short words and stays on one line; the row it sits in
+     wraps around it instead. */
+  display: inline-block;
+  white-space: nowrap;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -1927,6 +1974,11 @@ button.busy {
   padding: 1px 4px;
   border-radius: 3px;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.18));
+  /* A setting id is one long unbroken token and the sidebar is narrow, so
+     `agentWorktrees.statusPollSeconds` ran past the panel's edge and was clipped
+     mid-word with no scrollbar to reach the rest. Broken anywhere rather than
+     truncated: the whole point of printing the id is that it can be read. */
+  overflow-wrap: anywhere;
 }
 .gh-perms {
   font-size: 12px;
@@ -2364,7 +2416,7 @@ button.busy {
   align-items: center;
   gap: 6px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.25));
 }
 .bfilter {
   position: relative;
@@ -2440,7 +2492,7 @@ button.busy {
   overflow-y: auto;
   padding: 4px;
   border-radius: 6px;
-  border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.28));
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
@@ -2897,7 +2949,7 @@ button.busy {
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid
-    var(--vscode-menu-border, var(--vscode-widget-border, rgba(255, 255, 255, 0.12)));
+    var(--vscode-menu-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.28)));
   border-radius: 6px;
   background: var(
     --vscode-menu-background,
@@ -2990,7 +3042,7 @@ button.busy {
   margin: 4px 2px;
   background: var(
     --vscode-menu-separatorBackground,
-    var(--vscode-widget-border, rgba(255, 255, 255, 0.12))
+    var(--vscode-widget-border, rgba(127, 127, 127, 0.28))
   );
 }
 /* locked and detached, as glyphs on the meta line beside the agent counts. The
@@ -3224,6 +3276,35 @@ button.busy {
   max-height: 190px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127, 127, 127, 0.45) transparent;
+}
+/* There is more below: fade the last few pixels out.
+
+   The partial row is meant to be the cue, and on its own it was being read as a
+   row that had failed to draw rather than as a list that continues. A scrollbar
+   cannot carry it either: on macOS the platform scrollbar is an overlay one, so
+   it occupies no width and stays invisible until something scrolls, and nothing
+   scrolls until you already believe it can.
+
+   A mask rather than a gradient overlay, so it works over whatever the card
+   happens to be tinted (a terminal-open card is not the same colour as the rest)
+   and needs no extra element. `data-more` is set by the script whenever the
+   region is scrolled or repainted, so the fade is there only while something is
+   actually hidden, and goes once you reach the end. */
+.card .agent-list .agents[data-more="1"] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+}
+.card .agent-list .agents::-webkit-scrollbar {
+  width: 8px;
+}
+.card .agent-list .agents::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.45);
+}
+.card .agent-list .agents::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .card .agents {
@@ -3333,4 +3414,59 @@ button.busy {
     --vscode-button-hoverBackground,
     var(--vscode-button-background, #0e639c)
   );
+}
+
+/* --- High contrast -------------------------------------------------------- */
+/* VS Code's high-contrast themes expect solid, system-drawn edges, and the
+   panel's separation is built from translucent grey hairlines and a faint
+   zebra tint on alternate cards. Both wash out to nothing there, leaving a
+   wall of undifferentiated rows.
+
+   `forced-colors` covers the OS-level setting; `--vscode-contrastBorder` is set
+   only by VS Code's own HC themes, so the two together catch both routes in.
+   Card edges become real borders, the tint is dropped (it cannot survive forced
+   colors anyway), and focus stays visible. */
+@media (forced-colors: active) {
+  .card,
+  .card-menu,
+  .modal,
+  .tip,
+  .agent-row.attention,
+  .settings-tabs,
+  .bfilter-menu {
+    border: 1px solid CanvasText;
+  }
+  .card:nth-child(even) {
+    background: Canvas;
+  }
+  .status-dot {
+    /* A dot carrying only a fill has no colour of its own under forced colours,
+       so status would be conveyed by nothing at all. An outline survives. */
+    outline: 1px solid CanvasText;
+  }
+  .iconbtn:focus-visible,
+  .agent-row:focus-visible,
+  .card-menu-item:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .refresh-error {
+    border: 1px solid CanvasText;
+  }
+}
+
+/* The three animations that carry meaning (the status pulse, the spinner, the
+   subagent pulse) already opt out individually above. This catches the rest:
+   chevron rotations, the settings toggle knob, the nav fold, and the hover
+   fades on row actions, none of which were covered and all of which are motion
+   somebody asked not to see. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
 }
