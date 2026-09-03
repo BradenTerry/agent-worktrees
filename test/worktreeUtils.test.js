@@ -5,7 +5,9 @@ const path = require("node:path");
 const {
   countWaitingAgents,
   normalizePath,
+  pathKey,
   repoSettingsKey,
+  samePathKey,
   supportsAgentCliTitle,
   worktreeDirFor,
   worktreesNeedingLinks,
@@ -61,6 +63,51 @@ test("countWaitingAgents sums waiting agents across worktrees", () => {
 test("normalizePath lowercases the drive letter (Windows)", { skip: process.platform !== "win32" }, () => {
   assert.strictEqual(normalizePath("C:\\repo\\feature"), "c:\\repo\\feature");
   assert.strictEqual(normalizePath("C:\\repo"), normalizePath("c:\\repo"));
+});
+
+// The panel compares paths that arrive from three different places: `git
+// worktree list` (the case on disk), Claude's session registry (the case the
+// user typed to cd there) and the Git extension's rootUri (the workspace
+// folder's case). On a case-insensitive filesystem those are the same
+// directory, and comparing them as plain strings was a silent miss every time
+// they differed - an agent landing on no card, a Source Control button that
+// never lit up.
+const CASE_FOLDING = process.platform === "win32" || process.platform === "darwin";
+
+test(
+  "pathKey folds case where the filesystem does",
+  { skip: !CASE_FOLDING },
+  () => {
+    assert.strictEqual(
+      pathKey("/Repo/Feature-Work"),
+      pathKey("/repo/feature-work"),
+      "the same directory reached by two spellings is one key"
+    );
+    assert.ok(samePathKey("/Users/B/Code/Repo", "/users/b/code/repo"));
+  }
+);
+
+test(
+  "pathKey does not fold case where the filesystem does not",
+  { skip: CASE_FOLDING },
+  () => {
+    // On Linux these really are two different directories, and treating them
+    // as one would put an agent on the wrong card.
+    assert.notStrictEqual(pathKey("/repo/Feature"), pathKey("/repo/feature"));
+  }
+);
+
+test("pathKey still canonicalizes what normalizePath does", () => {
+  assert.strictEqual(pathKey("/repo/feature/"), pathKey("/repo/feature"));
+});
+
+test("normalizePath keeps case, because its result is used as a real path", () => {
+  // pathKey exists as a separate function precisely so this stays true: a
+  // linked file's stored relative entry is derived from normalizePath, and
+  // lowercasing it would break on a case-sensitive volume and read wrong in
+  // the settings list.
+  const p = path.join(path.sep, "Repo", "AppSettings.Development.json");
+  assert.ok(normalizePath(p).includes("AppSettings.Development.json"));
 });
 
 // Whether an agent terminal is left unnamed (so Claude Code's own OSC title

@@ -147,3 +147,66 @@ test("flush runs immediately without waiting out the debounce", () => {
   clock.tick(500);
   assert.strictEqual(runs, 1, "the pending timer was consumed, not left to fire");
 });
+
+test("a run that throws leaves the coalescer usable", async () => {
+  // `fire` is called as `void this.fire()`, so before this the rejection was
+  // unhandled: it reached the extension host as an unhandled promise rejection
+  // and nowhere the user could see. The panel's own refresh is this callback,
+  // so a failed gather is exactly the case that still has to keep scheduling.
+  const clock = makeClock();
+  const seen = [];
+  let runs = 0;
+  const c = new Coalescer(
+    async () => {
+      runs++;
+      if (runs === 1) throw new Error("gather blew up");
+    },
+    500,
+    5000,
+    clock,
+    (e) => seen.push(e.message)
+  );
+
+  c.trigger();
+  clock.tick(500);
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(runs, 1);
+  assert.deepStrictEqual(seen, ["gather blew up"], "the failure is reported");
+
+  // The next trigger still runs: a throw must not wedge `running` on.
+  c.trigger();
+  clock.tick(500);
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(runs, 2, "still scheduling after a failed run");
+});
+
+test("a trigger during a failing run still gets its follow-up", async () => {
+  const clock = makeClock();
+  let runs = 0;
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const c = new Coalescer(
+    async () => {
+      runs++;
+      if (runs === 1) {
+        await gate;
+        throw new Error("nope");
+      }
+    },
+    500,
+    5000,
+    clock,
+    () => {}
+  );
+
+  c.trigger();
+  clock.tick(500);
+  c.trigger(); // arrives mid-run, folds into one follow-up
+  release();
+  await new Promise((r) => setImmediate(r));
+  // The follow-up is re-triggered rather than run inline, so it waits out the
+  // quiet period like any other trigger would.
+  clock.tick(500);
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(runs, 2, "the queued follow-up survives the throw");
+});

@@ -3,6 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const {
   getJson,
+  rateLimitedFor,
   resetGithubCache,
   fetchPrsByBranch,
 } = require("../out/github.js");
@@ -129,17 +130,55 @@ test("getJson: a permission 403 is cached so the capability is not retried", asy
   );
 });
 
-test("getJson: a rate-limit 403 is NOT cached (retried later)", async () => {
+test("getJson: a rate-limit 403 pauses instead of denying the capability", async () => {
   resetGithubCache();
   await withFetch(
     () => forbidden("0"),
     async (calls) => {
       await getJson("/a/status", "tok", "statuses");
       await getJson("/b/status", "tok", "statuses");
-      // Exhausted rate limit is transient, so both calls go out.
-      assert.strictEqual(calls.length, 2);
+      // The capability is NOT recorded as denied - an exhausted limit says
+      // nothing about the token's permissions - but the second call is still
+      // held back, because GitHub has just told us to stop and re-issuing is
+      // what extends a limit rather than clearing it.
+      assert.strictEqual(calls.length, 1);
+      assert.ok(rateLimitedFor() > 0, "the pause is in force");
     }
   );
+});
+
+test("getJson: a secondary rate limit is not mistaken for a denied permission", async () => {
+  // The regression this exists for: GitHub answers a burst with 403 +
+  // `retry-after` and a *non-zero* remaining count. That reads exactly like a
+  // permission denial, so one burst used to disable checks and statuses for the
+  // whole life of the token - the badges simply never came back.
+  resetGithubCache();
+  await withFetch(
+    () => ({
+      ok: false,
+      status: 403,
+      headers: {
+        get: (h) => {
+          const k = h.toLowerCase();
+          if (k === "retry-after") return "30";
+          if (k === "x-ratelimit-remaining") return "4999";
+          return null;
+        },
+      },
+      json: async () => ({}),
+    }),
+    async () => {
+      await getJson("/a/status", "tok", "statuses");
+      assert.ok(rateLimitedFor() > 0, "recognized as rate limiting");
+      assert.ok(
+        rateLimitedFor() <= 30_000,
+        "and for the interval the retry-after asked for"
+      );
+    }
+  );
+  resetGithubCache();
+  // Cleared by resetGithubCache, so a replaced token starts fresh.
+  assert.strictEqual(rateLimitedFor(), 0);
 });
 
 test("getJson: a denied capability does not block a different token", async () => {

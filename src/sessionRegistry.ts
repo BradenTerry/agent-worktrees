@@ -11,7 +11,7 @@ import {
 import { systemProbes } from "./liveness";
 // The VS Code-free path key, so this module stays requirable (and unit-testable)
 // outside the extension host.
-import { normalizePath as normalize } from "./worktreeUtils";
+import { normalizePath as normalize, pathKey } from "./worktreeUtils";
 
 /**
  * Claude Code's own session registry: where every agent on a card comes from.
@@ -222,10 +222,17 @@ function parseRegistryFile(
  *  its cwd. Longest wins so a session inside a nested worktree lands on that
  *  worktree's card rather than the repo root's. */
 function placeIn(cwd: string, keys: string[]): string | undefined {
-  const target = normalize(cwd);
+  // Compared by key, returned by key-of-the-caller. The two sides come from
+  // different places - the cwd is whatever Claude recorded (the case the user
+  // typed), the keys are what `git worktree list` printed (the case on disk) -
+  // and on Windows and macOS those differ often enough that a straight string
+  // compare left agents sitting on no card at all. The value returned is still
+  // one of `keys`, so nothing downstream sees a different key space.
+  const target = pathKey(cwd);
   let best: string | undefined;
   for (const key of keys) {
-    if (target !== key && !target.startsWith(key + path.sep)) continue;
+    const k = pathKey(key);
+    if (target !== k && !target.startsWith(k + path.sep)) continue;
     if (!best || key.length > best.length) best = key;
   }
   return best;
@@ -290,7 +297,7 @@ export function indexRegistry(
     // a card and let one re-gather decide (see refreshAgents); a cwd that is
     // merely a subdirectory of a card, or in another repo entirely, costs one
     // re-gather and then settles.
-    if (key !== normalize(session.cwd)) unplaced.push(session.cwd);
+    if (!key || pathKey(key) !== pathKey(session.cwd)) unplaced.push(session.cwd);
     if (!key) continue;
     const list = byPath.get(key) ?? [];
     list.push(session);
@@ -311,7 +318,7 @@ export function indexRegistry(
         attributePrompt(own, status);
         for (const sub of own) {
           if (!sub.worktree) continue;
-          const target = normalize(sub.worktree);
+          const target = pathKey(sub.worktree);
           const home = placeIn(sub.worktree, keys);
           // The card it lands on is the longest path containing its cwd, which
           // is the parent's own card whenever no nearer one is known - and an
@@ -321,11 +328,11 @@ export function indexRegistry(
           // the stale case still matches, just too far up the tree. Report it
           // either way and let one re-gather decide (see refreshAgents); a cwd
           // that is merely a subdirectory of a card settles as itself.
-          if (home !== target) unplaced.push(sub.worktree);
+          if (!home || pathKey(home) !== target) unplaced.push(sub.worktree);
           // Not, via a symlinked path, the card it is already listed under.
           // Clearing the field keeps one invariant for everything downstream:
           // `worktree` set means "rendered on another card".
-          if (!home || home === key) {
+          if (!home || pathKey(home) === pathKey(key)) {
             delete sub.worktree;
             continue;
           }

@@ -358,7 +358,31 @@ symlinkTest("a linked file is a real symlink where symlinks are allowed", async 
   }
 });
 
-symlinkTest("re-points a stale symlink to the current source", async () => {
+symlinkTest("re-points a dangling symlink to the current source", async () => {
+  // The stale case worth repairing: a link left over from before the repository
+  // moved. It resolves to nothing, so there is no arrangement to preserve, and
+  // this is the shape our own links take once their source path is gone.
+  const { root, repo, worktree } = makeRepoAndWorktree();
+  try {
+    fs.symlinkSync(path.join(root, "gone.json"), path.join(worktree, "a.json"));
+    fs.writeFileSync(path.join(repo, "a.json"), "real");
+    const out = await linkPathsIntoWorktree(repo, worktree, ["a.json"]);
+    assert.strictEqual(out[0].status, "linked");
+    assert.strictEqual(
+      fs.readFileSync(path.join(worktree, "a.json"), "utf8"),
+      "real"
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+symlinkTest("leaves a working symlink the user aimed elsewhere alone", async () => {
+  // The documented safety rule ("re-points only a link of its own"), which
+  // linking did not actually keep: it removed any link that was not ours and
+  // put its own there, so an `.env` deliberately aimed at a shared fixture was
+  // replaced with nothing said about it. Unlinking already refused to touch
+  // one; now both do.
   const { root, repo, worktree } = makeRepoAndWorktree();
   try {
     const stray = path.join(root, "stray.json");
@@ -366,10 +390,12 @@ symlinkTest("re-points a stale symlink to the current source", async () => {
     fs.symlinkSync(stray, path.join(worktree, "a.json"));
     fs.writeFileSync(path.join(repo, "a.json"), "real");
     const out = await linkPathsIntoWorktree(repo, worktree, ["a.json"]);
-    assert.strictEqual(out[0].status, "linked");
+    assert.strictEqual(out[0].status, "skipped-foreign");
+    assert.match(out[0].message, /links somewhere else/);
     assert.strictEqual(
       fs.readFileSync(path.join(worktree, "a.json"), "utf8"),
-      "real"
+      "stray",
+      "the user's own link still points where they pointed it"
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

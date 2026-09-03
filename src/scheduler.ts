@@ -57,7 +57,9 @@ export class Coalescer {
     private readonly run: () => void | Promise<void>,
     private readonly delayMs: number,
     private readonly maxDelayMs: number = delayMs * 10,
-    private readonly clock: Clock = realClock
+    private readonly clock: Clock = realClock,
+    /** Told about a run that threw, so the failure has somewhere to go. */
+    private readonly onError?: (e: unknown) => void
   ) {}
 
   /** Request a run, coalescing with any already-pending or in-flight request. */
@@ -104,6 +106,14 @@ export class Coalescer {
     this.queued = false;
     try {
       await this.run();
+    } catch (e) {
+      // A run that throws must not take the coalescer with it. `fire` is called
+      // as `void this.fire()`, so without this the rejection is unhandled - it
+      // reaches the extension host as an unhandled promise rejection and is
+      // reported nowhere the user can see. Swallowed here on purpose: the
+      // callback owns reporting its own failure (see the try/catch in
+      // refresh), and this layer's job is only to keep scheduling.
+      this.onError?.(e);
     } finally {
       this.running = false;
       if (this.queued) {

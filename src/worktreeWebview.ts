@@ -18,6 +18,7 @@ import {
 } from "./worktreeData";
 import {
   countWaitingAgents,
+  pathKey,
   repoSettingsKey,
   supportsAgentCliTitle,
   worktreeDirFor,
@@ -379,6 +380,16 @@ export class WorktreeWebviewProvider
   private readonly regathered = new Map<string, number>();
   /** Paths the in-flight gather was started for, judged once it lands. */
   private pendingRegather?: Set<string>;
+  /** A full refresh is running. Every path that falls back to a full refresh
+   *  (refreshAgents has five, refreshRepos three) calls it directly rather than
+   *  through the coalescer, so without this several can overlap - and each one
+   *  is a `git status` per worktree. See refresh(). */
+  private refreshing = false;
+  /** A refresh was asked for while one was running; run exactly one more when
+   *  it settles, forced if any of the requests was. */
+  private queuedRefresh?: { force: boolean };
+  /** A failure banner is up, so a later success knows to clear it. */
+  private refreshError = false;
   /** Epoch ms each worktree's git status was last read, so a burst of agent
    *  transitions doesn't re-spawn git for the same worktree; see statusPoll.ts. */
   private readonly statusAt = new Map<string, number>();
@@ -442,21 +453,39 @@ export class WorktreeWebviewProvider
     // A session starting or ending only changes the debug rows, so patch the
     // cached payload rather than re-running the git gather for every worktree.
     this.debugSessions.onDidChange(() => this.postDebugState());
+    // Each coalescer is handed somewhere to report a run that threw. `refresh`
+    // catches its own (and shows a banner); these are the belt for everything
+    // that reaches the coalescer another way, so a failure is traced instead of
+    // becoming an unhandled rejection nobody sees.
+    const onRunError = (what: string) => (e: unknown) =>
+      diag(`${what} failed: ${e instanceof Error ? e.message : String(e)}`);
     this.refreshDebounce = new Coalescer(
       () => this.refresh(),
-      REFRESH_DEBOUNCE_MS
+      REFRESH_DEBOUNCE_MS,
+      undefined,
+      undefined,
+      onRunError("refresh")
     );
     this.prNudge = new Coalescer(
       () => this.prService.refresh(false),
-      REFRESH_DEBOUNCE_MS
+      REFRESH_DEBOUNCE_MS,
+      undefined,
+      undefined,
+      onRunError("pr nudge")
     );
     this.agentsDebounce = new Coalescer(
       () => this.refreshAgents(),
-      REFRESH_DEBOUNCE_MS
+      REFRESH_DEBOUNCE_MS,
+      undefined,
+      undefined,
+      onRunError("agent refresh")
     );
     this.reposDebounce = new Coalescer(
       () => this.refreshRepos(),
-      REFRESH_DEBOUNCE_MS
+      REFRESH_DEBOUNCE_MS,
+      undefined,
+      undefined,
+      onRunError("repo re-stat")
     );
     this.registryDir = registryDir();
     this.reader = new TranscriptReader(projectsDir());
@@ -616,9 +645,12 @@ export class WorktreeWebviewProvider
       !cards?.length ||
       uris.some((uri) => {
         if (uri.scheme !== "file") return false;
-        const p = normalize(uri.fsPath);
+        // Keyed: the saved file's path comes from VS Code, the card's from
+        // `git worktree list`, and a case difference between the two meant a
+        // save inside a worktree did not count as a change to it.
+        const p = pathKey(uri.fsPath);
         return cards.some((wt) => {
-          const root = normalize(wt.path);
+          const root = pathKey(wt.path);
           return p === root || p.startsWith(root + path.sep);
         });
       });
@@ -708,8 +740,63 @@ export class WorktreeWebviewProvider
    * Recompute worktree data and push it to the webview (only when it changed).
    * When `force` is set (the user clicked Refresh) this also runs a `git fetch`
    * so the behind/ahead counts are current and forces a fresh GitHub PR fetch.
+   *
+   * Single-flight, and the only place a gather's failure is reported.
+   *
+   * Single-flight because the coalescer is not the only caller: refreshAgents
+   * falls back to a full refresh in five places and refreshRepos in three, all
+   * of them direct calls that bypass the coalescer's own in-flight guard. With
+   * an agent whose cwd never resolves to a card, the 1s poll hit one of those
+   * fallbacks every tick, and each overlapping run spawns `git status` for
+   * every worktree. Requests that arrive during a run collapse into exactly one
+   * follow-up, so a burst costs two gathers rather than one per event.
+   *
+   * The try/catch because nothing else catches: every call site is
+   * `void this.refresh()`, so a throw becomes an unhandled rejection, the
+   * webview keeps whatever it last rendered (or the initial "Loading
+   * worktrees") and nothing says why. Anything that escapes is traced and
+   * reported to the panel rather than lost.
    */
   async refresh(force = false): Promise<void> {
+    if (!this.view) return;
+    if (this.refreshing) {
+      this.queuedRefresh = { force: force || !!this.queuedRefresh?.force };
+      return;
+    }
+    this.refreshing = true;
+    try {
+      await this.runRefresh(force);
+      // A refresh that got all the way through clears a banner an earlier one
+      // put up; leaving it would blame a live payload for a failure it does not
+      // have. Only posted when there is something to clear.
+      if (this.refreshError) {
+        this.refreshError = false;
+        void this.view?.webview.postMessage({ type: "refreshError", message: "" });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      diag(`refresh failed: ${msg}`);
+      this.postError(msg);
+    } finally {
+      this.refreshing = false;
+      const queued = this.queuedRefresh;
+      this.queuedRefresh = undefined;
+      if (queued) void this.refresh(queued.force);
+    }
+  }
+
+  /**
+   * Tell the panel a refresh failed, so a stale card list is not the only thing
+   * on screen. Kept to a banner over the last good payload rather than
+   * replacing it: the worktrees almost certainly still exist, and blanking the
+   * panel because one git call timed out loses more than it says.
+   */
+  private postError(message: string): void {
+    this.refreshError = true;
+    void this.view?.webview.postMessage({ type: "refreshError", message });
+  }
+
+  private async runRefresh(force: boolean): Promise<void> {
     if (!this.view) return;
     const seq = ++this.updateSeq;
     // Claimed before any await, so a gather that throws on its way through
@@ -725,7 +812,7 @@ export class WorktreeWebviewProvider
     // gone drop out, so the map tracks the cards rather than every path this
     // window has ever seen.
     const gatheredAt = Date.now();
-    const live = new Set(data.worktrees.map((wt) => normalize(wt.path)));
+    const live = new Set(data.worktrees.map((wt) => pathKey(wt.path)));
     for (const key of this.statusAt.keys()) {
       if (!live.has(key)) this.statusAt.delete(key);
     }
@@ -899,10 +986,10 @@ export class WorktreeWebviewProvider
     // as gathered-for before the gather had run, is what made the race with an
     // agent registering itself permanent instead of momentary.
     const retry = sessions.unplaced.filter(
-      (p) => (this.regathered.get(normalize(p)) ?? 0) < REGATHER_TRIES
+      (p) => (this.regathered.get(pathKey(p)) ?? 0) < REGATHER_TRIES
     );
     if (retry.length) {
-      this.pendingRegather = new Set(retry.map(normalize));
+      this.pendingRegather = new Set(retry.map(pathKey));
       return this.refresh();
     }
     if (fewer) return this.refresh();
@@ -950,7 +1037,7 @@ export class WorktreeWebviewProvider
     const due = new Set(
       dueForStatus({
         cards: data.worktrees.map((wt) => ({
-          path: normalize(wt.path),
+          path: pathKey(wt.path),
           working: working(wt),
         })),
         watched: new Set(this.repoStateWatch.keys()),
@@ -960,7 +1047,7 @@ export class WorktreeWebviewProvider
         watchedMs: WATCHED_STATUS_TTL_MS,
       })
     );
-    const touched = data.worktrees.filter((wt) => due.has(normalize(wt.path)));
+    const touched = data.worktrees.filter((wt) => due.has(pathKey(wt.path)));
     if (await this.statWorktrees(touched, now)) return this.refresh();
     this.applyAgents(data, sessions);
     this.postData(data, seq);
@@ -987,7 +1074,7 @@ export class WorktreeWebviewProvider
   ): Promise<boolean> {
     if (!touched.length) return false;
     const statuses = await mapLimit(touched, 4, (wt) => getStatus(wt.path));
-    for (const wt of touched) this.statusAt.set(normalize(wt.path), now);
+    for (const wt of touched) this.statusAt.set(pathKey(wt.path), now);
     const switched = touched.some(
       (wt, i) => !!statuses[i].branch && statuses[i].branch !== wt.branch
     );
@@ -1028,7 +1115,7 @@ export class WorktreeWebviewProvider
     if (!this.view?.visible || !dirty.size) return;
     const data = this.lastData;
     if (!data) return this.refresh();
-    const touched = data.worktrees.filter((wt) => dirty.has(normalize(wt.path)));
+    const touched = data.worktrees.filter((wt) => dirty.has(pathKey(wt.path)));
     // A root that names no card is a repository this panel does not show, or one
     // whose card has yet to be listed. Only the second is worth a gather, and the
     // two are indistinguishable from here, so gather: the first costs one sweep
@@ -1074,7 +1161,7 @@ export class WorktreeWebviewProvider
       const tries = (this.regathered.get(p) ?? 0) + 1;
       this.regathered.set(p, tries);
       const placed = data.worktrees.some(
-        (wt) => p === normalize(wt.path) || p.startsWith(normalize(wt.path) + path.sep)
+        (wt) => p === pathKey(wt.path) || p.startsWith(pathKey(wt.path) + path.sep)
       );
       diag(
         `regather: ${p} is still not a card after ${tries} ` +
@@ -2138,7 +2225,7 @@ export class WorktreeWebviewProvider
     // Claimed up front, not per iteration: a refresh that lands while this one
     // is still working through the list would otherwise pick up everything it
     // has not reached yet and link it a second time, concurrently.
-    for (const dir of todo) this.linkedWorktrees.add(normalize(dir));
+    for (const dir of todo) this.linkedWorktrees.add(pathKey(dir));
     for (const dir of todo) {
       try {
         const outcomes = await linkPathsIntoWorktree(primary, dir, paths);
@@ -2229,7 +2316,7 @@ export class WorktreeWebviewProvider
     const api = await this.gitApi();
     if (!api) return;
     const watch = (repo: GitApiRepository) => {
-      const key = normalize(repo.rootUri.fsPath);
+      const key = pathKey(repo.rootUri.fsPath);
       if (this.repoStateWatch.has(key)) return;
       const event = repo.state?.onDidChange;
       if (!event) return;
@@ -2248,7 +2335,7 @@ export class WorktreeWebviewProvider
     this.context.subscriptions.push(
       api.onDidOpenRepository((repo) => watch(repo)),
       api.onDidCloseRepository((repo) => {
-        const key = normalize(repo.rootUri.fsPath);
+        const key = pathKey(repo.rootUri.fsPath);
         this.repoStateWatch.get(key)?.dispose();
         this.repoStateWatch.delete(key);
       })
@@ -2303,11 +2390,11 @@ export class WorktreeWebviewProvider
     const api = await this.gitApi();
     const openPaths: string[] = [];
     if (api)
-      for (const r of api.repositories) openPaths.push(normalize(r.rootUri.fsPath));
+      for (const r of api.repositories) openPaths.push(pathKey(r.rootUri.fsPath));
     const scoped =
       this.context.globalState.get<string>(SCM_SCOPED_PATH_KEY) ?? null;
     for (const wt of data.worktrees) {
-      wt.scmActive = isScmActive(normalize(wt.path), openPaths, scoped);
+      wt.scmActive = isScmActive(pathKey(wt.path), openPaths, scoped);
     }
   }
 
@@ -2712,7 +2799,7 @@ export class WorktreeWebviewProvider
    * what actually reaches it. Only safe when removing a whole worktree — never
    * for a shared dir like the main repo, which would also kill unrelated agents.
    */
-  private killClaudeInDir(dir: string): void {
+  private async killClaudeInDir(dir: string): Promise<void> {
     // Windows: there is no portable way to read another process's cwd, but it
     // does not need one. stopSession already tree-kills each tracked agent by
     // its registry pid (taskkill /T), which reaches the `claude -w` child this
@@ -2720,15 +2807,12 @@ export class WorktreeWebviewProvider
     // by the time this runs on Windows.
     if (process.platform === "win32") return;
     const norm = normalize(dir);
-    let out = "";
-    try {
-      out = cp.execSync("lsof -a -d cwd -Fpn 2>/dev/null || true", {
-        encoding: "utf8",
-        maxBuffer: 16 * 1024 * 1024,
-      });
-    } catch {
-      return; // lsof missing -> nothing we can do here
-    }
+    // `lsof` over every open working directory takes seconds on a busy macOS
+    // box, and `execSync` spent all of it with the extension host blocked - no
+    // rendering, no other extension, nothing. Both reads here are async now;
+    // the one caller already awaits.
+    const out = await this.execText("lsof", ["-a", "-d", "cwd", "-Fpn"]);
+    if (!out) return; // lsof missing or refused -> nothing we can do here
     let pid = 0;
     const victims = new Set<number>();
     for (const line of out.split("\n")) {
@@ -2739,14 +2823,38 @@ export class WorktreeWebviewProvider
         if (cwd === norm || cwd.startsWith(norm + path.sep)) victims.add(pid);
       }
     }
-    for (const p of victims) {
+    await Promise.all(
+      [...victims].map(async (p) => {
+        // The same identity gate every other kill goes through, rather than a
+        // second, looser copy of it: a bare /claude/i over the command line
+        // also matches a process that merely has a file from ~/.claude open.
+        const cmd = await this.execText("ps", ["-p", String(p), "-o", "command="]);
+        if (!cmd || !namesClaude(cmd)) return;
+        try {
+          process.kill(p);
+        } catch {
+          /* already gone, or not killable */
+        }
+      })
+    );
+  }
+
+  /** Run a command and return its stdout, or "" for any failure. Used for the
+   *  process-table reads behind a worktree removal, which are advisory: not
+   *  being able to run one means "nothing found", never an error to report. */
+  private execText(file: string, args: string[]): Promise<string> {
+    return new Promise((resolve) => {
       try {
-        const cmd = cp.execSync(`ps -p ${p} -o command=`, { encoding: "utf8" });
-        if (/claude/i.test(cmd)) process.kill(p);
+        cp.execFile(
+          file,
+          args,
+          { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 10_000 },
+          (err, stdout) => resolve(err && !stdout ? "" : String(stdout || ""))
+        );
       } catch {
-        /* already gone, or not killable */
+        resolve("");
       }
-    }
+    });
   }
 
   /**
@@ -3332,7 +3440,7 @@ export class WorktreeWebviewProvider
     // the stops so every process is gone before git touches the directory --
     // otherwise a still-live Claude (Windows) keeps the worktree locked.
     await Promise.all(agents.map((a) => this.stopSession(a.sessionId)));
-    this.killClaudeInDir(fsPath);
+    await this.killClaudeInDir(fsPath);
 
     // `claude -w` sessions lock their worktree; now that the session is dead
     // (just killed above, or long gone) the lock is stale and would make the

@@ -68,7 +68,15 @@ The ignore list comes from `git ls-files --others --ignored --exclude-standard
 `src/links.ts` holds the filesystem logic, VS Code-free and unit-tested:
 
 - never replaces a real file;
-- re-points only a link of its own;
+- re-points only a link of its own, or one that resolves to nothing. A working
+  link the user aimed somewhere else is left exactly where they pointed it and
+  reported as `skipped-foreign`. Linking used to claim any link that was not
+  ours, which contradicted this rule and the unlink path (which has always
+  refused to touch one), so an `.env` deliberately aimed at a shared fixture was
+  replaced with nothing said about it. A **dangling** link is the exception and
+  the case the replacement was really for: it resolves to nothing, so there is
+  no arrangement to preserve, and it is the shape our own links take once a
+  repository moves;
 - skips paths absent from the primary worktree, or resolving outside the repo;
 - reports every failure per path without ever aborting the worktree creation.
 

@@ -1306,6 +1306,10 @@
       '<div class="card' +
       (hasActiveTerminal ? " terminal-open" : "") +
       (isCollapsed ? " collapsed" : "") +
+      // Names the card for the two things that have to survive a repaint: the
+      // scroll offset of its own agent list, and keyboard focus inside it.
+      '" data-card-path="' +
+      esc(wt.path) +
       '">' +
       inner +
       "</div>";
@@ -1954,8 +1958,6 @@
   }
 
   function render(data) {
-    // The caret this was positioned against is about to be replaced.
-    closeCardMenu();
     const holding = (editingGroup || drag) && data !== lastData;
     lastData = data;
     hideTip(); // a re-render replaces the hovered node; drop any open tooltip
@@ -1975,10 +1977,23 @@
       return;
     }
     if (!data || !data.repoRoot) {
+      // Nothing the menu could act on survives this, and it is mounted on
+      // <body>, so it would otherwise hang there over an empty panel.
+      closeCardMenu();
       root.innerHTML =
         '<div class="empty">No git repository in this window.<br/>Open a folder that is a git repository to see its worktrees.</div>';
       return;
     }
+    // What the paint below would otherwise throw away. Read back here, put back
+    // after (see restoreAfterPaint): an agent going active must not close the
+    // menu the user just opened, move their keyboard focus to nowhere, or
+    // scroll a card's agent list back to the top.
+    //
+    // Preserving it, rather than skipping the paint, is the fix that was
+    // available: the extension already drops a payload that would render
+    // identically (see postData), so every render that reaches here is a real
+    // change - an agent's status, a git count, a PR - and has to be drawn.
+    const keep = captureBeforePaint();
     // Preserve the cards scroll offset across the innerHTML swap so a routine
     // refresh doesn't bounce the user back to the top (see renderBranches).
     const prevCards = root.querySelector(".cards");
@@ -1993,7 +2008,66 @@
     const nextCards = root.querySelector(".cards");
     if (nextCards) nextCards.scrollTop = y;
     syncGroupHeadHeight();
+    restoreAfterPaint(keep);
     openFlaggedRename(data);
+  }
+
+  /**
+   * Read back the view state a paint would destroy.
+   *
+   * Three things, all of them state the user created and the payload knows
+   * nothing about: which element has keyboard focus, which card menu is open,
+   * and how far each card's own (bounded, independently scrolling) agent list
+   * has been scrolled. Elements are identified by the data attributes they
+   * already carry rather than by index, so they are found again after the
+   * markup is rebuilt even if rows moved.
+   */
+  function captureBeforePaint() {
+    const active = document.activeElement;
+    const inRoot = active && active !== document.body && root.contains(active);
+    const scrolls = [];
+    root.querySelectorAll(".agent-list .agents").forEach((el) => {
+      if (!el.scrollTop) return;
+      const card = el.closest("[data-card-path]");
+      if (card) scrolls.push([card.getAttribute("data-card-path"), el.scrollTop]);
+    });
+    // Focus inside the menu needs nothing: the menu is mounted on <body>, so
+    // the paint below does not touch it. Only focus inside the panel is lost.
+    return { focus: inRoot ? focusSelectorFor(active) : "", scrolls };
+  }
+
+  /** A selector that finds this element again after the markup is rebuilt. Only
+   *  the attributes a row is already keyed by; anything else (an index, a
+   *  position) would follow the wrong row once the list reorders. */
+  function focusSelectorFor(el) {
+    const action = el.getAttribute("data-action") || "";
+    for (const attr of ["data-session", "data-card-path", "data-menu-key", "data-tool", "data-group"]) {
+      const v = el.getAttribute(attr);
+      if (!v) continue;
+      return (
+        "[" + attr + '="' + cssEscape(v) + '"]' +
+        (action ? '[data-action="' + cssEscape(action) + '"]' : "")
+      );
+    }
+    return action ? '[data-action="' + cssEscape(action) + '"]' : "";
+  }
+
+  function restoreAfterPaint(keep) {
+    if (!keep) return;
+    for (const [path, top] of keep.scrolls) {
+      const card = root.querySelector(
+        '[data-card-path="' + cssEscape(path) + '"]'
+      );
+      const list = card && card.querySelector(".agent-list .agents");
+      if (list) list.scrollTop = top;
+    }
+    if (keep.focus) {
+      const el = root.querySelector(keep.focus);
+      // preventScroll: focus is being put back where it already was, so the
+      // browser must not also scroll the list to "reveal" it.
+      if (el && typeof el.focus === "function") el.focus({ preventScroll: true });
+    }
+    resyncOpenMenu();
   }
 
   /**
@@ -2405,6 +2479,30 @@
     );
     if (btn) btn.setAttribute("aria-expanded", "false");
     cardMenuKey = "";
+  }
+
+  /**
+   * Re-attach an open menu to the caret a repaint just rebuilt.
+   *
+   * A payload lands roughly every second while an agent is working, and each
+   * one used to close whatever menu was open - so the menu holding Move to
+   * group, Switch branch and Delete could vanish under the pointer within a
+   * second of being opened, which on a busy repo made it unusable.
+   *
+   * The menu itself needs nothing: it is mounted on <body> at viewport
+   * coordinates, so replacing the panel's markup underneath does not move it,
+   * and focus inside it is untouched. Only two things have to be reconciled -
+   * the new caret's `aria-expanded`, and the case where the thing the menu acts
+   * on is no longer on screen at all (its worktree was removed while it was
+   * open), where the menu is closed rather than left pointing at nothing.
+   */
+  function resyncOpenMenu() {
+    if (!cardMenuEl || !cardMenuKey) return;
+    const btn = root.querySelector(
+      '[data-menu-key="' + cssEscape(cardMenuKey) + '"]'
+    );
+    if (!btn) return closeCardMenu();
+    btn.setAttribute("aria-expanded", "true");
   }
 
   /**
@@ -4623,8 +4721,40 @@
       // follows the window rather than its own CSS, so it stays false. Only the
       // elapsed-time tick cares (see tickAges).
       panelVisible = msg.visible !== false;
+    } else if (msg.type === "refreshError") {
+      showRefreshError(msg.message || "");
     }
   });
+
+  /**
+   * A banner over the cards when a refresh failed.
+   *
+   * Every refresh path is fire-and-forget on the host, so a gather that threw
+   * used to leave the panel showing its last good payload with nothing to say
+   * that it had stopped being updated - or, on a fresh window, sitting on
+   * "Loading worktrees" for good.
+   *
+   * Deliberately a banner and not a replacement for the list: the worktrees
+   * almost certainly still exist and their last known state is still the best
+   * thing to show, so this says the panel is stale rather than blanking what it
+   * has. Written into a slot outside `root` so a re-render neither clears it
+   * nor is needed to draw it.
+   */
+  function showRefreshError(message) {
+    let bar = document.getElementById("refresh-error");
+    if (!message) {
+      if (bar) bar.remove();
+      return;
+    }
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "refresh-error";
+      bar.className = "refresh-error";
+      bar.setAttribute("role", "status");
+      root.parentNode.insertBefore(bar, root);
+    }
+    bar.textContent = "Could not refresh: " + message;
+  }
 
   /** Sync the .terminal-open classes to activeSessionId without re-rendering.
    *  The chips are always in the markup and CSS-gated, so this is pure class

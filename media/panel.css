@@ -391,6 +391,19 @@ body {
   line-height: 1.5;
 }
 
+/* A refresh failed, so what is below it is the last good state rather than the
+   current one. Sits above the panel, outside #root, so a re-render neither
+   clears it nor is needed to draw it. Full foreground, not the secondary gray:
+   it is the one thing on screen saying the rest cannot be trusted. */
+.refresh-error {
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground));
+  background: var(--vscode-inputValidation-errorBackground, rgba(241, 76, 76, 0.15));
+  border-bottom: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
 /* One worktree, one card. Three things separate a card from the next, because
    no single one of them survives every theme: the gutter between cards (bigger
    than the padding inside them, so the break reads as a break), a tint that
@@ -761,6 +774,15 @@ body {
 .agent-row:hover {
   background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.2));
   color: var(--vscode-list-activeSelectionForeground);
+}
+/* The row's hover paints a solid selection background, and on a light theme
+   that is a saturated blue. Anything inside it still holding the secondary gray
+   reads as mid-gray on blue, so the counters follow the row's own color for as
+   long as the pointer is on it. */
+.agent-row:hover .subagent-count,
+.agent-row:hover .skill-chip,
+.agent-row:hover .agent-where {
+  color: inherit;
 }
 .agent-row:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
@@ -1276,6 +1298,7 @@ button.busy {
   width: 11px;
   height: 11px;
 }
+
 
 /* A subagent that is running right now, indented under the agent that spawned
  * it — or, when it was given a worktree of its own, under that worktree's card.

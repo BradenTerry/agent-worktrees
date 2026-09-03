@@ -351,9 +351,31 @@ four cards take roughly a third of that again.
   re-render, and toggles `terminal-open` on both the card (which carries the
   outline) and its header (the tint). Leaving the card out of that set is what
   made the outline lag a terminal switch by a data push.
-- Under 340px of panel width a media query drops the agent-count chip from the
-  header: the branch name is what tells two cards apart, and the status dots
-  beside the chip already break the count down.
+- The only width media query is at **240px**, the narrowest the sidebar goes.
+  Between that and a comfortable width nothing is dropped: the meta line simply
+  wraps the git totals under the counts, which is why there is no second
+  breakpoint to keep in step with the markup.
+- **A repaint preserves what the payload does not know about.** `render` replaces
+  `root.innerHTML`, and a payload lands about once a second while an agent is
+  working, so everything the user is in the middle of has to survive it:
+  keyboard focus, the scroll offset of each card's own (bounded, independently
+  scrolling) agent list, and the open actions menu. `captureBeforePaint` reads
+  them back and `restoreAfterPaint` puts them back, identifying elements by the
+  data attributes they already carry (`data-session`, `data-card-path`,
+  `data-menu-key`) rather than by position, so they are found again even when
+  rows have moved. Without it, tabbing through agent rows dropped focus to the
+  body every second and the menu holding Move to group, Switch branch and Delete
+  could vanish under the pointer within a second of being opened.
+  - The menu itself needs no rebuilding: it is mounted on `<body>` at viewport
+    coordinates, so replacing the panel's markup underneath neither moves it nor
+    disturbs focus inside it. Only its new caret's `aria-expanded` is
+    re-synced, and it is closed outright when the thing it acts on is no longer
+    on screen at all.
+  - There is deliberately **no** payload-signature guard here. The extension
+    already drops a payload that would render identically (`postData`), so every
+    render that arrives is a real change and has to be drawn; a second copy of
+    that check in the webview would be a full `JSON.stringify` per payload
+    buying nothing.
 
 ## Screenshots
 

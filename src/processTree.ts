@@ -48,9 +48,55 @@ export type ParentMap = Map<number, number>;
  * (`~/.local/share/claude/versions/2.1.220 --session-id ...`) and as `node
  * .../claude/cli.js`; both carry `claude` in the path even when the process name
  * is `node`.
+ *
+ * What it deliberately does NOT do is search the whole command line. `claude`
+ * appears in the arguments of plenty of processes that are not Claude - every
+ * editor, pager and `tail` pointed at something in `~/.claude`, this extension's
+ * own tests included - and a recycled pid running `vim ~/.claude/settings.json`
+ * matched, which is exactly the process a Stop click would then have killed.
+ * Only the program being run is considered: argv0, plus the script argument when
+ * argv0 is a JS runtime, which is the one case where the identifying path is not
+ * argv0 at all.
  */
 export function namesClaude(commandLine: string): boolean {
-  return /claude/i.test(commandLine);
+  const tokens = commandLine.trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return false;
+  if (isClaudeProgram(tokens[0])) return true;
+  // `node .../claude/cli.js`, and the Windows reading, which prefixes the
+  // command line with the process name (`node.exe node.exe ...\cli.js`). Only a
+  // script path counts here, never a data file: `~/.claude/settings.json` is an
+  // argument to something else, not Claude being run.
+  return tokens.slice(1).some(isClaudeScript);
+}
+
+/** Path segments of a token, separator-agnostic (a Windows path reaches this
+ *  with backslashes, a POSIX one with slashes). */
+function segmentsOf(token: string): string[] {
+  return token.split(/[/\\]/).filter(Boolean);
+}
+
+/** Whether a program path is Claude: named `claude`, or living in a directory
+ *  named `claude` (the versioned binary is named for its version, so its
+ *  directory is the only thing that identifies it). */
+function isClaudeProgram(token: string): boolean {
+  const segments = segmentsOf(token);
+  if (!segments.length) return false;
+  const base = segments[segments.length - 1].toLowerCase();
+  if (/^claude(\.(exe|cmd|bat))?$/.test(base)) return true;
+  return segments
+    .slice(0, -1)
+    .some((s) => s.toLowerCase() === "claude" || s.toLowerCase() === ".claude");
+}
+
+/** Whether an argument is Claude's own entry script rather than a file handed
+ *  to some other program. */
+function isClaudeScript(token: string): boolean {
+  const segments = segmentsOf(token);
+  if (!segments.length) return false;
+  const base = segments[segments.length - 1].toLowerCase();
+  if (/^claude(\.(exe|cmd|bat))?$/.test(base)) return true;
+  if (!/\.(js|mjs|cjs)$/.test(base)) return false;
+  return segments.some((s) => s.toLowerCase() === "claude" || s.toLowerCase() === ".claude");
 }
 
 /**

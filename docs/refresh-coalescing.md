@@ -381,3 +381,33 @@ The session-state watcher pokes a second `Coalescer` that nudges the
 independently throttled PR poller, so an active agent's hook stream does not hit
 the GitHub API per event. The clock is injectable, so the coalescing guarantees
 are unit-tested with virtual time in `test/scheduler.test.js`.
+
+A run that throws is reported to an `onError` callback and swallowed. `fire` is
+called as `void this.fire()`, so without that the rejection is unhandled: it
+reaches the extension host as an unhandled promise rejection and lands nowhere
+the user can see, and the queued follow-up is what has to survive it.
+
+## The refresh itself is single-flight, and says when it fails
+
+`refresh()` is not only reached through the coalescer. `refreshAgents` falls back
+to a full refresh in five places and `refreshRepos` in three, and every one of
+those is a direct call that bypasses the coalescer's own in-flight guard. With an
+agent whose cwd never resolves to a card, the one-second poll took one of those
+fallbacks on every tick, and each overlapping run spawns `git status` for every
+worktree. So `refresh` holds its own claim: a request that arrives during a run
+collapses into exactly one follow-up, and a burst costs two gathers rather than
+one per event.
+
+It is also the only place a gather's failure is caught. Every call site is
+`void this.refresh()`, so anything that escapes used to be an unhandled
+rejection with the panel still showing its last payload - or, on a fresh window,
+sitting on "Loading worktrees" for good. The reliable way in was
+`getToken`, which memoizes the SecretStorage read: a host with no keyring or a
+locked keychain rejects, the *rejected promise* was cached, and it was then
+re-thrown to every later caller for the life of the window. That read now
+resolves to "no token" (an unreadable credential means the PR integration is
+off, which is what it should mean) and the outer catch traces whatever else gets
+through and posts a `refreshError` banner over the cards - a banner, not a
+replacement for the list, since the worktrees almost certainly still exist and
+their last known state is still the best thing on offer. A refresh that gets all
+the way through clears it.

@@ -212,6 +212,33 @@ test("a session outside every worktree has no card and is skipped", () => {
   assert.strictEqual(idx.agents.size, 0);
 });
 
+test(
+  "indexRegistry places a session whose cwd differs only in case",
+  { skip: process.platform !== "win32" && process.platform !== "darwin" },
+  () => {
+    // The card's path comes from `git worktree list` (the case on disk); the
+    // session's cwd is whatever Claude recorded, which is the case the user
+    // typed to cd there. On Windows and macOS those name one directory, but
+    // comparing them as plain strings did not: the agent got no card at all,
+    // and its cwd was reported unplaced, which spent a regather every poll.
+    const shouted = REPO.toUpperCase();
+    const idx = indexRegistry(
+      [{ sessionId: "s1", pid: 1, cwd: shouted, status: "active", startedAt: 1, lastActivity: 1 }],
+      [REPO]
+    );
+    assert.deepStrictEqual(
+      idx.agents.get(REPO).map((a) => a.sessionId),
+      ["s1"],
+      "the row lands on the card, keyed as the caller keyed it"
+    );
+    assert.deepStrictEqual(
+      idx.unplaced,
+      [],
+      "and it is not reported as needing another gather"
+    );
+  }
+);
+
 test("indexRegistry reports no subagents, since the registry has none", () => {
   // They run inside the parent's process, so they have no file of their own.
   const idx = indexRegistry(

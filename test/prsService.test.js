@@ -66,17 +66,33 @@ const MERGED_PR = {
 const gh = {
   /** ms to hold the bulk open-PR list, to keep a poll in flight. */
   bulkDelay: 0,
+  /** ms to hold the token read, which is the await the in-flight claim used to
+   *  sit behind (see the concurrent-refresh test). */
+  tokenDelay: 0,
   calls: [],
+  /** Bulk list calls running right now, and the high-water mark. Two at once is
+   *  the duplicate-fetch race; one after another is the intended queue. */
+  inBulk: 0,
+  maxInBulk: 0,
 };
 
 require.cache[ghPath].exports = {
   ...realGithub,
-  getToken: async () => "token",
+  getToken: async () => {
+    if (gh.tokenDelay) await sleep(gh.tokenDelay);
+    return "token";
+  },
   // No open PRs: the feature branch's PR has been merged.
   fetchOpenPrsByHead: async () => {
     gh.calls.push("bulk");
-    if (gh.bulkDelay) await sleep(gh.bulkDelay);
-    return new Map();
+    gh.inBulk++;
+    gh.maxInBulk = Math.max(gh.maxInBulk, gh.inBulk);
+    try {
+      if (gh.bulkDelay) await sleep(gh.bulkDelay);
+      return new Map();
+    } finally {
+      gh.inBulk--;
+    }
   },
   // `?head=owner:<branch>&state=all`: the merged PR for the feature branch,
   // nothing for the default branch.
@@ -144,6 +160,37 @@ test("PrService: get() ignores a value cached for a different branch", async () 
     assert.strictEqual(svc.get(KEY, "feat")?.state, "merged");
     assert.strictEqual(svc.get(KEY, "main"), undefined);
   } finally {
+    svc.dispose();
+  }
+});
+
+test("PrService: two refreshes racing the token read do not both fetch", async () => {
+  // The in-flight claim used to be taken *after* `await getToken()`. Reading a
+  // secret is a real async round trip, so a forced refresh and a timer tick
+  // could both pass the guard while it was still false and then run duplicate
+  // bulk fetches against the same targets - twice the rate limit for one
+  // result. The claim is now taken before the first await.
+  const svc = new PrService(context);
+  try {
+    svc.setTargets([{ key: KEY, branch: "feat", repo }]);
+    await sleep(30);
+    gh.calls.length = 0;
+    gh.maxInBulk = 0;
+    gh.tokenDelay = 40;
+    gh.bulkDelay = 20;
+    const a = svc.refresh(true);
+    const b = svc.refresh(true);
+    await Promise.all([a, b]);
+    await sleep(80);
+    assert.strictEqual(
+      gh.maxInBulk,
+      1,
+      "the two runs never overlapped: the second queued behind the first"
+    );
+    assert.ok(gh.calls.includes("bulk"), "and the queued one did still run");
+  } finally {
+    gh.tokenDelay = 0;
+    gh.bulkDelay = 0;
     svc.dispose();
   }
 });

@@ -135,10 +135,25 @@ export function initGithub(context: vscode.ExtensionContext): void {
   );
 }
 
-/** The stored token, or undefined when none is set. */
+/**
+ * The stored token, or undefined when none is set.
+ *
+ * SecretStorage is not guaranteed to resolve: a Linux host with no keyring, a
+ * locked keychain and some remote setups all reject instead. That rejection
+ * used to be *cached* (`tokenCache` held the rejected promise) and then
+ * re-thrown to every later caller, so one failed read took out the panel for
+ * the life of the window (the throw escapes `attachPrStatus` and out through
+ * `refresh`, which nothing catches). Read failures resolve to "no token": the
+ * PR integration switches itself off, which is exactly what an unreadable
+ * credential means, and the next read gets to try again.
+ */
 export async function getToken(): Promise<string | undefined> {
   if (!ctx) return undefined;
-  tokenCache ??= ctx.secrets.get(PAT_KEY);
+  tokenCache ??= Promise.resolve(ctx.secrets.get(PAT_KEY)).catch((e) => {
+    tokenCache = undefined; // not a verdict, just a failed read: retry next time
+    traceSink?.(`github token read failed: ${e instanceof Error ? e.message : e}`);
+    return undefined;
+  });
   return tokenCache;
 }
 
@@ -227,11 +242,66 @@ const COND_CACHE_MAX = 200;
  */
 const deniedCaps = new Set<string>();
 
+/**
+ * Epoch ms until which GitHub has asked us to stop calling, or 0 when it has
+ * not. Set from a rate-limited reply's own headers (see `rateLimitPause`) and
+ * read by the PR poller, which parks its timer rather than spending the next
+ * cadence re-issuing calls that can only be refused again.
+ *
+ * Global rather than per token: there is one credential in play at a time, and
+ * GitHub's secondary limits are per user, not per endpoint.
+ */
+let limitedUntil = 0;
+
+/** How long to sit out, in ms, or 0 when GitHub is not rate limiting us. */
+export function rateLimitedFor(now = Date.now()): number {
+  return Math.max(0, limitedUntil - now);
+}
+
+/**
+ * Whether a refused reply is GitHub rate limiting us rather than refusing the
+ * credential, and for how long.
+ *
+ * Three shapes, and the panel used to recognize only the first:
+ *  - primary limit: `x-ratelimit-remaining: 0`, resets at `x-ratelimit-reset`
+ *    (epoch *seconds*);
+ *  - secondary limit: a burst tripped an abuse guard. Answered 403 **or** 429
+ *    with `retry-after` (seconds) and a remaining count that is usually NOT
+ *    zero, which is exactly what made it look like a permission denial;
+ *  - 429 with neither header, which is still a limit.
+ *
+ * Returns 0 when the reply is not rate limiting.
+ */
+function rateLimitPause(res: Response, now = Date.now()): number {
+  const retryAfter = Number(res.headers.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(retryAfter * 1_000, MAX_LIMIT_PAUSE_MS);
+  }
+  const remaining = res.headers.get("x-ratelimit-remaining");
+  if (remaining === "0") {
+    const reset = Number(res.headers.get("x-ratelimit-reset")) * 1_000;
+    // A reset in the past (or an unparseable one) still means "wait"; fall back
+    // to a fixed pause rather than resuming immediately against a spent limit.
+    const wait = Number.isFinite(reset) ? reset - now : NaN;
+    return Math.min(
+      Number.isFinite(wait) && wait > 0 ? wait : DEFAULT_LIMIT_PAUSE_MS,
+      MAX_LIMIT_PAUSE_MS
+    );
+  }
+  return res.status === 429 ? DEFAULT_LIMIT_PAUSE_MS : 0;
+}
+
+/** Used when GitHub refuses for rate limiting but says nothing about when. */
+const DEFAULT_LIMIT_PAUSE_MS = 60_000;
+/** Cap, so a nonsense header cannot park the poller for hours. */
+const MAX_LIMIT_PAUSE_MS = 15 * 60_000;
+
 /** Drop the conditional-request and denied-capability caches (on token change,
  *  so we never reuse an ETag or a stale permission verdict across credentials). */
 export function resetGithubCache(): void {
   condCache.clear();
   deniedCaps.clear();
+  limitedUntil = 0;
 }
 
 /**
@@ -249,6 +319,9 @@ export async function getJson<T>(
   // If this token already failed a permission check for this capability, skip
   // the request entirely — it can only 403 again for the token's whole life.
   if (capability && deniedCaps.has(`${token}\n${capability}`)) return undefined;
+  // GitHub has already told us to stop. Issuing the call anyway spends nothing
+  // but makes the limit worse: a secondary limit extends while it is being hit.
+  if (rateLimitedFor()) return undefined;
   const url = `${API}${path}`;
   const key = `${token}\n${url}`;
   const cached = condCache.get(key);
@@ -259,14 +332,22 @@ export async function getJson<T>(
     // Unchanged since last fetch: reuse the cached body (free of rate limit).
     if (res.status === 304 && cached) return cached.value as T;
     if (!res.ok) {
-      // A 403 that is not rate limiting (the limit still has room) means the
-      // token lacks the permission this endpoint needs. Remember it so we stop
-      // re-issuing a call that cannot succeed until the token is replaced.
-      if (
-        capability &&
-        res.status === 403 &&
-        res.headers.get("x-ratelimit-remaining") !== "0"
-      ) {
+      // Rate limiting first, and it is checked for every refusal rather than
+      // inferred from a single header. A secondary limit answers 403 with a
+      // `retry-after` and a *non-zero* remaining count, which reads exactly
+      // like a permission denial - so one burst of check-run calls used to
+      // disable `checks` and `statuses` permanently, for the whole life of a
+      // token that was never actually missing a permission.
+      const pause = rateLimitPause(res);
+      if (pause) {
+        limitedUntil = Math.max(limitedUntil, Date.now() + pause);
+        traceSink?.(`github rate limited for ${Math.round(pause / 1000)}s`);
+        return undefined;
+      }
+      // A 403 that is not rate limiting means the token lacks the permission
+      // this endpoint needs. Remember it so we stop re-issuing a call that
+      // cannot succeed until the token is replaced.
+      if (capability && res.status === 403) {
         deniedCaps.add(`${token}\n${capability}`);
       }
       return undefined;

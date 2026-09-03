@@ -100,11 +100,47 @@ export function worktreesNeedingLinks(
   worktreePaths: readonly string[],
   linked: ReadonlySet<string>
 ): string[] {
-  const primaryKey = normalizePath(primary);
+  const primaryKey = pathKey(primary);
   return worktreePaths.filter((p) => {
-    const key = normalizePath(p);
+    const key = pathKey(p);
     return key !== primaryKey && !linked.has(key);
   });
+}
+
+/**
+ * Comparison key for a path, for the places two paths from *different sources*
+ * have to be recognized as the same worktree.
+ *
+ * `normalizePath` cannot do this itself: its result is also used as a real path
+ * (a linked file's relative entry is derived from it, and that entry is stored
+ * and displayed), so it has to preserve case. This does not - it is only ever a
+ * key - so it can fold case on the platforms whose filesystems do.
+ *
+ * The mismatch is not hypothetical. The panel compares paths that arrive from
+ * `git worktree list` (the case on disk), from Claude's session registry (the
+ * case the user typed to `cd` there), and from the Git extension's `rootUri`
+ * (the workspace folder's case). On Windows and macOS those routinely differ in
+ * case for the same directory, and every difference was a silent miss: an agent
+ * whose row landed on no card, a Source Control button that never highlighted,
+ * a worktree the poll re-stat'd because it looked unwatched.
+ *
+ * Case only. Symlinks (`/tmp` vs `/private/tmp`) still compare unequal; that
+ * needs a `realpath` per path, which is I/O, and this is called on hot paths.
+ */
+export function pathKey(p: string): string {
+  const normalized = normalizePath(p);
+  return CASE_INSENSITIVE_FS ? normalized.toLowerCase() : normalized;
+}
+
+/** Windows always, macOS by default (APFS can be formatted case-sensitive, but
+ *  case-folding a key there costs a missed match only for two worktrees whose
+ *  paths differ solely in case, which is not a thing anyone has). */
+const CASE_INSENSITIVE_FS =
+  process.platform === "win32" || process.platform === "darwin";
+
+/** Whether two paths name the same location, for the sources above. */
+export function samePathKey(a: string, b: string): boolean {
+  return pathKey(a) === pathKey(b);
 }
 
 /** Canonical absolute path: resolved, with any trailing slash removed. */

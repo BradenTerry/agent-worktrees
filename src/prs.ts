@@ -8,6 +8,7 @@ import {
   fetchPr,
   getToken,
   prUnchanged,
+  rateLimitedFor,
 } from "./github";
 
 /**
@@ -196,6 +197,18 @@ export class PrService implements vscode.Disposable {
     );
     const pushing = Date.now() < this.fastUntil;
     const delay = pushing ? PUSH_MS : anyPending ? ACTIVE_MS : IDLE_MS;
+    // While GitHub is rate limiting us, wake when the pause is over instead of
+    // on the cadence. Polling through a secondary limit is what extends it, and
+    // at the active cadence that is four refused calls a minute achieving
+    // nothing. `+1s` so the timer lands just after the window, not on its edge.
+    const limited = rateLimitedFor();
+    if (limited) {
+      this.timer = setTimeout(() => {
+        this.timer = undefined;
+        void this.refresh(false);
+      }, limited + 1_000);
+      return;
+    }
     this.timer = setTimeout(() => {
       this.timer = undefined;
       void this.refresh(false);
@@ -221,21 +234,31 @@ export class PrService implements vscode.Disposable {
       this.ensureScheduled();
       return;
     }
-
-    const token = await getToken();
-    if (!token) {
-      // No token: ensure no stale PR data lingers, then stay idle.
-      if (this.cache.size) {
-        this.cache.clear();
-        this._onChange.fire();
-      }
+    // GitHub is rate limiting us: sit out the rest of the pause rather than
+    // spending this run on calls it will refuse (getJson would skip them all
+    // anyway, and every refusal extends a secondary limit).
+    if (rateLimitedFor(now)) {
+      this.ensureScheduled();
       return;
     }
 
+    // Claimed before the first await, not after it. `getToken` is async, so a
+    // forced refresh (setTargets) and a timer tick could both get past the
+    // check above, both find `inFlight` still false, and run duplicate bulk
+    // fetches against the same targets.
     this.inFlight = true;
     this.lastFetch = now;
     let changed = false;
     try {
+      const token = await getToken();
+      if (!token) {
+        // No token: ensure no stale PR data lingers, then stay idle.
+        if (this.cache.size) {
+          this.cache.clear();
+          this._onChange.fire();
+        }
+        return;
+      }
       const targets = this.targets;
       // One bulk open-PR list per repo (worktrees of one repo share it), then
       // per-target follow-ups only where something can have changed. This

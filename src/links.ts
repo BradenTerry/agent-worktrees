@@ -41,6 +41,7 @@ export interface LinkOutcome {
     | "unchanged" // a correct link was already there
     | "missing-source" // nothing at that path in the primary worktree
     | "skipped-real" // a real (unrelated) file already sits at the target
+    | "skipped-foreign" // a working link the user pointed somewhere else
     | "invalid" // path escapes the repo / worktree (e.g. contains "..")
     | "error";
   /** How the link was made, when one was. Surfaced mainly so the Windows
@@ -84,7 +85,10 @@ function isInside(parent: string, child: string): boolean {
 type TargetState =
   | { kind: "none" }
   | { kind: "ours"; isDirLink: boolean } // our link, already pointing at source
-  | { kind: "foreign-link"; isDirLink: boolean } // a link pointing elsewhere
+  // A link pointing elsewhere. `broken` when it resolves to nothing, which is
+  // what separates "the user aimed this at something" from a dangling link that
+  // is only in the way (including one of ours from before the repo moved).
+  | { kind: "foreign-link"; isDirLink: boolean; broken?: boolean }
   | { kind: "real" }; // a genuine file/dir we must never touch
 
 /**
@@ -114,10 +118,11 @@ async function classifyTarget(
     // Whether it needs rmdir depends on what the *link* resolves to, not on the
     // source; a broken link falls back to the source's type as a best guess.
     let isDirLink = srcStat.isDirectory();
+    let broken = false;
     try {
       isDirLink = (await fs.promises.stat(target)).isDirectory();
     } catch {
-      /* broken link: keep the guess */
+      broken = true; // resolves to nothing; keep the guess at its type
     }
     try {
       const current = await fs.promises.readlink(target);
@@ -128,9 +133,11 @@ async function classifyTarget(
       );
       return samePath(resolved, source)
         ? { kind: "ours", isDirLink }
-        : { kind: "foreign-link", isDirLink };
+        : { kind: "foreign-link", isDirLink, broken };
     } catch {
-      return { kind: "foreign-link", isDirLink };
+      // Unreadable link: treated as broken, since nothing can be said to point
+      // anywhere, and leaving the name stranded would never link the path.
+      return { kind: "foreign-link", isDirLink, broken: true };
     }
   }
 
@@ -242,6 +249,23 @@ async function linkOne(
       path: rel,
       status: "skipped-real",
       message: `A real file already exists at "${rel}" in the worktree; left untouched.`,
+    };
+  }
+
+  // A link pointing somewhere else is the user's, not ours, and the documented
+  // rule is that only a link of our own is ever re-pointed. Replacing a working
+  // one silently discarded a deliberate choice (an `.env` aimed at a shared
+  // fixture, say), with nothing said about it.
+  //
+  // A *broken* foreign link is the exception: it resolves to nothing, so there
+  // is no intent left to preserve and nothing to lose by claiming the name.
+  // That is also the shape our own links take once a repository moves, which is
+  // the case the replacement was really there for.
+  if (state.kind === "foreign-link" && !state.broken) {
+    return {
+      path: rel,
+      status: "skipped-foreign",
+      message: `"${rel}" in the worktree already links somewhere else; left untouched.`,
     };
   }
 
