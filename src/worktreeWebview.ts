@@ -410,6 +410,14 @@ export class WorktreeWebviewProvider
   private queuedRefresh?: { force: boolean };
   /** A failure banner is up, so a later success knows to clear it. */
   private refreshError = false;
+  /** A `git fetch` started by a forced refresh is running, so a second click
+   *  (or the re-gather that fetch triggers) cannot stack another one. Also what
+   *  the panel's progress line reads; see postRefreshing. */
+  private fetchingRemotes = false;
+  /** A forced GitHub PR/CI poll is running. Same two jobs as fetchingRemotes;
+   *  prService coalesces its own overlapping refreshes, but this is what keeps
+   *  the progress line honest about them. */
+  private fetchingPrs = false;
   /** Epoch ms each worktree's git status was last read, so a burst of agent
    *  transitions doesn't re-spawn git for the same worktree; see statusPoll.ts. */
   private readonly statusAt = new Map<string, number>();
@@ -768,8 +776,12 @@ export class WorktreeWebviewProvider
 
   /**
    * Recompute worktree data and push it to the webview (only when it changed).
-   * When `force` is set (the user clicked Refresh) this also runs a `git fetch`
-   * so the behind/ahead counts are current and forces a fresh GitHub PR fetch.
+   * The gather is entirely local, so this posts as soon as git status has been
+   * read for each worktree.
+   *
+   * When `force` is set (the user clicked Refresh) a `git fetch` and a GitHub
+   * PR/CI poll are also owed, but they are started after that post rather than
+   * awaited before it, and each lands on its own; see runNetworkRefresh.
    *
    * Single-flight, and the only place a gather's failure is reported.
    *
@@ -836,7 +848,7 @@ export class WorktreeWebviewProvider
     // Every agent on a card comes from Claude's own session registry; a session
     // that is gone has no file, so there is nothing to sweep or expire.
     const registry = await this.readAgents();
-    const data = await gatherWorktrees(force, registry, this.reader);
+    const data = await gatherWorktrees(registry, this.reader);
     // A full gather just read every worktree's status, so the agent path has
     // nothing to re-read for a moment (see statusPoll.ts). Worktrees that are
     // gone drop out, so the map tracks the cards rather than every path this
@@ -886,7 +898,7 @@ export class WorktreeWebviewProvider
     if (this.gitPerf) data.gitPerf = this.withSlowFlag(this.gitPerf);
     data.activeSessionId = this.activeSessionId();
     if (this.view.visible) {
-      await this.attachPrStatus(data, force);
+      await this.attachPrStatus(data);
     } else {
       // Hidden view: the PR badges are not rendered and the poller is paused
       // (setVisible), so skip the token/remote/target work. The git gather
@@ -904,6 +916,110 @@ export class WorktreeWebviewProvider
     // catches up via onDidChangeViewState when re-shown.
     if (this.branchesPanel?.visible) void this.postBranches(false);
     await this.postGather(data, seq);
+    // The panel is now painted from purely local state. A forced refresh (the
+    // Refresh button) also owes the user two things that are not local - remote
+    // tracking refs and GitHub PR/CI status - and both are started here, AFTER
+    // the post, rather than awaited above it. See runNetworkRefresh.
+    if (force) this.runNetworkRefresh(data);
+  }
+
+  /**
+   * The two network legs of a forced refresh, started once the local payload is
+   * already on screen.
+   *
+   * Both used to run *inside* the gather, ahead of the only post: `fetchRemotes`
+   * before the status sweep and `prService.refresh(true)` at the end of
+   * attachPrStatus. So clicking Refresh bought a `git fetch` (15s timeout) plus a
+   * GitHub round trip per worktree before a single pixel moved, and with several
+   * worktrees the GitHub half dominated - the panel sat on its old payload for
+   * seconds with nothing to say it had heard the click, which is what read as the
+   * view freezing.
+   *
+   * Neither is something the render has to wait for. The git status, agent rows,
+   * change counts and cached PR badges are all known before either call starts,
+   * so they are posted first and each network result lands on its own when it
+   * arrives: the fetch through a follow-up gather, the PR data through the
+   * poller's existing onChange -> postPrState patch. Started here rather than
+   * before the post so that patch applies to the payload just posted; kicking
+   * them earlier would let a fast reply patch the *previous* payload and then be
+   * overwritten by this one's cached values.
+   *
+   * Fire-and-forget on purpose (both swallow their own failures), and each is
+   * single-flight so holding the Refresh button down cannot stack fetches.
+   */
+  private runNetworkRefresh(data: WorktreeData): void {
+    void this.fetchRemotesThenRefresh(data.repoRoot);
+    if (data.prEnabled && data.github?.hasToken) void this.refreshPrs();
+  }
+
+  /**
+   * Update remote-tracking refs, then re-gather so the behind/ahead counts move.
+   *
+   * A `git fetch` is the one part of a refresh that talks to the network, and
+   * `fetchRemotes` gives it a 15s timeout, so this is the leg most able to make
+   * the panel look stuck.
+   *
+   * Only re-gathers when the fetch actually moved a remote-tracking ref. Nothing
+   * else in the payload can have changed — the fetch touches no working tree —
+   * and a re-gather is a `git status` per worktree, which is the cost this file
+   * spends everywhere else avoiding. Most refreshes fetch nothing new, so most
+   * of them now end here.
+   */
+  private async fetchRemotesThenRefresh(repoRoot?: string): Promise<void> {
+    if (!repoRoot || this.fetchingRemotes) return;
+    this.fetchingRemotes = true;
+    let moved = false;
+    this.postRefreshing();
+    try {
+      // Never throws; offline or a missing remote just leaves the refs alone.
+      moved = await fetchRemotes(repoRoot);
+    } finally {
+      this.fetchingRemotes = false;
+      this.postRefreshing();
+    }
+    if (moved) await this.refresh(false);
+  }
+
+  /** Force a fresh PR/CI poll for every tracked branch. The result reaches the
+   *  panel through prService.onChange -> postPrState, which patches the badges
+   *  onto the payload already rendered instead of re-running any git. */
+  private async refreshPrs(): Promise<void> {
+    if (this.fetchingPrs) return;
+    this.fetchingPrs = true;
+    this.postRefreshing();
+    try {
+      await this.prService.refresh(true);
+    } catch (e) {
+      // prService swallows per-branch failures itself; this is only for a throw
+      // on the way in (a rejected token read), which must not escape as an
+      // unhandled rejection now that nothing awaits this.
+      diag(`PR refresh failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.fetchingPrs = false;
+      this.postRefreshing();
+    }
+  }
+
+  /**
+   * Tell the panel which parts of a refresh are still in flight.
+   *
+   * The Refresh button is a `view/title` command, so VS Code renders it and the
+   * panel cannot spin it. Without this, decoupling the network legs above would
+   * trade one bad signal for another: the click would repaint instantly from
+   * data that had not changed, and the fetch and GitHub results arriving seconds
+   * later would look like they came from nowhere. A progress line above the
+   * cards says the click landed and work is still going.
+   *
+   * Its own message, not a payload field: it changes several times per refresh
+   * and the payload rebuilds the whole card DOM, so routing it through `update`
+   * would repaint the list purely to move a progress bar.
+   */
+  private postRefreshing(): void {
+    void this.view?.webview.postMessage({
+      type: "refreshing",
+      git: this.fetchingRemotes,
+      github: this.fetchingPrs,
+    });
   }
 
   /**
@@ -1365,15 +1481,17 @@ export class WorktreeWebviewProvider
 
   /**
    * Attach GitHub connection + per-worktree PR status onto the payload. This is
-   * the only place PR work is kicked off, and it is fully optional: with no
-   * token (or the integration toggled off) it sets an empty target list, does no
-   * network work, and leaves every `pr` undefined. Resolving remotes and reading
+   * where the PR service is pointed at the current branches, and it is fully
+   * optional: with no token (or the integration toggled off) it sets an empty
+   * target list and leaves every `pr` undefined. Resolving remotes and reading
    * the cache never throws, so a GitHub hiccup can't break the worktree render.
+   *
+   * Nothing here waits on the network. It reads the PR cache; the fetches that
+   * fill that cache are the poller's, `setTargets`' own kick when the branch set
+   * moved, and — for the Refresh button — runNetworkRefresh, which runs after
+   * this payload is posted.
    */
-  private async attachPrStatus(
-    data: WorktreeData,
-    force = false
-  ): Promise<void> {
+  private async attachPrStatus(data: WorktreeData): Promise<void> {
     const enabled = this.prService.isEnabled();
     const github = await connection();
     data.github = github;
@@ -1392,12 +1510,11 @@ export class WorktreeWebviewProvider
       }
     }
     this.prService.setTargets(targets);
-    // On an explicit refresh, refetch PR/CI status now so this payload carries
-    // the latest instead of waiting for the next background poll.
-    if (force && enabled && github.hasToken) {
-      await this.prService.refresh(true);
-    }
-
+    // Cache only - nothing here waits on GitHub. A forced refresh does refetch,
+    // but from runNetworkRefresh after this payload is posted, and its result
+    // reaches the panel through onChange -> postPrState. Blocking the render on
+    // it (which is what this used to do) is what made Refresh feel frozen on a
+    // repo with several worktrees.
     for (const wt of data.worktrees) {
       if (!wt.branch) continue;
       // Branch-matched: a value cached for a branch this worktree no longer has
@@ -3961,8 +4078,11 @@ export class WorktreeWebviewProvider
       return;
     }
     await fetchRemotes(repoRoot, { prune });
-    // We already fetched, so re-read without a second fetch; reuse cached PR data
-    // (refetchPrs=false) to keep the git fetch decoupled from the GitHub API.
+    // Unforced, which is what keeps this button git-only: a forced refresh would
+    // add its own fetch (redundant, we just ran one) and a GitHub poll, and the
+    // separate Refresh GitHub button owns the latter. Re-gathered unconditionally
+    // rather than on fetchRemotes' "refs moved" answer, because this is also what
+    // re-posts both views and so what clears the button's spinner.
     await this.refresh();
     await this.postBranches(false);
   }

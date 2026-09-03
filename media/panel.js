@@ -4964,6 +4964,8 @@
       panelVisible = msg.visible !== false;
     } else if (msg.type === "refreshError") {
       showRefreshError(msg.message || "");
+    } else if (msg.type === "refreshing") {
+      showRefreshProgress(!!msg.git, !!msg.github);
     }
   });
 
@@ -5029,6 +5031,46 @@
     live.setAttribute("aria-atomic", "true");
     (root.parentNode || document.body).insertBefore(live, root);
   })();
+
+  /**
+   * A progress line while the network half of a Refresh is still running.
+   *
+   * Refresh is a `view/title` command, so it is VS Code's button and the panel
+   * cannot put a spinner on it. The panel now paints as soon as the local git
+   * gather is done and lets the `git fetch` and the GitHub PR/CI poll land
+   * afterwards, which is what stops the click from freezing the view - but it
+   * also means the numbers those two produce arrive seconds after the repaint.
+   * This says which of them is still going, so the wait is visible work rather
+   * than a panel that stopped halfway.
+   *
+   * Written into the slot above `root`, like the error banner: it is toggled
+   * several times per refresh and a re-render neither draws nor clears it, so it
+   * never costs a rebuild of the card list.
+   */
+  function showRefreshProgress(git, github) {
+    let bar = document.getElementById("refresh-progress");
+    if (!git && !github) {
+      if (bar) bar.remove();
+      return;
+    }
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "refresh-progress";
+      bar.className = "refresh-progress";
+      bar.setAttribute("role", "progressbar");
+      bar.innerHTML = '<span class="refresh-progress-track"></span>';
+      root.parentNode.insertBefore(bar, root);
+    }
+    // Both legs run concurrently, so name whichever are still outstanding.
+    const what =
+      git && github
+        ? "Fetching from the remote and loading GitHub status"
+        : git
+          ? "Fetching from the remote"
+          : "Loading GitHub status";
+    bar.setAttribute("aria-label", what);
+    bar.title = what;
+  }
 
   function showRefreshError(message) {
     let bar = document.getElementById("refresh-error");

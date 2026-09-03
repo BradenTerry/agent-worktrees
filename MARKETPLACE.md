@@ -123,6 +123,9 @@ and the card grows a PR rollup:
 - Title, state, CI checks, reviews, comment count.
 - **Out of date** and **Auto-merge** pills.
 - Refreshed as your agents work, plus a per-card refresh.
+- Refresh never blocks the panel. The worktrees repaint straight away and
+  the PR badges fill in as GitHub answers, with a progress line above the
+  cards while it does.
 - Always the PR for the branch checked out right now, so a merged branch's PR
   clears instead of lingering.
 
