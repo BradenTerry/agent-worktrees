@@ -193,6 +193,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | Doc | Covers |
 | --- | --- |
 | [Card layout](docs/card-layout.md) | How `card()` lays out a worktree: what folds together, the sticky header, the actions menu |
+| [Accessibility and narrow widths](docs/accessibility.md) | The menu and dialog keyboard models, the live region, forced colours, what folds at 240px, the two empty states |
 | [Worktree groups](docs/groups.md) | The user's sections over the cards list: where the state lives, why General is fixed and the primary worktree is unfilable, folding, in-header naming, drag reordering |
 | [Agents view](docs/agents-view.md) | The flat all-agents list: the switch, what a row adds, ordering and pinning, subagents without cards |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |

@@ -257,7 +257,17 @@ A worktree is not part of your open workspace, so **Find in Files** and
 - **A Preferences tab**: the order the agents view groups its statuses in, moved
   with an up/down control per status.
 - **Buttons that show their work**: slow actions swap their icon for a spinner.
-- **A settings nav that folds to icons** on a narrow sidebar.
+- **A settings nav that folds to icons** on a narrow sidebar, on its own once
+  there is no room for labels.
+- **Usable from the keyboard.** Arrow keys, Home and End move through the card
+  and group menus; Escape and Tab close one and put you back on the button you
+  opened it from; dialogs keep Tab inside them and hand focus back on close.
+  Tooltips open on focus as well as hover, so the readings that only live in one
+  are not mouse-only.
+- **Announces the agents that need you**, once, as the count rises, for anyone
+  who cannot see the badge or the colour.
+- **High-contrast themes** get real borders instead of the translucent hairlines
+  that wash out in them, and everything that moves respects Reduced Motion.
 
 ## Requirements
 
