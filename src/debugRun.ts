@@ -77,22 +77,28 @@ export async function readLaunchFile(
   return parsed;
 }
 
-/** Whether each worktree has anything to debug, valid while its launch.json
- *  mtime is unchanged. Only the answer is cached, not the parsed file: starting
- *  a session re-reads it, so a config edit can never be launched from a stale
- *  copy. */
-const debuggableCache = new Map<string, { mtimeMs: number; has: boolean }>();
+/** What each worktree has to debug, valid while its launch.json mtime is
+ *  unchanged. Only the target list is cached, never the parsed file: starting a
+ *  session re-reads it, so a config edit can never be launched from a stale
+ *  copy. The list itself is just names and types - it is what the panel's menu
+ *  draws, so it has to be in the payload, and it is small enough to be. */
+const debuggableCache = new Map<
+  string,
+  { mtimeMs: number; targets: DebugTarget[] }
+>();
 
 /**
- * Whether the Debug button should render for this worktree.
+ * The launch targets the card's Run and Debug menu offers for this worktree.
  *
  * Called for every worktree on every full refresh (window focus, an agent
  * transition, a worktree added), so it must not read and parse a file per
  * worktree per refresh. A missing launch.json is the common case and costs one
  * failed stat; a present one is parsed once and re-parsed only when it is
- * edited.
+ * edited. An empty list is also what says the menu entry should not be drawn.
  */
-export async function hasDebugTargets(worktreePath: string): Promise<boolean> {
+export async function listDebugTargets(
+  worktreePath: string
+): Promise<DebugTarget[]> {
   const file = path.join(worktreePath, LAUNCH_REL);
   let mtimeMs: number;
   try {
@@ -102,68 +108,14 @@ export async function hasDebugTargets(worktreePath: string): Promise<boolean> {
     // one that appears later must be picked up, and a failed stat is already as
     // cheap as this gets.
     debuggableCache.delete(file);
-    return false;
+    return [];
   }
   const hit = debuggableCache.get(file);
-  if (hit && hit.mtimeMs === mtimeMs) return hit.has;
-  const has = !!(await readLaunchFile(worktreePath));
-  debuggableCache.set(file, { mtimeMs, has });
-  return has;
-}
-
-/**
- * Pick a launch target for a worktree. Accepting an item starts it with
- * debugging; the play button on a row starts it without. One quick pick rather
- * than two steps, and the button carries a tooltip so the alternative is
- * discoverable.
- */
-async function pickTarget(
-  targets: DebugTarget[],
-  worktreeName: string
-): Promise<{ target: DebugTarget; noDebug: boolean } | undefined> {
-  type Item = vscode.QuickPickItem & { target: DebugTarget };
-  const runButton: vscode.QuickInputButton = {
-    iconPath: new vscode.ThemeIcon("run"),
-    tooltip: "Start without debugging",
-  };
-  const qp = vscode.window.createQuickPick<Item>();
-  qp.title = `Debug in ${worktreeName}`;
-  qp.placeholder =
-    "Pick a launch configuration, or its play icon to start without debugging";
-  qp.matchOnDescription = true;
-  qp.items = targets.map((t) => ({
-    label: t.name,
-    description:
-      t.kind === "compound"
-        ? `compound · ${t.count} configuration${t.count === 1 ? "" : "s"}`
-        : t.type,
-    buttons: [runButton],
-    target: t,
-  }));
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (
-      result: { target: DebugTarget; noDebug: boolean } | undefined
-    ): void => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-      qp.hide();
-    };
-    qp.onDidAccept(() => {
-      const item = qp.selectedItems[0];
-      finish(item ? { target: item.target, noDebug: false } : undefined);
-    });
-    qp.onDidTriggerItemButton((e) =>
-      finish({ target: e.item.target, noDebug: true })
-    );
-    qp.onDidHide(() => {
-      finish(undefined);
-      qp.dispose();
-    });
-    qp.show();
-  });
+  if (hit && hit.mtimeMs === mtimeMs) return hit.targets;
+  const parsed = await readLaunchFile(worktreePath);
+  const targets = parsed ? debugTargets(parsed) : [];
+  debuggableCache.set(file, { mtimeMs, targets });
+  return targets;
 }
 
 /**
@@ -510,12 +462,21 @@ async function runPreLaunch(
 }
 
 /**
- * Ask which target to run in `worktreePath`, then start it. A compound starts
- * its members in order, as VS Code does. Returns the number of sessions started.
+ * Run one named launch target in `worktreePath`. A compound starts its members
+ * in order, as VS Code does. Returns the number of sessions started.
+ *
+ * The target arrives by **name**, from the panel's menu, and the launch file is
+ * re-read here rather than trusted from the payload it was drawn from. The menu
+ * can be a refresh or two behind an edit to launch.json, and starting the wrong
+ * configuration because the panel had a stale list would be a far worse failure
+ * than saying the name is gone. Same reason the old quick pick re-read it: what
+ * is cached is only ever what to *offer*, never what to run.
  */
-export async function startWorktreeDebug(
+export async function runWorktreeTarget(
   worktreePath: string,
-  worktreeName: string
+  worktreeName: string,
+  targetName: string,
+  noDebug: boolean
 ): Promise<number> {
   const file = await readLaunchFile(worktreePath);
   if (!file) {
@@ -524,11 +485,15 @@ export async function startWorktreeDebug(
     );
     return 0;
   }
-  const targets = debugTargets(file);
-  if (!targets.length) return 0;
-
-  const choice = await pickTarget(targets, worktreeName);
-  if (!choice) return 0;
+  const target = debugTargets(file).find((t) => t.name === targetName);
+  if (!target) {
+    vscode.window.showWarningMessage(
+      `"${targetName}" is no longer in ${worktreeName}'s ${LAUNCH_REL}. ` +
+        `Reopen the menu for the current list.`
+    );
+    return 0;
+  }
+  const choice = { target, noDebug };
 
   const configs = resolveTarget(file, choice.target);
 

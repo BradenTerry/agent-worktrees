@@ -117,6 +117,17 @@
           "maxItems": 3,
           "markdownDescription": "Which order the **agents view** groups its rows in. Waiting first by default, so the agent that needs you is at the top whatever worktree it is in. Edit it here or in Settings → Preferences in the panel. A partial or unrecognized list is completed with the missing statuses rather than hiding those agents."
         },
+        "agentWorktrees.notifyWaiting": {
+          "type": "string",
+          "default": "unfocused",
+          "enum": ["off", "unfocused", "always"],
+          "enumDescriptions": [
+            "Never. The pulsing dot, the collapsed-group badge and the Activity Bar count are the only signals.",
+            "Only while the VS Code window is not focused, which is when nothing else reaches you.",
+            "Every time an agent starts waiting, focused or not."
+          ],
+          "markdownDescription": "Show a notification with an **Open terminal** button when an agent starts waiting for you. One notification per agent, so two agents prompting at the same time raise two, each opening its own terminal. Raised once per time an agent starts waiting, never repeated while it stays there, and never for agents that were already waiting when the window opened."
+        },
         "agentWorktrees.statusPollSeconds": {
           "type": "number",
           "default": 10,

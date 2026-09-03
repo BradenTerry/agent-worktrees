@@ -14,6 +14,7 @@ import { normalizePath } from "./worktreeUtils";
 import { indexRegistry, RegistrySession } from "./sessionRegistry";
 import { TranscriptReader } from "./transcript";
 import { DebugSessionVM } from "./debugRun";
+import type { DebugTarget } from "./debugTargets";
 import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
 import type { WorktreeGroupVM } from "./groups";
 import { diag } from "./diagnostics";
@@ -126,9 +127,12 @@ export interface WorktreeVM {
    *  Control view (i.e. the scope is "set"). Only set when the SCM integration
    *  is enabled. */
   scmActive?: boolean;
-  /** True when this worktree has launch configurations of its own, which is what
-   *  puts the Debug button on the card. Re-read on each full refresh. */
-  canDebug?: boolean;
+  /** The launch targets this worktree offers, which is both what puts Run and
+   *  Debug in the card's menu and what that entry's own menu lists. Names and
+   *  types only; the launch file is re-read when one is actually started, so a
+   *  stale list can offer a target that has gone but never launch one.
+   *  Re-read on each full refresh; absent or empty means no entry. */
+  debugTargets?: DebugTarget[];
   /** Debug sessions this extension started in this worktree, so the card can
    *  offer a stop button for each (the Run and Debug view cannot be retargeted,
    *  so the panel owns both ends). */

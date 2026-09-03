@@ -106,7 +106,10 @@ function overviewData() {
         // upstream set: the branch is pushed, so its GitHub entry is offered.
         git: { dirty: 0, insertions: 0, deletions: 0, ahead: 0, behind: 2, upstream: "origin/main" },
         // Has launch configurations, nothing running: the Debug button only.
-        canDebug: true,
+        debugTargets: [
+          { name: "Run API", kind: "config", type: "node" },
+          { name: "Web + API", kind: "compound", count: 2 },
+        ],
         agents: [
           {
             sessionId: "s-main-1",
@@ -153,7 +156,10 @@ function overviewData() {
         },
         // A debug session the panel started in this worktree, with the stop
         // button that is the way back out of it.
-        canDebug: true,
+        debugTargets: [
+          { name: "Run API", kind: "config", type: "node" },
+          { name: "Web + API", kind: "compound", count: 2 },
+        ],
         debugSessions: [
           {
             id: "dbg-checkout-api",
@@ -236,7 +242,10 @@ function overviewData() {
         git: { dirty: 1, insertions: 9, deletions: 4, ahead: 1, behind: 0, upstream: "origin/fix/login-race" },
         // Started with "Run without debugging", so the row carries the chip that
         // says no debugger is attached.
-        canDebug: true,
+        debugTargets: [
+          { name: "Run API", kind: "config", type: "node" },
+          { name: "Web + API", kind: "compound", count: 2 },
+        ],
         debugSessions: [
           {
             id: "dbg-login-web",
