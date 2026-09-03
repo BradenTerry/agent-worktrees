@@ -17,6 +17,14 @@ import {
   GitPerfVM,
 } from "./worktreeData";
 import {
+  newlyWaiting,
+  noticeText,
+  notifyMode,
+  shouldNotify,
+  waitingAgents,
+  NOTIFY_WAITING_SETTING,
+} from "./waitingNotices";
+import {
   countWaitingAgents,
   pathKey,
   repoSettingsKey,
@@ -83,8 +91,8 @@ import { DEFAULT_POLL_SECONDS, dueForStatus, pollIntervalMs } from "./statusPoll
 import { moveAgentStatus, normalizeAgentStatusOrder } from "./agentOrder";
 import {
   DebugSessionTracker,
-  hasDebugTargets,
-  startWorktreeDebug,
+  listDebugTargets,
+  runWorktreeTarget,
 } from "./debugRun";
 import {
   initGithub,
@@ -202,6 +210,11 @@ const SCM_SCOPED_PATH_KEY = "agentWorktrees.scmScopedPath";
 /** Config key for the debug-tracing toggle, surfaced in Settings → Debug. */
 const TRACE_SETTING = "agentWorktrees.trace";
 
+/** The one action on a waiting-agent notification. Compared by identity with
+ *  what showInformationMessage resolves to, so it has to be the same string
+ *  both times - hence a constant rather than two literals that can drift. */
+const OPEN_TERMINAL = "Open terminal";
+
 /** Config key for the order the agents view groups its rows in, surfaced in
  *  Settings → Preferences. A real setting rather than webview state: it is a
  *  preference about the panel, so it belongs where the user's other ones are
@@ -281,6 +294,13 @@ interface ActionMessage {
   sessionId?: string;
   /** Debug session id, for stopDebug. */
   debugId?: string;
+  /** Launch target name, for debugWorktree: which entry of the card's Run and
+   *  Debug menu was pressed. Sent by name, not by index, so a launch.json edited
+   *  between the menu being drawn and pressed cannot start the wrong one. */
+  debugTarget?: string;
+  /** True when the target's play button was pressed rather than its row, i.e.
+   *  start without debugging. */
+  noDebug?: boolean;
   /** GitHub PAT, for setGithubToken. */
   token?: string;
   /** New on/off state, for togglePr and setGitPerf; or the Prune choice for
@@ -446,6 +466,16 @@ export class WorktreeWebviewProvider
   private repoWatchSet = false;
   /** Debug sessions the panel started, so a card can stop what it launched. */
   private readonly debugSessions = new DebugSessionTracker();
+  /** Sessions whose current stint in the waiting status has already been
+   *  announced, so the 1s poll cannot re-toast the same permission prompt every
+   *  second. Entries are dropped when the agent stops waiting, which is what
+   *  lets the *next* prompt in the same session announce again. */
+  private readonly announcedWaiting = new Set<string>();
+  /** False until the first payload has been reconciled. That payload seeds the
+   *  set above without notifying, so opening a window (or reloading the
+   *  extension host) onto agents that were already blocked does not fire a
+   *  toast per agent for news that is not new. */
+  private notifySeeded = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     initGithub(context);
@@ -911,6 +941,11 @@ export class WorktreeWebviewProvider
           ? "1 agent waiting for you"
           : `${waiting} agents waiting for you`,
     };
+    // Same signal, but pushed rather than displayed: the badge is only visible
+    // while the Activity Bar is, and neither it nor the panel reaches the user
+    // once VS Code is behind another window. Before the unchanged-payload
+    // return below for the same reason as the badge.
+    this.notifyWaiting(data);
     // lastActivity is a per-hook-event heartbeat the panel never renders;
     // including it in the signature would defeat this guard on every tool call
     // and rebuild the webview DOM for a byte-identical render.
@@ -920,6 +955,54 @@ export class WorktreeWebviewProvider
     if (json === this.lastPosted) return;
     this.lastPosted = json;
     void this.view.webview.postMessage({ type: "update", data });
+  }
+
+  /**
+   * Raise a notification for each agent that has just started waiting, with a
+   * button that reveals its terminal.
+   *
+   * **One toast per agent, raised together.** `showInformationMessage` resolves
+   * when its notification is dismissed, so awaiting one before raising the next
+   * would turn two agents blocking at the same moment into two toasts shown one
+   * after the other - the second appearing only once the first had been
+   * answered, which is precisely backwards for the case it exists to serve.
+   * Every notification is therefore created in the same tick and each promise
+   * handled on its own; VS Code stacks them, and each carries the session id of
+   * the agent it is about, so the buttons cannot be crossed.
+   *
+   * The set is reconciled before the mode is read, so the seeding and the
+   * "already announced" bookkeeping happen even while notifications are off.
+   * Turning the setting on mid-session then announces the *next* agent to
+   * block rather than everything currently sitting there.
+   *
+   * Nothing here fires until the panel view has been resolved once, since this
+   * hangs off postData. That is the same constraint the Activity Bar badge has
+   * always had, and it is the extension's only refresh path.
+   */
+  private notifyWaiting(data: WorktreeData): void {
+    const seed = !this.notifySeeded;
+    this.notifySeeded = true;
+    const fresh = newlyWaiting(
+      waitingAgents(data.worktrees),
+      this.announcedWaiting,
+      seed
+    );
+    if (!fresh.length) return;
+    const mode = notifyMode(
+      vscode.workspace.getConfiguration().get(NOTIFY_WAITING_SETTING)
+    );
+    // Read once for the whole batch rather than per toast: they are all being
+    // raised in response to one refresh, so they should agree about whether the
+    // user was looking at the window when it landed.
+    if (!shouldNotify(mode, vscode.window.state.focused)) return;
+    for (const agent of fresh) {
+      diag(`notifying: ${agent.sessionId} is waiting in ${agent.where}`);
+      void Promise.resolve(
+        vscode.window.showInformationMessage(noticeText(agent), OPEN_TERMINAL)
+      ).then((choice) => {
+        if (choice === OPEN_TERMINAL) void this.focusAgent(agent.sessionId);
+      });
+    }
   }
 
   /**
@@ -1404,7 +1487,7 @@ export class WorktreeWebviewProvider
       case "scopeScm":
         return this.scopeScm(msg.path);
       case "debugWorktree":
-        return this.debugWorktree(msg.path);
+        return this.debugWorktree(msg.path, msg.debugTarget, msg.noDebug);
       case "stopDebug":
         return this.stopDebug(msg.debugId);
       case "openBranches":
@@ -1430,12 +1513,21 @@ export class WorktreeWebviewProvider
    * a started session adds a row (the tracker's onDidChange also fires, so this
    * post is only for the case where nothing started).
    */
-  private async debugWorktree(fsPath?: string): Promise<void> {
-    if (!fsPath) return;
+  private async debugWorktree(
+    fsPath?: string,
+    target?: string,
+    noDebug?: boolean
+  ): Promise<void> {
+    if (!fsPath || !target) return;
     const wt = this.lastData?.worktrees.find(
       (w) => normalize(w.path) === normalize(fsPath)
     );
-    await startWorktreeDebug(fsPath, wt?.name ?? path.basename(fsPath));
+    await runWorktreeTarget(
+      fsPath,
+      wt?.name ?? path.basename(fsPath),
+      target,
+      !!noDebug
+    );
   }
 
   /** Stop one debug session the panel started. */
@@ -1452,7 +1544,8 @@ export class WorktreeWebviewProvider
   private async annotateDebug(data: WorktreeData): Promise<void> {
     await Promise.all(
       data.worktrees.map(async (wt) => {
-        wt.canDebug = await hasDebugTargets(wt.path);
+        const targets = await listDebugTargets(wt.path);
+        if (targets.length) wt.debugTargets = targets;
         const sessions = this.debugSessions.forWorktree(wt.path);
         if (sessions.length) wt.debugSessions = sessions;
       })

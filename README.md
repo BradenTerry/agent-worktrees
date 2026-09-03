@@ -63,10 +63,15 @@ its running agents in one view.
   removal), so the provider re-reads `git worktree list` before reporting: a
   worktree git dropped but whose files it could not delete is reported as exactly
   that, not as a failed removal the panel then contradicts by dropping the card.
-- **[Run and Debug](docs/debug-sessions.md)** per worktree: a Debug button (only on
-  cards whose worktree has launch configurations) picks one of its
-  `.vscode/launch.json` targets, with or without the debugger, and rows underneath
-  stop the sessions it started. The Run and Debug view itself cannot be retargeted
+- **[Run and Debug](docs/debug-sessions.md)** per worktree: an entry in the card's
+  caret menu (only where the worktree has launch configurations) opens its
+  `.vscode/launch.json` targets as a second menu **in the same place**, each row
+  starting with the debugger and its play button without, and rows underneath
+  stop the sessions it started. A menu rather than `showQuickPick`, which painted
+  at the top of the window when the control pressed was at the bottom of a
+  sidebar. The target is sent by name and the launch file re-read before anything
+  starts, so a list a refresh out of date can offer a stale target but never
+  launch one. The Run and Debug view itself cannot be retargeted
   by an extension, so the panel drives `debug.startDebugging` with the folder
   variables rewritten to the worktree and its `${input:...}` variables resolved
   from the worktree's own declarations.
@@ -98,6 +103,15 @@ its running agents in one view.
   cannot push the others off screen, and a number badge on the Activity Bar icon
   counting **waiting** agents, so a blocked agent surfaces while the panel is
   hidden.
+- **[Notifications](docs/notifications.md)** when an agent starts waiting, each
+  with an **Open terminal** button that reveals that agent's terminal. One per
+  agent, raised in the same tick, so two agents prompting at once stack two
+  notifications rather than queueing the second behind the first's dismissal.
+  One per *entry* into waiting (never repeated by the 1s poll, raised again if
+  the same session blocks a second time), and the first payload seeds the set
+  silently so opening a window onto blocked agents announces nothing. Default
+  `unfocused` (`agentWorktrees.notifyWaiting`): the case no other signal covers,
+  since neither the dot nor the badge reaches you behind another application.
 - **[Agents view](docs/agents-view.md)**: a tab strip under the panel header
   (Worktrees / Agents) swaps the cards for every agent in the repository as one
   flat list, each row carrying the branch it is working on. Both views render
@@ -197,6 +211,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | [Worktree groups](docs/groups.md) | The user's sections over the cards list: where the state lives, why General is fixed and the primary worktree is unfilable, folding, in-header naming, drag reordering |
 | [Agents view](docs/agents-view.md) | The flat all-agents list: the switch, what a row adds, ordering and pinning, subagents without cards |
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
+| [Notifications](docs/notifications.md) | The waiting-agent toast: why the in-panel signals were not enough, one per agent raised together, the announced set and its seeding, the focus gate |
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the two status tiers, the agent-only path, why there is no `**/*` watcher, and the Performance tab |
 | [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |

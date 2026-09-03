@@ -887,7 +887,20 @@ body {
    .subagent-row, so only what differs is here: each row carries the branch it
    is working on, and there is no card around it to indent against. */
 .agents-list {
-  padding: 0 2px 8px;
+  /* No padding of its own, which is what makes the gutter even on all four
+     sides. Every edge is already spoken for: `body` pads 8px around the whole
+     panel, which reaches this list on the left, the right and the bottom, and
+     `.repo-bar`'s 8px margin sits between the tab strip and the top of it. The
+     `0 2px 8px` this carried was added on top of all three, so the list read as
+     8px of air above, 10px at the sides and 16px below.
+
+     Declared as one value so it stays even: whatever is set here lands on all
+     four sides on top of the 8px those already have. At zero the rows ran hard
+     into the panel edge - a card at least has a border to stop against, and
+     these rows have only their fill, so they read as running off the side. 4px
+     puts a visible 12px gutter around the list without spending the width a
+     240px sidebar does not have. */
+  padding: 4px;
 }
 .agents-list .agents {
   /* A touch more air than inside a card: these rows are two lines each, and the
@@ -3036,6 +3049,75 @@ button.busy {
    monochrome mark in a list of them. */
 .card-menu-item.checked {
   font-weight: 600;
+}
+/* --- Run and Debug's target list -------------------------------------------
+   One launch target per line: the row starts it with the debugger, the play
+   button beside it starts it without. Two controls on one line rather than two
+   lines, because they are the same target - which is how the quick pick this
+   replaced put them too (an item, and a button on that item). */
+.card-menu-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+/* The row's own button gives up `width: 100%` here so the play button has
+   somewhere to sit, and takes the leftover instead. */
+.card-menu-row .card-menu-item {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The target's name. Allowed to shrink and clip, so a long configuration name
+   pushes neither the type beside it nor the play button off the menu. */
+.card-menu-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The debug type ("node", "coreclr") or a compound's size: what the quick pick
+   showed as an item description, and secondary in the same way. */
+.card-menu-detail {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+/* The selection fill covers the whole row, so the detail has to follow the row's
+   colour over it for the same reason the agent rows' counters do. */
+.card-menu-item:hover .card-menu-detail,
+.card-menu-item:focus-visible .card-menu-detail {
+  color: inherit;
+}
+.card-menu-run {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.card-menu-run svg {
+  width: 13px;
+  height: 13px;
+}
+.card-menu-run:hover,
+.card-menu-run:focus-visible {
+  outline: none;
+  background: var(
+    --vscode-menu-selectionBackground,
+    var(--vscode-list-activeSelectionBackground)
+  );
+  color: var(
+    --vscode-menu-selectionForeground,
+    var(--vscode-list-activeSelectionForeground)
+  );
 }
 .card-menu-sep {
   height: 1px;

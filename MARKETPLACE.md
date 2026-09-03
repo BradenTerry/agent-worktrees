@@ -12,7 +12,9 @@ and its running agents in one view.
 - Start a Claude agent in any worktree in one click, or create a worktree and an
   agent together.
 - Live agent status: active, waiting, idle. Activity Bar badge when one is
-  blocked on you.
+  blocked on you, and a notification with an **Open terminal** button when one
+  starts waiting while you are in another app. Two agents prompting at once
+  raise two, each opening its own terminal.
 - Switch the panel to an agents view: every agent in the repo in one list,
   waiting ones first, each row naming the branch it is working on. Pin the one
   you are shepherding and it stays at the top, or point Source Control at the
@@ -95,6 +97,22 @@ automatically; hooks you added yourself are left alone.
 The Activity Bar badge counts **waiting** agents only, so it always means an agent
 needs you.
 
+### When you are not looking at VS Code
+
+The badge and the pulsing dot only reach you while the panel or the Activity Bar
+is on screen. When an agent starts waiting and you have switched to a browser or
+a terminal, the panel raises a **notification** naming that agent and the
+worktree it is in, with an **Open terminal** button that takes you straight to
+it.
+
+Two agents can stop and ask you at the same time, so you get **one notification
+per agent**, side by side, each with its own button. It is raised once per time
+an agent starts waiting, never repeated while it sits there, and never for
+agents that were already waiting when you opened the window.
+
+Set `agentWorktrees.notifyWaiting` to change when they appear: `unfocused` (the
+default, only while VS Code is in the background), `always`, or `off`.
+
 <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills one agent has invoked" width="380">
 
 ## Pull requests
@@ -153,11 +171,14 @@ build or tests need is missing and they fail.
 
 ## Run and Debug a worktree
 
-VS Code always launches out of your main folder. Each card gets a **Debug** button
-instead, shown only on worktrees that have launch configurations.
+VS Code always launches out of your main folder. Each card gets a **Run and
+Debug** entry in its menu instead, shown only on worktrees that have launch
+configurations.
 
 - Any configuration from **that worktree's own** `launch.json`, so a branch that
   added one offers it.
+- The list opens as a menu right where you clicked, not as a picker at the top of
+  the window.
 - Run with the debugger, or click the play icon on a row to run without
   breakpoints. Compounds work too.
 - `${input:...}` prompts work, from the worktree's own `inputs`, and a compound

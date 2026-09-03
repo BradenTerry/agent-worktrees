@@ -70,6 +70,15 @@ test("agents-view - every agent in one list", async ({ page }) => {
   // Park the pointer on another row so the image shows the offer as well as the
   // state: an outlined pin where one could go, the filled one where it is.
   await page.locator(".agent-row[data-session='s-co-2']").hover();
+  // A hovered row is also a tipped one, and the tooltip is on a 400ms timer that
+  // was landing on either side of the capture - so this image alternated between
+  // having a tooltip pasted across it and not, on every regeneration. Wait for
+  // the timer to have fired, then clear what it drew: the hover is wanted here
+  // (it is what reveals the pin), the tooltip over the top of it is not, and
+  // waiting for it before removing it is what makes that deterministic rather
+  // than a race the capture usually won.
+  await page.waitForSelector(".tip");
+  await page.evaluate(() => document.querySelectorAll(".tip").forEach((t) => t.remove()));
   await page.locator("#root").screenshot({
     path: shot("agents-view.png"),
     animations: "disabled",

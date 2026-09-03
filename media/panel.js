@@ -90,6 +90,11 @@
     // "debug" rather than a generic play.
     debug:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M4 2.8l7 5.2-7 5.2z"/><circle cx="7.4" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>',
+    // Start without debugging: the same triangle as `debug` with the bug taken
+    // out of it, so the pair reads as one action with and without the debugger
+    // rather than as two unrelated controls.
+    play:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M4 2.8l7 5.2-7 5.2z"/></svg>',
     // A running debug session, mirroring VS Code's debug-stop square.
     debugStop:
       '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>',
@@ -2482,6 +2487,9 @@
   // path so the button to un-expand can be found either way.
   let cardMenuEl = null;
   let cardMenuKey = "";
+  /** The panel control the open menu hangs off, which is the key itself except
+   *  for a menu opened from another menu (see mountMenu). */
+  let cardMenuAnchor = "";
 
   /**
    * Shut the open menu. `restoreFocus` hands focus back to the caret that
@@ -2497,13 +2505,14 @@
     cardMenuEl.remove();
     cardMenuEl = null;
     const btn = root.querySelector(
-      '[data-menu-key="' + cssEscape(cardMenuKey) + '"]'
+      '[data-menu-key="' + cssEscape(cardMenuAnchor || cardMenuKey) + '"]'
     );
     if (btn) {
       btn.setAttribute("aria-expanded", "false");
       if (restoreFocus && held) btn.focus();
     }
     cardMenuKey = "";
+    cardMenuAnchor = "";
   }
 
   /**
@@ -2517,7 +2526,12 @@
    */
   function onMenuKey(e) {
     if (!cardMenuEl || !cardMenuEl.contains(e.target)) return;
-    const items = [...cardMenuEl.querySelectorAll(".card-menu-item")];
+    // The run buttons in the Run and Debug list are menu items too: they sit
+    // beside a target's row rather than on their own line, but Down still has to
+    // reach them or "start without debugging" would be pointer-only.
+    const items = [
+      ...cardMenuEl.querySelectorAll(".card-menu-item, .card-menu-run"),
+    ];
     if (!items.length) return;
     const at = items.indexOf(document.activeElement);
     const go = (i) => {
@@ -2555,7 +2569,7 @@
   function resyncOpenMenu() {
     if (!cardMenuEl || !cardMenuKey) return;
     const btn = root.querySelector(
-      '[data-menu-key="' + cssEscape(cardMenuKey) + '"]'
+      '[data-menu-key="' + cssEscape(cardMenuAnchor || cardMenuKey) + '"]'
     );
     if (!btn) return closeCardMenu();
     btn.setAttribute("aria-expanded", "true");
@@ -2603,13 +2617,19 @@
    * The caret is found from `key` rather than passed in, so a right-click can
    * open the very same menu without having a button to hand.
    */
-  function mountMenu(key, items, at) {
+  function mountMenu(key, items, at, anchorKey) {
     const already = cardMenuKey === key && cardMenuEl;
     closeCardMenu();
     if (already) return;
 
+    // Which control in the panel this menu belongs to, for aria-expanded, focus
+    // restore and the repaint resync. Usually the caret that opened it, i.e. the
+    // key itself - but a menu opened *from* another menu (Run and Debug's target
+    // list) has no caret of its own and borrows the one its parent used, or a
+    // payload landing a second later would find no button and shut it.
+    cardMenuAnchor = anchorKey || key;
     const btn = root.querySelector(
-      '[data-menu-key="' + cssEscape(key) + '"]'
+      '[data-menu-key="' + cssEscape(cardMenuAnchor) + '"]'
     );
     cardMenuEl = document.createElement("div");
     cardMenuEl.className = "card-menu";
@@ -2724,8 +2744,8 @@
       '<div class="card-menu-sep"></div>' +
       item("searchWorktree", icons.search, "Search this worktree&hellip;") +
       item("findWorktreeFile", icons.fileSearch, "Find file&hellip;") +
-      (wt.canDebug
-        ? item("debugWorktree", icons.debug, "Run and Debug&hellip;")
+      ((wt.debugTargets || []).length
+        ? item("debugMenu", icons.debug, "Run and Debug&hellip;")
         : "") +
       '<div class="card-menu-sep"></div>' +
       item("openWindow", icons.window, "Open in new window") +
@@ -2739,6 +2759,96 @@
   }
 
   /**
+   * The worktree's launch targets, as a menu in place of the quick pick.
+   *
+   * `showQuickPick` paints at the top centre of the *window*, which for a
+   * control in a sidebar card is nowhere near where it was pressed: you click at
+   * the bottom-left of the screen and the list you have to read appears at the
+   * top-middle of it. Every other per-worktree action on this card is already a
+   * menu at the pointer, so the picker was the one thing that threw the eye
+   * across the window, and the list it showed was usually two or three entries.
+   *
+   * It opens over the menu it came from rather than beside it. A cascading
+   * submenu needs somewhere to cascade *to*, and a sidebar is a narrow column
+   * with no room on either side; replacing the parent keeps the whole thing
+   * where the pointer already is. Escape shuts it, as it shuts any menu.
+   *
+   * Rows carry the target's **name**, not its index: the host re-reads
+   * launch.json before it starts anything, so a file edited since this list was
+   * drawn resolves to the right configuration or to none, never to whatever now
+   * sits at that position.
+   */
+  function openDebugMenu(path, at) {
+    const wt = ((lastData && lastData.worktrees) || []).find(
+      (w) => w.path === path
+    );
+    const targets = (wt && wt.debugTargets) || [];
+    if (!targets.length) return;
+
+    const rows = targets
+      .map((t) => {
+        // A compound says how many sessions it starts; a single configuration
+        // says its debug type. Both are the quick pick's own description, kept
+        // so the two lists read the same to anyone who used the old one.
+        const detail =
+          t.kind === "compound"
+            ? t.count + " config" + (t.count === 1 ? "" : "s")
+            : t.type || "";
+        return (
+          '<div class="card-menu-row">' +
+          '<button class="card-menu-item" role="menuitem" data-action="debugWorktree"' +
+          ' data-path="' +
+          esc(path) +
+          '" data-debug-target="' +
+          esc(t.name) +
+          '" title="Start ' +
+          esc(t.name) +
+          ' with the debugger">' +
+          // One glyph for every row: they are all launch targets, and the
+          // detail on the right is what says a compound is one. A second glyph
+          // here would be a distinction to learn for the one thing the text
+          // already states.
+          '<span class="card-menu-ico">' +
+          icons.debug +
+          "</span>" +
+          '<span class="card-menu-name">' +
+          esc(t.name) +
+          "</span>" +
+          (detail
+            ? '<span class="card-menu-detail">' + esc(detail) + "</span>"
+            : "") +
+          "</button>" +
+          // The quick pick carried this as a per-item button with the same
+          // tooltip; it stays a separate control for the same reason it was one
+          // there - it is a different way to start the same target, not a
+          // different target.
+          '<button class="card-menu-run" data-action="debugWorktree" data-path="' +
+          esc(path) +
+          '" data-debug-target="' +
+          esc(t.name) +
+          '" data-no-debug="1" aria-label="Start ' +
+          esc(t.name) +
+          // `title`, not `data-tip`: the panel's own tooltip is delegated from
+          // `root` and this menu is mounted on <body>, so a data-tip here would
+          // never fire.
+          '" title="Start without debugging">' +
+          icons.play +
+          "</button>" +
+          "</div>"
+        );
+      })
+      .join("");
+
+    mountMenu(
+      "debug:" + path,
+      '<div class="card-menu-label">Run and Debug</div>' + rows,
+      at,
+      "card:" + path
+    );
+  }
+
+  /**
+   * The actions on one section header. Move up and down are always here, even  /**
    * The actions on one section header. Move up and down are always here, even
    * on the first and last group where they do nothing: the host no-ops an out
    * of range move, and a menu whose entries shift position depending on which
@@ -4578,12 +4688,18 @@
   // The menu lives on the body, outside #root, so its clicks need their own
   // handler rather than the delegated one the cards use.
   document.addEventListener("click", (e) => {
-    const item = cardMenuEl && e.target.closest(".card-menu-item");
+    const item =
+      cardMenuEl && e.target.closest(".card-menu-item, .card-menu-run");
     if (item) {
       const action = item.getAttribute("data-action");
       const path = item.getAttribute("data-path") || undefined;
       const groupId = item.getAttribute("data-group") || undefined;
       const delta = Number(item.getAttribute("data-delta")) || undefined;
+      const debugTarget = item.getAttribute("data-debug-target") || undefined;
+      const noDebug = item.hasAttribute("data-no-debug") || undefined;
+      // Where the menu is now, so the one that replaces it lands in the same
+      // place. Read before closing, since closing removes the element.
+      const box = cardMenuEl.getBoundingClientRect();
       closeCardMenu();
       // Renaming is webview-only until the name is typed: the field opens in the
       // header, and only the finished name goes to the host.
@@ -4591,8 +4707,15 @@
         startGroupRename(groupId);
         return;
       }
+      // The launch targets are already in the payload, so the list is another
+      // menu rather than a round trip. `- 4` undoes the gap mountMenu adds below
+      // an anchor, which puts the new menu's top edge where this one's was.
+      if (action === "debugMenu") {
+        openDebugMenu(path, { x: box.left, y: box.top - 4 });
+        return;
+      }
       // No action means the <a> among them, which navigates on its own.
-      if (action) send(action, { path, groupId, delta });
+      if (action) send(action, { path, groupId, delta, debugTarget, noDebug });
       return;
     }
     // Anywhere else, including a caret itself - which then re-opens through

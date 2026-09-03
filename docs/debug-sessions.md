@@ -183,14 +183,49 @@ Three cases it cannot handle, each of which warns rather than pretending:
 
 ## Picking a target
 
-One quick pick, not two steps:
+A menu at the pointer, not a quick pick, and one step rather than two:
 
-- Accepting an item starts it **with** debugging.
-- Each row carries a play button ("Start without debugging") which starts it with
-  `noDebug: true`. The tooltip is what makes the alternative discoverable, and it
-  costs no extra keystroke for the common case.
-- A compound is described as `compound · N configurations`, so it does not read
-  like a single launch.
+- **Run and Debug** in the card's caret menu replaces that menu with the target
+  list, in the same place. It was `showQuickPick`, which paints at the top centre
+  of the *window*: you press a control at the bottom of a sidebar and the two or
+  three entries you have to read appear at the top-middle of the screen. Every
+  other per-worktree action is already a menu at the pointer, so the picker was
+  the one thing that threw the eye across the window.
+- **Over** the menu it came from, not beside it. A cascading submenu needs
+  somewhere to cascade to, and a sidebar is a narrow column with none on either
+  side. Escape shuts it like any menu.
+- Pressing a row starts it **with** debugging. Each row also carries a play
+  button ("Start without debugging") which starts it with `noDebug: true` - the
+  same pair the quick pick had as an item and an item button. Both are in the
+  arrow-key walk, so the alternative is not pointer-only.
+- A compound is described as `N configs`, so it does not read like a single
+  launch.
+
+```mermaid
+flowchart LR
+  R["full refresh"] --> L["listDebugTargets(worktree)<br/>mtime-cached"]
+  L --> V["WorktreeVM.debugTargets<br/>names + types only"]
+  V --> M["card menu shows<br/>Run and Debug"]
+  M -->|click| S["openDebugMenu(): mountMenu<br/>at the same anchor"]
+  S -->|"row / play button"| P["debugWorktree<br/>{path, debugTarget, noDebug}"]
+  P --> X["runWorktreeTarget()"]
+  X --> F["re-reads launch.json"]
+  F --> D["startDebugging"]
+  F -.->|name gone| W["warns, starts nothing"]
+```
+
+### Why the target travels by name
+
+The payload's list is what to *offer*; it is never what to run. `listDebugTargets`
+is mtime-cached and refreshed on the full refresh, so the menu can be a refresh
+behind an edit to `launch.json`. `runWorktreeTarget` therefore re-reads the file
+and looks the target up **by name**: a file edited between the menu being drawn
+and pressed resolves to the right configuration or to none, and never to whatever
+has since moved into that position. A name that has gone warns and starts
+nothing.
+
+That is also why the cache holds only the target list and not the parsed file -
+the same rule the boolean it replaced was written under.
 
 If the first member of a compound fails to start, the rest are skipped: starting
 them against a half-built setup is worse than stopping with one warning.

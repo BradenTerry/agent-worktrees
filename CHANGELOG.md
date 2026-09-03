@@ -2,6 +2,33 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.5.1
+
+### Changes
+
+- **A notification when an agent needs you**, with an **Open terminal** button
+  that takes you straight to it. The pulsing dot and the Activity Bar badge only
+  reach you while the panel or the Activity Bar is on screen; this is for when
+  you have switched to a browser or a terminal. Two agents prompting at the same
+  time raise two notifications, each opening its own terminal. Raised once per
+  time an agent starts waiting, never repeated while it sits there, and never
+  for agents that were already waiting when you opened the window. Set
+  `agentWorktrees.notifyWaiting` to `unfocused` (the default), `always` or `off`.
+- **Worktree groups.** User-named, collapsible sections over the cards list, for
+  the worktrees you keep checked out until a PR merges. File a worktree from its
+  menu, reorder sections by dragging a header, and rename one in the header
+  itself. A folded section still reports the agents waiting inside it, so
+  collapsing one cannot hide an agent that needs you.
+- **Run and Debug opens where you clicked.** The launch configurations for a
+  worktree used to appear as a picker at the top of the window; they are now a
+  menu in the same place as the card menu you opened them from.
+- **The panel works at its narrowest.** Cards, agent rows and the settings view
+  stay usable down to 240px, and every control in the panel is reachable from
+  the keyboard.
+- **A failed refresh says so** instead of leaving the panel quietly showing
+  stale worktrees, and no longer takes the rest of the panel down with it.
+- **Minor bug fixes and improvements.**
+
 ## 4.4.31
 
 ### Changes
