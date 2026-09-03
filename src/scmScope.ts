@@ -15,6 +15,8 @@
  * target after the close if it dropped out.
  */
 
+import { pathKey } from "./worktreeUtils";
+
 /** The slice of a Git model this algorithm drives. Paths are normalized roots. */
 export interface ScmModel {
   /** Normalized root paths of the currently-open repositories. */
@@ -44,11 +46,16 @@ export function isScmActive(
   openPaths: string[],
   scopedPath: string | null
 ): boolean {
-  const open = new Set(openPaths);
+  // Keyed, because the two sides come from different sources: `wtPath` from
+  // `git worktree list`, the open paths from the Git extension's `rootUri`.
+  // On Windows and macOS the same directory arrives from those two in different
+  // case often enough that the button simply never lit up.
+  const open = new Set(openPaths.map(pathKey));
+  const wt = pathKey(wtPath);
   // Only ever highlight a worktree whose repo is actually open.
-  if (!open.has(wtPath)) return false;
+  if (!open.has(wt)) return false;
   // Honor an explicit scope, but only while that repo is still open.
-  if (scopedPath && open.has(scopedPath)) return wtPath === scopedPath;
+  if (scopedPath && open.has(pathKey(scopedPath))) return wt === pathKey(scopedPath);
   // No usable scope: highlight only when a single repo is open (unambiguous).
   return open.size === 1;
 }

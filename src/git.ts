@@ -127,6 +127,15 @@ function git(
     env: {
       ...process.env,
       GIT_OPTIONAL_LOCKS: "0",
+      // Never let a git call sit on a prompt. `fetch --all` runs on every
+      // manual refresh, and against a remote whose credentials have expired
+      // git will ask for a username on a terminal that does not exist - the
+      // call then does nothing but occupy its slot until the timeout, once per
+      // refresh, with no way for the user to see why. Refusing the prompt
+      // fails it immediately instead, and a fetch that cannot authenticate is
+      // one the panel already treats as "no new remote state".
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -oBatchMode=yes",
       ...(ceiling ? { GIT_CEILING_DIRECTORIES: ceiling } : {}),
     },
   });

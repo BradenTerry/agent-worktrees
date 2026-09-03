@@ -71,6 +71,50 @@ test("readSubagents reads a subagent the way Claude writes it", async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("readSubagents reads a first record longer than one read", async () => {
+  // The first record of a subagent's transcript is the whole prompt the Agent
+  // tool was handed, and a real one routinely runs past the 8KB the head read
+  // used to take in a single bite. Stopping mid-record made JSON.parse throw,
+  // and the subagent silently lost both readings that come from it: the cwd
+  // that moves its row onto the worktree it was given, and its start time.
+  const dir = seed({
+    a1: {
+      meta: meta(),
+      records: [
+        firstRecord({
+          message: { role: "user", content: "x".repeat(40_000) },
+          cwd: "/repo/worktrees/isolated",
+        }),
+      ],
+    },
+  });
+  const [s] = await readSubagents(dir);
+  assert.strictEqual(s.worktree, "/repo/worktrees/isolated");
+  assert.strictEqual(s.startedAt, NOW - 9 * 60_000);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("readSubagents keeps a multi-byte cwd intact across a read boundary", async () => {
+  // Accumulated as bytes and decoded once: decoding each 8KB chunk on its own
+  // turns a character straddling the boundary into a replacement character,
+  // which would corrupt the very path this read exists for.
+  const pad = "é".repeat(5_000); // 2 bytes each, so boundaries land mid-character
+  const dir = seed({
+    a1: {
+      meta: meta(),
+      records: [
+        firstRecord({
+          message: { role: "user", content: pad },
+          cwd: "/repo/wörktree-ünicode",
+        }),
+      ],
+    },
+  });
+  const [s] = await readSubagents(dir);
+  assert.strictEqual(s.worktree, "/repo/wörktree-ünicode");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("readSubagents survives a subagent with no transcript yet", async () => {
   // The meta file lands first; a subagent that has not written a record still
   // deserves a row, dated from the meta file itself.

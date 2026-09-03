@@ -146,7 +146,8 @@ build or tests need is missing and they fail.
   Whole folders like `node_modules` collapse to one row.
 - Links point at your main worktree's copy, so editing once updates everywhere.
 - **Link existing worktrees** applies the list to the ones you already have.
-- A file a worktree genuinely owns is never overwritten.
+- A file a worktree genuinely owns is never overwritten, and neither is a link
+  you pointed somewhere else yourself.
 - Windows works without Developer Mode or admin rights (junctions, then hard
   links).
 

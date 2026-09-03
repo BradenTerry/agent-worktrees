@@ -129,20 +129,54 @@ export function subagentsDir(projectsDir: string, project: string, sessionId: st
   return path.join(projectsDir, project, sessionId, "subagents");
 }
 
+/** Read in 8KB steps looking for the end of the first record, and give up past
+ *  this. A first line longer than that is not a prompt any more, it is a
+ *  malformed file, and reading megabytes to find out is worse than not knowing. */
+const HEAD_CHUNK = 8192;
+const HEAD_MAX = 512 * 1024;
+
 /**
  * The first record's `cwd` and timestamp, from the head of a subagent's
  * transcript. Both are written on the first line, so this reads a small prefix
  * rather than the file - a subagent that has been working for a while has a
  * transcript as large as any other.
+ *
+ * Read in chunks until the first newline rather than in one fixed 8KB bite. The
+ * first record of a subagent's transcript is the whole prompt the Agent tool
+ * was given, which routinely runs past 8KB - a fixed read then stopped
+ * mid-record, `JSON.parse` threw, and the subagent silently lost both readings
+ * this exists for: its `cwd`, which is what moves its row onto the card for the
+ * worktree it was handed, and its start time, which fell back to the meta
+ * file's mtime.
  */
 function readHead(file: string): { cwd?: string; startedAt?: number } {
   let fd: number | undefined;
   try {
     fd = fs.openSync(file, "r");
-    const buf = Buffer.alloc(8192);
-    const read = fs.readSync(fd, buf, 0, buf.length, 0);
-    if (!read) return {};
-    const line = buf.toString("utf8", 0, read).split("\n")[0];
+    const buf = Buffer.alloc(HEAD_CHUNK);
+    // Accumulated as bytes and decoded once at the end, never per chunk: a
+    // multi-byte character straddling a chunk boundary decodes to a
+    // replacement character if each half is converted on its own, which would
+    // corrupt the very path this is here to read.
+    const chunks: Buffer[] = [];
+    let at = 0;
+    let line: string | undefined;
+    for (;;) {
+      const read = fs.readSync(fd, buf, 0, HEAD_CHUNK, at);
+      if (!read) break;
+      at += read;
+      const nl = buf.indexOf(0x0a /* \n */, 0);
+      const end = nl !== -1 && nl < read ? nl : read;
+      chunks.push(Buffer.from(buf.subarray(0, end)));
+      if (nl !== -1 && nl < read) {
+        line = Buffer.concat(chunks).toString("utf8");
+        break;
+      }
+      // Still no record boundary. A file being written right now legitimately
+      // has none yet, so a short read is "come back later", not a failure.
+      if (read < HEAD_CHUNK || at >= HEAD_MAX) break;
+    }
+    if (line === undefined) return {};
     const rec = JSON.parse(line);
     const ts = Date.parse(rec?.timestamp);
     return {

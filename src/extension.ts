@@ -16,6 +16,7 @@ const TRACE_SETTING = "agentWorktrees.trace";
  *  still needs a re-render: Settings → Performance shows the current rate, and
  *  the user may have edited it in VS Code's own Settings UI instead. */
 const POLL_SECONDS_SETTING = "agentWorktrees.statusPollSeconds";
+const STATUS_ORDER_SETTING = "agentWorktrees.agentStatusOrder";
 
 /** Read the trace setting and wire git + GitHub tracing to match it. */
 function applyTraceSetting(): void {
@@ -86,6 +87,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(TRACE_SETTING)) applyTraceSetting();
       if (e.affectsConfiguration(POLL_SECONDS_SETTING)) void provider.refresh();
+      // The agents view groups its rows in this order, and Settings ->
+      // Preferences writes it through this same setting - but so does VS Code's
+      // own Settings UI and a hand-edited settings.json, and neither of those
+      // was noticed. The order then only changed on the next refresh something
+      // else happened to trigger, which on a quiet repo is not soon.
+      if (e.affectsConfiguration(STATUS_ORDER_SETTING)) void provider.refresh();
     }),
 
     // Keep the panel in sync when folders change by any means.

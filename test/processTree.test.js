@@ -169,6 +169,38 @@ test("namesClaude rejects a recycled pid, which is the whole point", () => {
   assert.strictEqual(namesClaude("svchost.exe -k netsvcs"), false);
 });
 
+test("namesClaude ignores claude in the arguments of something else", () => {
+  // The gate used to test the whole command line, so any process holding a
+  // file from ~/.claude open matched - and matching is what lets Stop kill it.
+  // A recycled pid running one of these was a stranger's process tree away
+  // from being force-killed.
+  assert.strictEqual(namesClaude("vim /Users/b/.claude/settings.json"), false);
+  assert.strictEqual(namesClaude("tail -f /Users/b/.claude/sessions/567.json"), false);
+  assert.strictEqual(namesClaude("rg --files /Users/b/.claude/projects"), false);
+  assert.strictEqual(
+    namesClaude("node /Users/b/scripts/parse.js /Users/b/.claude/x.jsonl"),
+    false,
+    "a JS runtime running someone else's script over a claude data file"
+  );
+});
+
+test("namesClaude still accepts the real shapes after tightening", () => {
+  // Every accepted shape identifies Claude by the *program*, never by an
+  // argument: argv0 named claude, argv0 living in a claude directory, or a
+  // runtime whose script is Claude's own entry point.
+  assert.strictEqual(namesClaude("/opt/homebrew/bin/claude --session-id x"), true);
+  assert.strictEqual(namesClaude("claude.exe --session-id x"), true);
+  assert.strictEqual(
+    namesClaude("/Users/b/.claude/local/node_modules/.bin/claude -w"),
+    true
+  );
+  assert.strictEqual(
+    namesClaude("node /Users/b/.claude/local/node_modules/@anthropic-ai/claude-code/cli.js"),
+    true,
+    "the entry script lives under a claude directory and ends in .js"
+  );
+});
+
 test("readCommandLine yields the empty string rather than throwing", async () => {
   const gone = (_f, _a, _o, cb) => cb(new Error("no such process"), "", "");
   assert.strictEqual(await readCommandLine(999999, gone), "");
