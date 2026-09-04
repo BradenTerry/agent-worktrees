@@ -2,6 +2,16 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.5.2
+
+### Changes
+
+- **Refresh no longer waits on the network.** The worktrees repaint as soon as
+  local git status is read; the `git fetch` and the GitHub PR/CI status land
+  afterwards, behind a progress line, instead of holding the whole panel until
+  they answer. Most noticeable on a repo with several worktrees, where the
+  GitHub half was what made the click feel like a freeze.
+
 ## 4.5.1
 
 ### Changes
