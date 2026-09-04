@@ -106,6 +106,77 @@ take: read-only runs do not write the index, so a refresh cannot be what the
 extension reports next. It is the information a `**/*` watcher would have given,
 already debounced, from a watcher that exists either way.
 
+## The Refresh button does not wait on the network
+
+A gather is entirely local: `git worktree list`, a `git status` per worktree, and
+a read of the session registry. Nothing in it talks to a server, and that is what
+lets a refresh paint promptly.
+
+Clicking Refresh asks for two more things that are **not** local, and both used
+to sit in front of the only post:
+
+- `git fetch --all --prune`, so the behind/ahead counts reflect the remote. It
+  ran at the top of `gatherWorktrees`, before the status sweep, with a 15s
+  timeout.
+- A forced GitHub PR/CI poll, so the badges are current rather than up to 90s
+  old. It ran at the end of `attachPrStatus`, after everything else.
+
+So the click bought a network round trip, then a status sweep, then a second and
+larger set of round trips — one bulk open-PR list per repo plus detail, checks and
+reviews per worktree — and only then did a single pixel move. On a repo with
+several worktrees the GitHub half dominates, and the panel sat on its previous
+payload the whole time with nothing on screen to say the click had been heard.
+That is the "the whole tree freezes when I refresh" report, and the panel was not
+in fact busy: the extension host was idle on a socket while the webview, a
+separate process that was never blocked, had nothing new to draw.
+
+Neither result is something the render has to wait for. The cards, their change
+counts, the agent rows and the cached PR badges are all known before either call
+starts, so the payload is posted first and each network result lands separately:
+
+```mermaid
+flowchart LR
+  R[Click Refresh] --> G[Local gather<br/>worktree list + status]
+  G --> P[post update<br/>panel repaints]
+  P --> F[git fetch]
+  P --> H[GitHub PR/CI poll]
+  F -->|refs moved| G2[re-gather<br/>ahead/behind move]
+  H --> B[onChange -> postPrState<br/>badges patched in]
+```
+
+Both legs start in `runNetworkRefresh`, **after** `postGather`, not before it.
+The ordering is load-bearing on the PR side: `postPrState` patches whatever
+`lastData` currently holds, so kicking the poll earlier would let a fast reply
+patch the *previous* payload and then be overwritten by this one's cached values,
+leaving stale badges up until the next poll tick. Each leg is single-flight
+(`fetchingRemotes`, `fetchingPrs`) so leaning on the button cannot stack fetches,
+and each swallows its own failure — they are fire-and-forget now that nothing
+awaits them.
+
+The fetch's re-gather is **conditional**, which is what keeps the split from
+costing a second status sweep per click. A fetch touches no working tree, so the
+only thing it can change is the ahead/behind distance, and most fetches bring
+back nothing at all. `fetchRemotes` therefore brackets itself with a
+`for-each-ref` over `refs/remotes` and returns whether any of them moved — two
+cheap listings against a sweep of up to two `git status` spawns per worktree — and
+a fetch that found nothing new simply ends there. A prune counts as a move (the
+ref is gone even though nothing was downloaded), and a listing that fails counts
+as one too, since re-gathering needlessly is the harmless direction.
+
+The cost of decoupling is that the click repaints from data that has usually not
+changed, and the real answer turns up seconds later. Refresh is a `view/title`
+command, so it is VS Code's button and the panel cannot spin it — the webview's
+own `markBusy` reaches only buttons the panel drew. So the provider posts a
+`refreshing` message naming which legs are outstanding and the panel draws a 2px
+indeterminate bar above the cards, labelled with what is running. It is its own
+message rather than a payload field because it flips several times per refresh
+and an `update` rebuilds the whole card DOM; it is written into the slot above
+`#root`, like the failure banner, so a re-render neither draws nor clears it.
+
+Nothing about the background paths changed: an unforced refresh (a save, a repo
+state event, the poll) never fetched and never forced a PR poll, and still does
+neither. Only the button's two extra calls moved.
+
 ## Two tiers: what the poll is actually for
 
 A worktree's counts can move without any deliberate user action, and the panel
@@ -360,7 +431,10 @@ no longer re-posts, and full-DOM-rebuilds, a byte-identical panel.
   The agent poll claims a token every second, so any gather slower than that (a
   `git fetch`, a PR fetch, a status sweep over many worktrees) was routinely
   discarded. That is the other half of why a new worktree, or a card's change
-  counts, could sit stale until a manual Refresh happened to win the race.
+  counts, could sit stale until a manual Refresh happened to win the race. The
+  `git fetch` and PR fetch in that list are the pre-`runNetworkRefresh` shape of
+  a forced gather; a status sweep over many worktrees still overruns the poll on
+  its own.
   `postGather` instead re-reads the sessions (an mtime-cached registry read plus
   cached titles), swaps the rows onto the freshly gathered payload, and posts
   under a new claim: newest git *and* newest agents. An agent-only refresh still

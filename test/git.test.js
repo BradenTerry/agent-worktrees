@@ -24,6 +24,7 @@ const {
   readPerfConfig,
   setPerfSetting,
   saysUnsupported,
+  fetchRemotes,
 } = require("../out/git.js");
 
 function git(cwd, args) {
@@ -890,4 +891,67 @@ test("turning the monitor off overrides a value inherited from --global", async 
     if (had === undefined) delete process.env.GIT_CONFIG_GLOBAL;
     else process.env.GIT_CONFIG_GLOBAL = had;
   }
+});
+
+// fetchRemotes reports whether it brought anything back, which is what lets a
+// forced refresh skip its re-gather (a `git status` per worktree) on the usual
+// "already up to date" fetch. A local bare repo stands in for the remote, so
+// this needs no network.
+function clonedRepo(name) {
+  const origin = path.join(dir, name + "-origin.git");
+  git(dir, ["init", "--bare", "-b", "main", origin]);
+  const upstream = path.join(dir, name + "-upstream");
+  git(dir, ["clone", origin, upstream]);
+  git(upstream, ["config", "user.email", "t@example.com"]);
+  git(upstream, ["config", "user.name", "Tester"]);
+  fs.writeFileSync(path.join(upstream, "a.txt"), "one\n");
+  git(upstream, ["add", "."]);
+  git(upstream, ["commit", "-m", "init"]);
+  git(upstream, ["push", "-u", "origin", "main"]);
+  const local = path.join(dir, name);
+  git(dir, ["clone", origin, local]);
+  git(local, ["config", "user.email", "t@example.com"]);
+  git(local, ["config", "user.name", "Tester"]);
+  return { local, upstream };
+}
+
+test("fetchRemotes reports no change when the remote has not moved", async () => {
+  const { local } = clonedRepo("fetch-idle");
+  // The clone is already current, so a fetch can only confirm that.
+  assert.strictEqual(await fetchRemotes(local), false);
+  assert.strictEqual(await fetchRemotes(local), false);
+});
+
+test("fetchRemotes reports a change when the remote advanced", async () => {
+  const { local, upstream } = clonedRepo("fetch-moved");
+  fs.writeFileSync(path.join(upstream, "a.txt"), "two\n");
+  git(upstream, ["commit", "-am", "second"]);
+  git(upstream, ["push", "origin", "main"]);
+
+  assert.strictEqual(await fetchRemotes(local), true, "the new commit moved origin/main");
+  assert.strictEqual(await fetchRemotes(local), false, "and the next fetch is a no-op");
+});
+
+test("fetchRemotes reports a change when --prune drops a dead ref", async () => {
+  const { local, upstream } = clonedRepo("fetch-pruned");
+  git(upstream, ["checkout", "-b", "doomed"]);
+  git(upstream, ["push", "-u", "origin", "doomed"]);
+  assert.strictEqual(await fetchRemotes(local), true, "origin/doomed appeared");
+
+  git(upstream, ["push", "origin", "--delete", "doomed"]);
+  assert.strictEqual(
+    await fetchRemotes(local),
+    true,
+    "pruning origin/doomed is a change even though nothing was downloaded"
+  );
+  assert.strictEqual(await fetchRemotes(local), false);
+});
+
+test("fetchRemotes reports no change when there is no remote at all", async () => {
+  // Offline, or a repo that was never cloned: the fetch fails and the caller
+  // must not be told to re-gather for it.
+  const r = path.join(dir, "fetch-no-remote");
+  fs.mkdirSync(r);
+  git(r, ["init", "-b", "main"]);
+  assert.strictEqual(await fetchRemotes(r), false);
 });

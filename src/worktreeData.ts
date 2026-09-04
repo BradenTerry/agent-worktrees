@@ -5,7 +5,6 @@ import {
   listWorktrees,
   listBranches,
   getStatus,
-  fetchRemotes,
   mapLimit,
   releaseStaleClaudeLocks,
   GitStatus,
@@ -249,19 +248,24 @@ export function folderIndex(fsPath: string): number {
   return folders.findIndex((f) => normalize(f.uri.fsPath) === target);
 }
 
-/** Gather worktrees of the repo containing the first workspace folder. */
+/**
+ * Gather worktrees of the repo containing the first workspace folder.
+ *
+ * Entirely local: `git worktree list` plus a `git status` per worktree, no
+ * network call anywhere in it. That is deliberate and it is what makes a
+ * refresh able to paint promptly. Updating remote-tracking refs (a `git fetch`,
+ * which can sit on the network for its full 15s timeout) is the provider's job
+ * and happens *after* this payload is on screen; see `fetchRemotesThenRefresh`
+ * in worktreeWebview.ts. The ahead/behind counts this reads therefore come from
+ * whatever the local refs say, and the fetch's own re-gather corrects them.
+ */
 export async function gatherWorktrees(
-  fetch = false,
   registry: RegistrySession[] = [],
   reader?: TranscriptReader
 ): Promise<WorktreeData> {
   const repo = await findRepo();
   if (!repo) return { worktrees: [] };
   const { repoRoot } = repo;
-
-  // One fetch updates remote-tracking refs for every linked worktree, so the
-  // behind ("commits to pull") count is current. Only on an explicit refresh.
-  if (fetch) await fetchRemotes(repoRoot);
 
   let worktrees;
   try {

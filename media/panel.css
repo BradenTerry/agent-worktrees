@@ -407,6 +407,52 @@ body {
   white-space: nowrap;
 }
 
+/* The network half of a Refresh is still running.
+
+   The Refresh button lives in the view title bar, which is VS Code's to draw, so
+   the panel has no button of its own to spin. It also no longer waits for the
+   `git fetch` or the GitHub poll before painting, so without this the click
+   would repaint instantly from unchanged data and the real answer would turn up
+   seconds later with nothing having said it was coming.
+
+   Two pixels, above the cards and outside #root (like the error banner), so it
+   costs no re-render and takes no vertical space worth noticing. */
+.refresh-progress {
+  height: 2px;
+  overflow: hidden;
+  /* The faint track. A translucent gray rather than the progress color at low
+     opacity: `opacity` here would dim the sweeping segment inside it too. */
+  background: rgba(127, 127, 127, 0.3);
+}
+/* The moving part: a short segment sweeping across the track, which is the
+   indeterminate progress idiom VS Code itself uses. It carries the theme's
+   progress color at full strength against the gray track, so the sweep reads
+   without the bar needing to be any taller. */
+.refresh-progress-track {
+  display: block;
+  width: 34%;
+  height: 100%;
+  background: var(--vscode-progressBar-background, #0e70c0);
+  animation: awt-progress 1.4s ease-in-out infinite;
+}
+@keyframes awt-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(394%);
+  }
+}
+/* The global reduced-motion rule below stops the animation, which would leave
+   the segment parked wherever the first frame put it. A static full-width bar
+   says the same thing without moving. */
+@media (prefers-reduced-motion: reduce) {
+  .refresh-progress-track {
+    width: 100%;
+    animation: none;
+  }
+}
+
 /* A refresh failed, so what is below it is the last good state rather than the
    current one. Sits above the panel, outside #root, so a re-render neither
    clears it nor is needed to draw it. Full foreground, not the secondary gray:
@@ -3534,6 +3580,14 @@ button.busy {
   }
   .refresh-error {
     border: 1px solid CanvasText;
+  }
+  /* The translucent gray track has no meaning in a forced palette; keep the
+     two apart so the sweeping segment is still visible against it. */
+  .refresh-progress {
+    background: Canvas;
+  }
+  .refresh-progress-track {
+    background: Highlight;
   }
 }
 

@@ -44,8 +44,10 @@ its running agents in one view.
 - Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
   upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file
-  watcher, so a card does not disagree with the Source Control view: see
-  [Refresh coalescing](docs/refresh-coalescing.md).
+  watcher, so a card does not disagree with the Source Control view. Refresh
+  paints from the local gather and lets its `git fetch` and GitHub poll land
+  after, behind a progress line, rather than holding the panel on the old payload
+  until they answer: see [Refresh coalescing](docs/refresh-coalescing.md).
 - **New Worktree**, **Open in new window** (focuses an existing window via the
   `code` CLI when it is on `PATH`), and **Change branch** via a quick pick of the
   branches free to check out, plus a create-new-branch entry. The switch runs
@@ -213,7 +215,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | [Agent status](docs/agent-status.md) | The session registry, work summaries, retiring dead sessions, removing the old hooks |
 | [Notifications](docs/notifications.md) | The waiting-agent toast: why the in-panel signals were not enough, one per agent raised together, the announced set and its seeding, the focus gate |
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
-| [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, the two status tiers, the agent-only path, why there is no `**/*` watcher, and the Performance tab |
+| [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, why the Refresh button does not wait on the network, the two status tiers, the agent-only path, why there is no `**/*` watcher, and the Performance tab |
 | [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |
 | [Run and Debug in a worktree](docs/debug-sessions.md) | Why the debug view can't be retargeted, launch.json parsing, session tracking |
 | [Terminal tab titles](docs/terminal-titles.md) | Why the extension does not pass `name` to `createTerminal` |

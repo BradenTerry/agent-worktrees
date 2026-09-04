@@ -225,12 +225,19 @@ export interface GitStatus {
  * deleted on the remote, so the Branches view stops showing phantom "remote
  * only" / "local + remote" branches that no longer exist (and that a remote
  * delete would fail on). Pass `prune: false` to keep stale tracking refs.
+ *
+ * Returns whether any remote-tracking ref actually moved. The caller's reason
+ * for fetching is the behind/ahead counts, and re-reading those means a `git
+ * status` for every worktree — so the usual "already up to date" fetch is worth
+ * two cheap `for-each-ref` listings to skip. A listing that fails is reported as
+ * a change, since re-gathering needlessly is the harmless direction.
  */
 export async function fetchRemotes(
   cwd: string,
   opts: { prune?: boolean } = {}
-): Promise<void> {
+): Promise<boolean> {
   const prune = opts.prune !== false;
+  const before = await remoteRefs(cwd);
   try {
     await git(["fetch", "--all", ...(prune ? ["--prune"] : []), "--quiet"], {
       cwd,
@@ -238,6 +245,23 @@ export async function fetchRemotes(
     });
   } catch {
     /* offline / no remote / timeout: keep stale refs */
+    return false;
+  }
+  const after = await remoteRefs(cwd);
+  return before === undefined || after === undefined || before !== after;
+}
+
+/** Every remote-tracking ref and what it points at, as one string to compare a
+ *  fetch against. Undefined when the listing failed. */
+async function remoteRefs(cwd: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await git(
+      ["for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes"],
+      { cwd }
+    );
+    return stdout;
+  } catch {
+    return undefined;
   }
 }
 
