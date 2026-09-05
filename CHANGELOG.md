@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.5.3
+
+### Changes
+
+- **An agent row keeps its work summary.** A row that had one could fall back to
+  "Claude 1" as its session ran on, and a session titled once (by the app, or by
+  a rename) could show the ordinal from the start.
+
 ## 4.5.2
 
 ### Changes
