@@ -158,8 +158,8 @@ test("normalizeSkill reduces every form to a bare name", () => {
   }
 });
 
-test("scanSkills finds skills anywhere in the transcript, deduped in order", async () => {
-  const { scanSkills } = require("../out/transcript.js");
+test("scanTranscript finds skills anywhere in the transcript, deduped in order", async () => {
+  const { scanTranscript } = require("../out/transcript.js");
   const root = seed("s1", [
     skillCall("plugin:code-review"),
     ...Array.from({ length: 400 }, () => msg), // push the early call out of any tail
@@ -167,7 +167,31 @@ test("scanSkills finds skills anywhere in the transcript, deduped in order", asy
     skillCall("code-review"), // same skill by its bare name
   ]);
   const file = await findTranscript(root, "s1");
-  assert.deepStrictEqual(await scanSkills(file), ["code-review", "pdf"]);
+  assert.deepStrictEqual((await scanTranscript(file)).skills, ["code-review", "pdf"]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("scanTranscript takes the newest title in the whole file", async () => {
+  const { scanTranscript } = require("../out/transcript.js");
+  const root = seed("s1", [
+    { type: "ai-title", aiTitle: "first pass" },
+    ...Array.from({ length: 400 }, () => msg),
+    { type: "custom-title", customTitle: "renamed by hand" },
+    ...Array.from({ length: 400 }, () => msg),
+  ]);
+  const file = await findTranscript(root, "s1");
+  assert.strictEqual((await scanTranscript(file)).title, "renamed by hand");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("scanTranscript reads a last record written without its newline", async () => {
+  // A transcript being appended to right now often ends mid-write, and that
+  // last record is the likeliest place for the newest title.
+  const { scanTranscript } = require("../out/transcript.js");
+  const root = seed("s1", [msg]);
+  const file = await findTranscript(root, "s1");
+  fs.appendFileSync(file, JSON.stringify({ type: "ai-title", aiTitle: "no newline" }));
+  assert.strictEqual((await scanTranscript(file)).title, "no newline");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -227,6 +251,57 @@ test("a session dropped mid-scan does not come back", async () => {
   // A scan that finishes after its session was dropped must write nothing back,
   // or every cache here grows for the life of the window.
   assert.deepStrictEqual(await reader.skillsFor("s1"), []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+/**
+ * The title, once seen, is remembered. Claude writes one when it summarizes the
+ * work, not on every turn, so a session titled once (the app titling it, a
+ * rename) has that record hundreds of kilobytes back by the time it has run a
+ * while - at which point the tail alone finds nothing and the row would fall
+ * back to "Claude 1" while Claude itself still calls the session something.
+ */
+
+test("titleFor keeps a title that has scrolled out of the tail", async () => {
+  const root = seed("s1", [{ type: "custom-title", customTitle: "named once" }]);
+  const reader = new TranscriptReader(root);
+  assert.strictEqual(await reader.titleFor("s1"), "named once");
+
+  // The session runs on, and the title record is now far behind the tail.
+  const file = await findTranscript(root, "s1");
+  fs.appendFileSync(file, PAST_TAIL.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  assert.strictEqual(
+    await reader.titleFor("s1"),
+    "named once",
+    "a tail with no title says nothing new, so it must not erase the title"
+  );
+
+  // A newer title still wins.
+  fs.appendFileSync(file, JSON.stringify({ type: "ai-title", aiTitle: "later work" }) + "\n");
+  assert.strictEqual(await reader.titleFor("s1"), "later work");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("titleFor recovers a title buried before the tail", async () => {
+  // A window opening onto a session that was titled long ago: the tail cannot
+  // see it, so the one full scan is what fills it in.
+  const root = seed("s1", [{ type: "ai-title", aiTitle: "buried title" }, ...PAST_TAIL]);
+  const reader = new TranscriptReader(root);
+  assert.strictEqual(await reader.titleFor("s1"), "", "the tail alone has nothing");
+  await eventually(() => reader.titleFor("s1"), "buried title", "the full scan finds it");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("the full scan does not overwrite a newer title from the tail", async () => {
+  const root = seed("s1", [
+    { type: "ai-title", aiTitle: "buried title" },
+    ...PAST_TAIL,
+    { type: "ai-title", aiTitle: "current title" },
+  ]);
+  const reader = new TranscriptReader(root);
+  assert.strictEqual(await reader.titleFor("s1"), "current title");
+  await new Promise((r) => setTimeout(r, 150)); // let the scan land
+  assert.strictEqual(await reader.titleFor("s1"), "current title");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
