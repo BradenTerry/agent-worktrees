@@ -80,6 +80,40 @@ the session's own `<sessionId>.jsonl`.
 A session Claude has not summarized yet has no title, and its row falls back to
 `Claude 1`, `Claude 2` - ordinals counted per card, oldest first.
 
+### A title outlives the tail it came from
+
+A title is not written on every turn. Claude writes one when it summarizes the
+work, and a session titled explicitly - the desktop app naming it, or a rename -
+can carry a single `custom-title` record and never another. Measured on real
+transcripts, that record sits anywhere from a few KB to **half a megabyte** back
+from the end, so the 64KB tail is not where a title reliably lives.
+
+Deriving the label from each tail read therefore had a row start out named and
+then revert to `Claude 1` as the session ran on, while Claude itself still called
+it something. Two things fix that, and the reader does both:
+
+- The newest title seen is **remembered per session**. A tail with no title in it
+  says nothing new, so it leaves the remembered one alone; only a newer title
+  replaces it. It is dropped when the session is retired or its transcript
+  disappears, along with the rest of that session's caches.
+- The **one-time full scan** that already exists for skills also picks up the
+  last title in the file, so a window opening onto a long-running session that
+  was titled an hour ago gets the title on a later refresh rather than never.
+  The tail always wins over the scan: anything the tail has seen is newer than
+  anything the scan can find.
+
+```mermaid
+flowchart TD
+    R["titleFor(session)"] --> T["tail read<br/>(last 64KB, mtime-cached)"]
+    T -->|title in the tail| K["remember it<br/>(newest wins)"]
+    T -->|no title in the tail| U["leave the remembered one"]
+    T -->|first read of this session| S["full scan, off the refresh path"]
+    S -->|"only if nothing remembered"| K
+    K --> L["row label"]
+    U --> L
+    L -->|nothing remembered yet| O["Claude 1, Claude 2"]
+```
+
 ### Skills
 
 A Skill tool call is an ordinary `tool_use` block, so the chip on an agent row is
@@ -87,11 +121,11 @@ recoverable too: `input.skill`, reduced to its bare name so `plugin:foo` and
 `path/to/foo` dedupe to `foo` (the same normalization the emitter did on the
 `PreToolUse` payload).
 
-Skills are the one thing that cannot come from the tail alone: they accumulate
-over a whole session, so one used an hour ago is far behind the end of the file.
-`scanSkills` walks the transcript once, the first time a window sees that
-session, and every tail read after that tops the list up — anything new is by
-definition at the end.
+Skills cannot come from the tail alone either: they accumulate over a whole
+session, so one used an hour ago is far behind the end of the file.
+`scanTranscript` walks the transcript once, the first time a window sees that
+session, collecting the skills and the last title in the same pass, and every
+tail read after that tops the list up — anything new is by definition at the end.
 
 That one pass is **not** awaited. A long session's transcript runs to several
 megabytes (5-12MB is ordinary), and awaiting it here put one such read per live

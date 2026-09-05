@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { StringDecoder } from "string_decoder";
 import { SubagentVM } from "./worktreeData";
 import {
   liveSubagents,
@@ -25,8 +26,9 @@ import {
  * were carrying that the session registry does not.
  */
 
-/** Only the tail is read: the latest title record sits near the end, so the
- *  cost stays bounded no matter how large a transcript grows. */
+/** Only the tail is read on a refresh, so the cost stays bounded no matter how
+ *  large a transcript grows. Anything older than this window (a title written
+ *  once, early) comes from the one-time full scan instead; see scanTranscript. */
 const TAIL_BYTES = 65536;
 /** Long enough to be a summary, short enough for a row. */
 const MAX_TITLE = 120;
@@ -62,6 +64,20 @@ export function normalizeSkill(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
   const name = raw.split(/[/:\\]/).filter(Boolean).pop();
   return name && /^[a-z0-9][a-z0-9._-]*$/i.test(name) ? name : undefined;
+}
+
+/** The title a parsed record carries, normalized, or "" when it is not a title
+ *  record. Both kinds are read the same way, so the tail read and the full scan
+ *  agree on what counts as a title. */
+function titleIn(rec: Record<string, unknown>): string {
+  const o = rec as { type?: string; aiTitle?: string; customTitle?: string };
+  const raw =
+    o.type === "ai-title" && typeof o.aiTitle === "string"
+      ? o.aiTitle
+      : o.type === "custom-title" && typeof o.customTitle === "string"
+      ? o.customTitle
+      : "";
+  return raw.replace(/\s+/g, " ").trim().slice(0, MAX_TITLE);
 }
 
 /** Every skill invoked in a line of transcript, if any. A Skill tool call is a
@@ -163,15 +179,8 @@ export function readTail(file: string): TranscriptTail {
         continue; // partial or non-JSON line
       }
       if (maybeTitle) {
-        const o = rec as { type?: string; aiTitle?: string; customTitle?: string };
-        const raw =
-          o.type === "ai-title" && typeof o.aiTitle === "string"
-            ? o.aiTitle
-            : o.type === "custom-title" && typeof o.customTitle === "string"
-            ? o.customTitle
-            : "";
-        const title = raw.replace(/\s+/g, " ").trim();
-        if (title) out.title = title.slice(0, MAX_TITLE);
+        const title = titleIn(rec);
+        if (title) out.title = title;
       }
       if (maybeSkill) out.skills.unshift(...skillsInLine(rec));
       if (!maybeResult) continue;
@@ -201,55 +210,85 @@ export function readTail(file: string): TranscriptTail {
 /** Chunk size for the one-time full scan. Big enough that a long transcript is
  *  a handful of reads, small enough that none of this lands in memory twice. */
 const SCAN_CHUNK = 256 * 1024;
-/** The only thing the scan is looking for, so it can reject a whole chunk with
- *  one search rather than splitting it into records first. */
+/** What the scan is looking for, so it can reject a whole chunk with one search
+ *  rather than splitting it into records first. Both title kinds end the same
+ *  way, so one mark finds either. */
 const SKILL_MARK = '"Skill"';
+const TITLE_MARK = '-title"';
+
+/** What one pass over a whole transcript yields. */
+export interface TranscriptScan {
+  /** Every skill invoked in the file, bare names in first-use order. */
+  skills: string[];
+  /** The newest title anywhere in the file, or "" when it has none. */
+  title: string;
+}
 
 /**
- * Every skill invoked anywhere in a transcript, bare names in first-use order.
+ * Everything in a transcript that the tail alone cannot be trusted for.
  *
- * Skills accumulate over a whole session, so unlike the title and the tool
- * results they cannot be read from the tail alone: a session that used a skill
- * an hour ago has it far behind. This walks the whole file once per session -
- * the tail read on every refresh after that keeps the list current - so the cost
- * is paid when a window first sees a session, not repeatedly.
+ * Skills accumulate over a whole session, so a session that used a skill an hour
+ * ago has it far behind. The title has the same problem for a different reason:
+ * it is written when Claude summarizes the work, not on every turn, and a
+ * session titled once (the app titling it, or a rename) leaves that record
+ * hundreds of kilobytes back by the time the session has run a while - at which
+ * point a tail read finds nothing and the row falls back to "Claude 1". So the
+ * whole file is walked once per session - the tail read on every refresh after
+ * that keeps both current - and the cost is paid when a window first sees a
+ * session, not repeatedly.
  */
-export async function scanSkills(file: string): Promise<string[]> {
-  const out: string[] = [];
+export async function scanTranscript(file: string): Promise<TranscriptScan> {
+  const out: TranscriptScan = { skills: [], title: "" };
   const seen = new Set<string>();
   let handle: fs.promises.FileHandle | undefined;
   try {
     handle = await fs.promises.open(file, "r");
     const buf = Buffer.alloc(SCAN_CHUNK);
+    // A chunk boundary can fall inside a multi-byte character; the decoder
+    // holds those bytes back rather than handing out a replacement char.
+    const decoder = new StringDecoder("utf8");
     let rest = "";
+    const take = (line: string): void => {
+      const skill = line.indexOf(SKILL_MARK) !== -1;
+      const title = line.indexOf(TITLE_MARK) !== -1;
+      if (!skill && !title) return;
+      let rec: Record<string, unknown>;
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        return; // not a whole record
+      }
+      if (title) {
+        const found = titleIn(rec);
+        if (found) out.title = found;
+      }
+      if (!skill) return;
+      for (const name of skillsInLine(rec)) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        out.skills.push(name);
+      }
+    };
     for (;;) {
       const { bytesRead } = await handle.read(buf, 0, SCAN_CHUNK, null);
       if (!bytesRead) break;
-      const text = rest + buf.toString("utf8", 0, bytesRead);
+      const text = rest + decoder.write(buf.subarray(0, bytesRead));
       // Splitting megabytes into lines is the expensive part, and almost no
-      // chunk mentions the Skill tool at all. One indexOf over the chunk decides
-      // whether it is worth doing; when it is not, only the trailing partial
-      // record is carried forward.
-      if (text.indexOf(SKILL_MARK) === -1) {
+      // chunk carries either mark. Two indexOf over the chunk decide whether it
+      // is worth doing; when it is not, only the trailing partial record is
+      // carried forward.
+      if (text.indexOf(SKILL_MARK) === -1 && text.indexOf(TITLE_MARK) === -1) {
         const nl = text.lastIndexOf("\n");
         rest = nl === -1 ? text : text.slice(nl + 1);
         continue;
       }
       const lines = text.split("\n");
       rest = lines.pop() ?? "";
-      for (const line of lines) {
-        if (line.indexOf(SKILL_MARK) === -1) continue;
-        try {
-          for (const skill of skillsInLine(JSON.parse(line))) {
-            if (seen.has(skill)) continue;
-            seen.add(skill);
-            out.push(skill);
-          }
-        } catch {
-          /* not a whole record */
-        }
-      }
+      for (const line of lines) take(line);
     }
+    // A transcript being written right now often ends without its newline, and
+    // that last record is the likeliest place for the newest title.
+    take(rest + decoder.end());
   } catch {
     /* no transcript, unreadable, gone mid-scan */
   } finally {
@@ -279,8 +318,15 @@ export class TranscriptReader {
   private readonly located = new Map<string, string>();
   private readonly cache = new Map<string, { mtimeMs: number; tail: TranscriptTail }>();
   /** Skills this session has invoked, seeded from the tail and completed by one
-   *  background scan (see fillSkills), then topped up from every tail read. */
+   *  background scan (see fillFromScan), then topped up from every tail read. */
   private readonly skills = new Map<string, string[]>();
+  /** The newest title seen for this session, remembered rather than re-derived.
+   *  Claude writes a title when it summarizes the work, not on every turn, so a
+   *  title that was in the tail an hour ago has scrolled out of it since - and
+   *  re-deriving from each tail read would drop a row back to "Claude 1" while
+   *  the session is still called something in Claude itself. A tail with no
+   *  title says nothing new, so it leaves the remembered one alone. */
+  private readonly titles = new Map<string, string>();
   /** Sessions whose one-time full scan is in flight, so the poll cannot pile up
    *  a scan of the same transcript on every tick. */
   private readonly scanning = new Set<string>();
@@ -327,6 +373,7 @@ export class TranscriptReader {
       // id would be found again rather than serving a stale read forever.
       this.located.delete(sessionId);
       this.cache.delete(sessionId);
+      this.titles.delete(sessionId);
       return { title: "", finished: [], skills: [] };
     }
     const hit = this.cache.get(sessionId);
@@ -337,41 +384,47 @@ export class TranscriptReader {
     for (const id of tail.finished) seen.add(id);
     this.finished.set(sessionId, seen);
     // Skills are the one thing here that needs a pass over the whole transcript
-    // (see scanSkills), and a long session's is megabytes: awaiting it put a
+    // (see scanTranscript), and a long session's is megabytes: awaiting it put a
     // multi-megabyte read per live session on the path to the panel's first
     // render, which is the slowest thing a freshly opened window did. So seed
     // from the tail and let the scan land on a later refresh. A row shows the
     // skills its tail mentions in the meantime rather than none, and the poll
     // reposts within a second of the scan finishing.
+    if (tail.title) this.titles.set(sessionId, tail.title);
     const known = this.skills.get(sessionId);
     const skills = known ?? [];
     for (const skill of tail.skills) {
       if (!skills.includes(skill)) skills.push(skill);
     }
     this.skills.set(sessionId, skills);
-    if (!known) void this.fillSkills(sessionId, file);
+    if (!known) void this.fillFromScan(sessionId, file);
     return tail;
   }
 
   /**
-   * Fill in the skills used before the tail, off the refresh path.
+   * Fill in what happened before the tail, off the refresh path.
    *
    * Once per session, and never twice at once: the 1s poll would otherwise start
    * a fresh scan of the same file every tick until the first one finished. The
    * result is merged rather than assigned, since tail reads keep adding to the
    * list while the scan runs, and dropped entirely if the session was retired
-   * meanwhile.
+   * meanwhile. The title is only filled IN, never over: a window opening onto a
+   * session titled long ago gets its title from here, but anything the tail has
+   * since produced is newer than anything the scan can find.
    */
-  private async fillSkills(sessionId: string, file: string): Promise<void> {
+  private async fillFromScan(sessionId: string, file: string): Promise<void> {
     if (this.scanning.has(sessionId)) return;
     this.scanning.add(sessionId);
     try {
-      const scanned = await scanSkills(file);
+      const scanned = await scanTranscript(file);
       const seeded = this.skills.get(sessionId);
       if (!seeded) return; // retained away mid-scan: nothing to fill in
+      if (scanned.title && !this.titles.get(sessionId)) {
+        this.titles.set(sessionId, scanned.title);
+      }
       // Scan order first (it is first-use order over the whole file), then
       // anything only the tail has seen, which is by definition newer.
-      const merged = [...scanned];
+      const merged = [...scanned.skills];
       for (const skill of seeded) {
         if (!merged.includes(skill)) merged.push(skill);
       }
@@ -385,7 +438,8 @@ export class TranscriptReader {
 
   /** Claude's generated work summary for this session, or "". */
   async titleFor(sessionId: string): Promise<string> {
-    return (await this.tailFor(sessionId)).title;
+    await this.tailFor(sessionId);
+    return this.titles.get(sessionId) ?? "";
   }
 
   /** The skills this session has invoked, deduped, in first-use order. */
@@ -429,6 +483,7 @@ export class TranscriptReader {
       this.cache,
       this.finished,
       this.skills,
+      this.titles,
       this.subagentDirs,
     ];
     for (const map of maps) {
