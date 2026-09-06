@@ -113,13 +113,15 @@ printing it is that it can be read.
 
 ## Two empty states
 
-**A repository with only its primary worktree** drew a `Worktrees` divider, a
-`General 0` header and an empty-section line inviting the user to move a worktree
-in from a menu that would not offer it (the primary cannot be filed): three rows
-of chrome about a feature that had not been used and could not yet do anything.
-The sections are skipped while General is still the only group. Once the user
-makes a group of their own, their structure is shown whether or not anything is
-in it.
+**A repository with only its primary worktree** keeps its `Worktrees` divider and
+`General 0` header. Skipping them made the section disappear from the repository
+whose next worktree is certain to land in it, and brought every card on screen
+back under a header the moment one arrived. What was actually wrong was the
+line under the header: it invited the user to move a worktree in from a menu
+that would not offer it, since the primary cannot be filed. An empty General now
+reads `Empty. New worktrees land here.`, which is true whether or not there is
+anything to move; the move-here line stays on user-made groups, which only exist
+once the user has been in that menu.
 
 **Empty-state copy names what is on screen.** It read `Use "New Agent" to start
 one`, and there is no text anywhere in the panel reading "New Agent" - the

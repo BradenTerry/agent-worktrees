@@ -1751,11 +1751,13 @@
   /**
    * The cards, divided into the user's groups.
    *
-   * General is always drawn, even when it is the only group and a user has never
-   * made one. It is where a new worktree lands, so it is the thing you drag out
-   * of and the header you reach for New group on; a panel that only grew
-   * sections once you already had two of them made the first one hard to find
-   * and moved every card the moment you did.
+   * General is always drawn, even when it is the only group, a user has never
+   * made one, and there is nothing in it. It is where a new worktree lands, so
+   * it is the thing you drag out of and the header you reach for New group on;
+   * a panel that only grew sections once you already had two of them made the
+   * first one hard to find and moved every card the moment you did, and one
+   * that dropped the section in a repository with only its primary worktree
+   * hid it exactly where a user is most likely to be looking for it.
    *
    * A card whose group is gone (deleted in another window between this payload
    * and the last) falls to General rather than vanishing, which is the same rule
@@ -1786,15 +1788,6 @@
     // above the sections, and a labelled rule separates the two.
     const primary = wts.filter((wt) => wt.isPrimary);
     const rest = wts.filter((wt) => !wt.isPrimary);
-    // A repository with only its primary worktree has nothing to file, so the
-    // sections are three rows of chrome about a feature that has not been used
-    // and cannot yet do anything: a `Worktrees` divider, a `General 0` header,
-    // and an empty-section line inviting a move from a menu that would not
-    // offer it (the primary cannot be filed). Only when General is still the
-    // only group - once the user has made one of their own, their structure is
-    // shown whether or not anything is in it.
-    const onlyGeneral = groups.length === 1 && groups[0].id === "general";
-    if (!rest.length && onlyGeneral) return primary.map(card).join("");
     const members = new Map(groups.map((g) => [g.id, []]));
     for (const wt of rest) {
       const list = members.get(wt.group) || members.get("general");
@@ -1903,7 +1896,16 @@
       '">' +
       (wts.length
         ? wts.map(card).join("")
-        : '<div class="group-empty">Empty. Move a worktree here from its menu.</div>') +
+        : '<div class="group-empty">' +
+          // General's line says where new worktrees go; a user-made group's says
+          // how to fill it. In a repository with only its primary worktree the
+          // move-here line would be an instruction the menu cannot carry (the
+          // primary is not filed), and General is exactly the section such a
+          // repository shows.
+          (g.id === "general"
+            ? "Empty. New worktrees land here."
+            : "Empty. Move a worktree here from its menu.") +
+          "</div>") +
       "</div>" +
       "</div>"
     );
