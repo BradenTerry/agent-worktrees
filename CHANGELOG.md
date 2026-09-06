@@ -41,6 +41,8 @@ what shipped in the 4.5.1 to 4.5.3 pre-releases.
   scrolling back to the top.
 - **An agent row keeps its work summary** instead of falling back to "Claude 1"
   as its session runs on.
+- **The Auto-merge pill follows GitHub.** Turning auto-merge on or off shows
+  on the card at the next poll instead of up to five minutes later.
 - **Minor bug fixes and improvements.**
 
 ## 4.5.3 (pre-release)
