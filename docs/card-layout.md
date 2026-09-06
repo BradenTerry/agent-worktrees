@@ -371,7 +371,9 @@ four cards take roughly a third of that again.
   `data-menu-key`) rather than by position, so they are found again even when
   rows have moved. Without it, tabbing through agent rows dropped focus to the
   body every second and the menu holding Move to group, Switch branch and Delete
-  could vanish under the pointer within a second of being opened.
+  could vanish under the pointer within a second of being opened. It is also what
+  keeps the branch list (see [Switching a worktree's branch](switch-branch.md))
+  open across the repaints that land while it is waiting for its branches.
   - The menu itself needs no rebuilding: it is mounted on `<body>` at viewport
     coordinates, so replacing the panel's markup underneath neither moves it nor
     disturbs focus inside it. Only its new caret's `aria-expanded` is

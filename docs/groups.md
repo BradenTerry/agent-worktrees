@@ -118,11 +118,21 @@ look like the panel had deleted it. Empty sections keep their header and say so.
 
 `cardsBody` in `media/panel.js` partitions the cards by `wt.group`.
 
-**General is always drawn**, even in a repo where nobody has made a group. It is
-where a new worktree lands, so it is the thing you drag out of and the header you
-reach New group on. The panel spent a version only growing sections once you
-already had two groups, which made the first one hard to find and then moved
-every card on screen the moment you made it.
+**General is always drawn**, even in a repo where nobody has made a group and
+even when it holds nothing. It is where a new worktree lands, so it is the thing
+you drag out of and the header you reach New group on. The panel spent a version
+only growing sections once you already had two groups, which made the first one
+hard to find and then moved every card on screen the moment you made it, and a
+version dropping the sections in a repository with only its primary worktree,
+which hid General from the one repository whose next worktree is certain to land
+in it.
+
+An empty General says where new worktrees go (`Empty. New worktrees land here.`)
+rather than inviting a move the way an empty user-made group does. In a
+repository with only its primary worktree there is nothing a card menu could move
+- the primary is not filed - so the move-here line would be an instruction the
+menu cannot carry, and that repository is exactly the one showing an empty
+General.
 
 **The primary worktree leads, under a labelled rule.** `cardsBody` lifts it out
 before partitioning and renders it first, then a `Worktrees` divider, then the

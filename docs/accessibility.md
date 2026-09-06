@@ -18,6 +18,14 @@ the menu open behind it. `onMenuKey` supplies the rest of the pattern.
 | Escape | Close, focus back on the caret |
 | Tab | Close, focus back on the caret |
 
+The Switch branch menu opens with a filter field above its rows, and the field
+is part of that model rather than an exception to it: the menu focuses it instead
+of the first item, Down and Enter go to the **rows** (not to the menu's first
+item, which is Create new branch - what was being typed was a branch name), Up
+goes to the last row, and Home / End stay in the field, where they belong to the
+text. Escape and Tab still close the whole menu. See
+[Switching a worktree's branch](switch-branch.md).
+
 Tab is deliberately "leave", not "move within". A menu is a dead end for
 sequential navigation, and the alternative (trapping Tab inside it) leaves no way
 out that does not involve knowing about Escape.
@@ -113,13 +121,15 @@ printing it is that it can be read.
 
 ## Two empty states
 
-**A repository with only its primary worktree** drew a `Worktrees` divider, a
-`General 0` header and an empty-section line inviting the user to move a worktree
-in from a menu that would not offer it (the primary cannot be filed): three rows
-of chrome about a feature that had not been used and could not yet do anything.
-The sections are skipped while General is still the only group. Once the user
-makes a group of their own, their structure is shown whether or not anything is
-in it.
+**A repository with only its primary worktree** keeps its `Worktrees` divider and
+`General 0` header. Skipping them made the section disappear from the repository
+whose next worktree is certain to land in it, and brought every card on screen
+back under a header the moment one arrived. What was actually wrong was the
+line under the header: it invited the user to move a worktree in from a menu
+that would not offer it, since the primary cannot be filed. An empty General now
+reads `Empty. New worktrees land here.`, which is true whether or not there is
+anything to move; the move-here line stays on user-made groups, which only exist
+once the user has been in that menu.
 
 **Empty-state copy names what is on screen.** It read `Use "New Agent" to start
 one`, and there is no text anywhere in the panel reading "New Agent" - the

@@ -1751,11 +1751,13 @@
   /**
    * The cards, divided into the user's groups.
    *
-   * General is always drawn, even when it is the only group and a user has never
-   * made one. It is where a new worktree lands, so it is the thing you drag out
-   * of and the header you reach for New group on; a panel that only grew
-   * sections once you already had two of them made the first one hard to find
-   * and moved every card the moment you did.
+   * General is always drawn, even when it is the only group, a user has never
+   * made one, and there is nothing in it. It is where a new worktree lands, so
+   * it is the thing you drag out of and the header you reach for New group on;
+   * a panel that only grew sections once you already had two of them made the
+   * first one hard to find and moved every card the moment you did, and one
+   * that dropped the section in a repository with only its primary worktree
+   * hid it exactly where a user is most likely to be looking for it.
    *
    * A card whose group is gone (deleted in another window between this payload
    * and the last) falls to General rather than vanishing, which is the same rule
@@ -1786,15 +1788,6 @@
     // above the sections, and a labelled rule separates the two.
     const primary = wts.filter((wt) => wt.isPrimary);
     const rest = wts.filter((wt) => !wt.isPrimary);
-    // A repository with only its primary worktree has nothing to file, so the
-    // sections are three rows of chrome about a feature that has not been used
-    // and cannot yet do anything: a `Worktrees` divider, a `General 0` header,
-    // and an empty-section line inviting a move from a menu that would not
-    // offer it (the primary cannot be filed). Only when General is still the
-    // only group - once the user has made one of their own, their structure is
-    // shown whether or not anything is in it.
-    const onlyGeneral = groups.length === 1 && groups[0].id === "general";
-    if (!rest.length && onlyGeneral) return primary.map(card).join("");
     const members = new Map(groups.map((g) => [g.id, []]));
     for (const wt of rest) {
       const list = members.get(wt.group) || members.get("general");
@@ -1903,7 +1896,16 @@
       '">' +
       (wts.length
         ? wts.map(card).join("")
-        : '<div class="group-empty">Empty. Move a worktree here from its menu.</div>') +
+        : '<div class="group-empty">' +
+          // General's line says where new worktrees go; a user-made group's says
+          // how to fill it. In a repository with only its primary worktree the
+          // move-here line would be an instruction the menu cannot carry (the
+          // primary is not filed), and General is exactly the section such a
+          // repository shows.
+          (g.id === "general"
+            ? "Empty. New worktrees land here."
+            : "Empty. Move a worktree here from its menu.") +
+          "</div>") +
       "</div>" +
       "</div>"
     );
@@ -2490,6 +2492,10 @@
   /** The panel control the open menu hangs off, which is the key itself except
    *  for a menu opened from another menu (see mountMenu). */
   let cardMenuAnchor = "";
+  /** The pointer the open menu was anchored to, when it was opened by one. Kept
+   *  so a menu whose contents change after it is up (the branch list arriving,
+   *  a filter narrowing it) can be measured and placed again without moving. */
+  let cardMenuAt = null;
 
   /**
    * Shut the open menu. `restoreFocus` hands focus back to the caret that
@@ -2513,6 +2519,7 @@
     }
     cardMenuKey = "";
     cardMenuAnchor = "";
+    cardMenuAt = null;
   }
 
   /**
@@ -2526,6 +2533,29 @@
    */
   function onMenuKey(e) {
     if (!cardMenuEl || !cardMenuEl.contains(e.target)) return;
+    // The branch menu's filter field. Down and Enter both go to the rows rather
+    // than to the menu's first item, which is Create new branch: what you were
+    // typing was a branch name, so what is under the field is what the typing
+    // was for. Up goes to the last row, and the keys that belong to a text field
+    // stay in it.
+    const inFilter =
+      e.target.classList && e.target.classList.contains("card-menu-filter");
+    if (inFilter) {
+      const rows = [
+        ...cardMenuEl.querySelectorAll(".card-menu-list .card-menu-item"),
+      ];
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (rows[0]) rows[0].click();
+        return;
+      }
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rows.length) {
+        e.preventDefault();
+        (e.key === "ArrowDown" ? rows[0] : rows[rows.length - 1]).focus();
+        return;
+      }
+      if (e.key === "Home" || e.key === "End") return;
+    }
     // The run buttons in the Run and Debug list are menu items too: they sit
     // beside a target's row rather than on their own line, but Down still has to
     // reach them or "start without debugging" would be pointer-only.
@@ -2599,6 +2629,8 @@
       '"' +
       (o.path ? ' data-path="' + esc(o.path) + '"' : "") +
       (o.group ? ' data-group="' + esc(o.group) + '"' : "") +
+      (o.branch ? ' data-branch="' + esc(o.branch) + '"' : "") +
+      (o.create ? ' data-create="1"' : "") +
       (o.delta ? ' data-delta="' + o.delta + '"' : "") +
       '><span class="card-menu-ico">' +
       (glyph || "") +
@@ -2637,19 +2669,38 @@
     cardMenuEl.innerHTML = items;
     document.body.appendChild(cardMenuEl);
     cardMenuKey = key;
+    cardMenuAt = at || null;
     if (btn) btn.setAttribute("aria-expanded", "true");
+    positionMenu();
+    const first = cardMenuEl.querySelector(".card-menu-item");
+    if (first) first.focus();
+  }
 
-    // Under the anchor, flipped above when there is not room below. Measured
-    // after mounting, since the height depends on what is in the list (whether
-    // Delete is there, how many groups exist).
-    //
-    // A pointer anchor is a zero-size box at the cursor, and opens to its right
-    // the way a context menu should; a caret opens right-aligned under itself,
-    // so the menu hangs inside the card rather than off its edge.
+  /**
+   * Place the open menu under its anchor, flipped above when there is not room
+   * below. Measured rather than computed, since the height depends on what is in
+   * the list (whether Delete is there, how many groups exist, how many branches
+   * came back), and re-run whenever those contents change so a menu that grows
+   * or shrinks in place stays where the pointer left it.
+   *
+   * A pointer anchor is a zero-size box at the cursor, and opens to its right
+   * the way a context menu should; a caret opens right-aligned under itself, so
+   * the menu hangs inside the card rather than off its edge.
+   */
+  function positionMenu() {
+    if (!cardMenuEl) return;
+    const at = cardMenuAt;
+    const btn = root.querySelector(
+      '[data-menu-key="' + cssEscape(cardMenuAnchor || cardMenuKey) + '"]'
+    );
     const r = at
       ? { top: at.y, bottom: at.y, left: at.x, right: at.x, width: 0, height: 0 }
       : btn && btn.getBoundingClientRect();
     if (!r) return;
+    // Uncapped for the measurement: the cap from the last placement is a limit
+    // on the box, so measuring through it would report the old height forever
+    // and a menu that shrank would never take its space back.
+    cardMenuEl.style.maxHeight = "";
     const m = cardMenuEl.getBoundingClientRect();
     const gap = 4;
     const edge = 4;
@@ -2666,8 +2717,6 @@
     const left = at ? r.left : r.right - m.width;
     cardMenuEl.style.left =
       Math.max(edge, Math.min(left, window.innerWidth - m.width - edge)) + "px";
-    const first = cardMenuEl.querySelector(".card-menu-item");
-    if (first) first.focus();
   }
 
   function openCardMenu(path, at) {
@@ -2739,7 +2788,7 @@
     const items =
       groupItems +
       '<div class="card-menu-sep"></div>' +
-      item("changeBranch", icons.edit, "Switch branch&hellip;") +
+      item("branchMenu", icons.branch, "Switch branch&hellip;") +
       item("refreshWorktree", icons.refresh, "Refresh") +
       '<div class="card-menu-sep"></div>' +
       item("searchWorktree", icons.search, "Search this worktree&hellip;") +
@@ -2847,8 +2896,169 @@
     );
   }
 
+  // --- Switch branch ---------------------------------------------------------
+  // The branches a worktree could check out, as a menu where the pointer is.
+  //
+  // This was a `showQuickPick`, which paints at the top centre of the *window*:
+  // you right-click a card at the bottom of a sidebar and the list you have to
+  // read opens at the top-middle of the editor, with nothing left on screen
+  // saying which worktree you are switching. Run and Debug moved off the quick
+  // pick for the same reason and this is the same treatment - the list opens
+  // over the menu it came from, which is where the pointer already is.
+  //
+  // A quick pick brings its own filter, so this one carries a field: a repo with
+  // three branches does not need it, and the one with three hundred is exactly
+  // where a menu without it would be worse than what it replaced.
+
+  /** Branch lists the host has answered with, keyed by worktree path. Kept
+   *  between opens so re-opening paints from the last answer instead of an empty
+   *  box; every open re-asks, so what is on screen is never stale for long. */
+  const branchOptions = new Map();
+  /** What is typed in the open branch menu's filter field. */
+  let branchFilter = "";
+  /** How many branch rows a menu draws at once. A monorepo's branch list runs to
+   *  thousands, and a menu is a few hundred pixels tall: past this the rows are
+   *  DOM nobody scrolls to, and the field above is the way to reach them. */
+  const BRANCH_ROW_CAP = 200;
+
   /**
-   * The actions on one section header. Move up and down are always here, even  /**
+   * Open the branch list for `path`, anchored at `at`.
+   *
+   * The list is not on the payload: it costs a pair of `for-each-ref` passes
+   * plus an ahead/behind sweep to build, and the panel repaints about once a
+   * second while an agent is working. So the menu opens on what it has (nothing,
+   * the first time) and fills in when the host answers - which keeps the menu
+   * itself instant, and is why it has to be able to re-place itself once the
+   * rows arrive.
+   */
+  function openBranchMenu(path, at) {
+    const key = "branch:" + path;
+    branchFilter = "";
+    mountMenu(key, branchMenuItems(path), at, "card:" + path);
+    // mountMenu toggles: the same key twice shuts it, and there is then nothing
+    // to fill or to ask for.
+    if (cardMenuKey !== key) return;
+    // A fixed width for this one menu, applied before it is placed again: it
+    // opens on a loading line and fills with rows a moment later, and a menu
+    // that resized between the two would shift out from under the pointer that
+    // opened it (the clamp that keeps it on screen moves a wider one left).
+    cardMenuEl.classList.add("card-menu-branch");
+    positionMenu();
+    focusBranchFilter();
+    send("branchOptions", { path });
+  }
+
+  /** Put the caret in the filter field, which is what a list you are looking for
+   *  something in owes the keyboard. mountMenu has just focused the first item;
+   *  this is the branch menu saying it wants the field instead. */
+  function focusBranchFilter() {
+    const f = cardMenuEl && cardMenuEl.querySelector(".card-menu-filter");
+    if (f) f.focus();
+  }
+
+  function branchMenuItems(path) {
+    return (
+      '<div class="card-menu-head">' +
+      '<div class="card-menu-label">Switch branch</div>' +
+      '<input class="card-menu-filter" type="text" spellcheck="false"' +
+      ' placeholder="Filter branches" aria-label="Filter branches" value="' +
+      esc(branchFilter) +
+      '">' +
+      "</div>" +
+      // Above the list and outside the filter, because it is not one of the
+      // branches: it is what you reach for when none of them is the one you
+      // want, which is exactly when the filter has emptied the list.
+      menuItem("changeBranch", icons.add, "Create new branch&hellip;", {
+        path,
+        create: true,
+      }) +
+      '<div class="card-menu-sep"></div>' +
+      '<div class="card-menu-list">' +
+      branchRows(path) +
+      "</div>"
+    );
+  }
+
+  /**
+   * The rows: every branch this worktree could check out, most recently updated
+   * first (the order the branches view uses), narrowed by the filter field.
+   *
+   * A branch checked out in another worktree is not among them - git allows one
+   * checkout per branch - and neither is the one already here. That filtering is
+   * the host's, so this draws what it is given.
+   */
+  function branchRows(path) {
+    const opts = branchOptions.get(path);
+    const note = (text) =>
+      '<div class="card-menu-note">' + esc(text) + "</div>";
+    if (!opts) return note("Loading branches\u2026");
+    if (opts.error) return note(opts.error);
+    const all = opts.branches || [];
+    if (!all.length) return note("No other branch to switch to.");
+    const q = branchFilter.trim().toLowerCase();
+    const hits = q
+      ? all.filter((b) => b.name.toLowerCase().includes(q))
+      : all;
+    if (!hits.length) return note("No branch matches that.");
+    const shown = hits.slice(0, BRANCH_ROW_CAP);
+    return (
+      shown
+        .map(
+          (b) =>
+            '<button class="card-menu-item" role="menuitem" data-action="changeBranch"' +
+            ' data-path="' +
+            esc(path) +
+            '" data-branch="' +
+            esc(b.name) +
+            // `title`, not `data-tip`: the panel's tooltip is delegated from
+            // `root` and this menu is mounted on <body>.
+            '" title="Check out ' +
+            esc(b.name) +
+            ' in this worktree">' +
+            '<span class="card-menu-ico">' +
+            icons.branch +
+            "</span>" +
+            '<span class="card-menu-name">' +
+            esc(b.name) +
+            "</span>" +
+            (b.remoteOnly
+              ? '<span class="card-menu-detail">remote only</span>'
+              : "") +
+            "</button>"
+        )
+        .join("") +
+      (hits.length > shown.length
+        ? note(
+            "Showing " +
+              shown.length +
+              " of " +
+              hits.length +
+              ". Type to narrow the list."
+          )
+        : "")
+    );
+  }
+
+  /** The host answered: redraw the whole menu, keeping what was typed and the
+   *  focus that was in it, and place it again now that it has a height. */
+  function refillBranchMenu(path) {
+    if (!cardMenuEl) return;
+    const held = cardMenuEl.contains(document.activeElement);
+    cardMenuEl.innerHTML = branchMenuItems(path);
+    positionMenu();
+    if (held) focusBranchFilter();
+  }
+
+  /** A keystroke in the filter: only the rows change, so only they are redrawn -
+   *  replacing the field would take the caret out of it mid-word. */
+  function refreshBranchRows() {
+    const list = cardMenuEl && cardMenuEl.querySelector(".card-menu-list");
+    if (!list || cardMenuKey.indexOf("branch:") !== 0) return;
+    list.innerHTML = branchRows(cardMenuKey.slice("branch:".length));
+    positionMenu();
+  }
+
+  /**
    * The actions on one section header. Move up and down are always here, even
    * on the first and last group where they do nothing: the host no-ops an out
    * of range move, and a menu whose entries shift position depending on which
@@ -4697,6 +4907,8 @@
       const delta = Number(item.getAttribute("data-delta")) || undefined;
       const debugTarget = item.getAttribute("data-debug-target") || undefined;
       const noDebug = item.hasAttribute("data-no-debug") || undefined;
+      const branch = item.getAttribute("data-branch") || undefined;
+      const createBranch = item.hasAttribute("data-create") || undefined;
       // Where the menu is now, so the one that replaces it lands in the same
       // place. Read before closing, since closing removes the element.
       const box = cardMenuEl.getBoundingClientRect();
@@ -4714,16 +4926,38 @@
         openDebugMenu(path, { x: box.left, y: box.top - 4 });
         return;
       }
+      // The branch list is a round trip rather than payload data, so this menu
+      // opens empty and fills in - same placement, over the menu it came from.
+      if (action === "branchMenu") {
+        openBranchMenu(path, { x: box.left, y: box.top - 4 });
+        return;
+      }
       // No action means the <a> among them, which navigates on its own.
-      if (action) send(action, { path, groupId, delta, debugTarget, noDebug });
+      if (action)
+        send(action, {
+          path,
+          groupId,
+          delta,
+          debugTarget,
+          noDebug,
+          branch,
+          createBranch,
+        });
       return;
     }
     // Anywhere else, including a caret itself - which then re-opens through
     // root's handler only when it was not the click that shut this. Every caret
     // that owns a menu is exempted, not just a card's: this listener runs after
     // root's, so a caret it did not know about would have its menu opened and
-    // then shut again by the same click.
-    if (cardMenuEl && !e.target.closest("[data-menu-key]")) closeCardMenu();
+    // then shut again by the same click. Anything inside the menu is exempt too:
+    // its own filter field is a click that lands in a menu without being an item
+    // in it, and shutting the menu on it would make the field unusable.
+    if (
+      cardMenuEl &&
+      !cardMenuEl.contains(e.target) &&
+      !e.target.closest("[data-menu-key]")
+    )
+      closeCardMenu();
   });
 
   // The rename field. Enter keeps the name, Escape drops it, and clicking away
@@ -4793,6 +5027,19 @@
     },
     true
   );
+
+  // The branch menu's filter. On document, not root: the menu is mounted on
+  // <body>, outside the panel's own delegated listeners.
+  document.addEventListener("input", (e) => {
+    if (
+      !cardMenuEl ||
+      !e.target.classList ||
+      !e.target.classList.contains("card-menu-filter")
+    )
+      return;
+    branchFilter = e.target.value || "";
+    refreshBranchRows();
+  });
 
   root.addEventListener("change", (e) => {
     if (e.target && e.target.id === "gh-enable") {
@@ -4949,6 +5196,15 @@
       render(msg.data);
       announceWaiting(msg.data);
       maybeRefreshSettings(msg.data);
+    } else if (msg.type === "branchOptions") {
+      // The branch list for one worktree, asked for when its menu opened. Held
+      // whether or not that menu is still up (the next open paints from it
+      // immediately), and drawn only into the menu that asked.
+      branchOptions.set(msg.path, {
+        branches: msg.branches || [],
+        error: msg.error,
+      });
+      if (cardMenuKey === "branch:" + msg.path) refillBranchMenu(msg.path);
     } else if (msg.type === "activeTerminal") {
       // Terminal switch: retint the rows in place — no full re-render, so an
       // open menu/modal or the scroll position is never disturbed.

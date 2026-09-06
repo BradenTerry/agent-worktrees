@@ -282,6 +282,24 @@ test("titleFor keeps a title that has scrolled out of the tail", async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test("TranscriptReader sees an append that did not move the mtime", async () => {
+  // Filesystem stamps are coarse (NTFS reports two appends milliseconds apart
+  // with one stamp), and Claude writes a burst of records per turn. Pin the
+  // stamp across the appends so the case is the same on every OS: the size
+  // still moves, and that alone must be enough to re-read.
+  const root = seed("s1", [{ type: "custom-title", customTitle: "named once" }]);
+  const reader = new TranscriptReader(root);
+  const file = await findTranscript(root, "s1");
+  const T = new Date(2_000_000_000_000);
+  fs.utimesSync(file, T, T);
+  assert.strictEqual(await reader.titleFor("s1"), "named once");
+
+  fs.appendFileSync(file, JSON.stringify({ type: "ai-title", aiTitle: "later work" }) + "\n");
+  fs.utimesSync(file, T, T);
+  assert.strictEqual(await reader.titleFor("s1"), "later work", "same stamp, bigger file");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test("titleFor recovers a title buried before the tail", async () => {
   // A window opening onto a session that was titled long ago: the tail cannot
   // see it, so the one full scan is what fills it in.

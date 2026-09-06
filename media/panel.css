@@ -3004,6 +3004,10 @@ button.busy {
   position: fixed;
   z-index: 30;
   min-width: 202px;
+  /* Branch names run long, and .card-menu-item does not wrap: without a ceiling
+     one of them would stretch the menu wider than the sidebar it opened in. The
+     name itself ellipsises (see .card-menu-name). */
+  max-width: min(340px, calc(100vw - 8px));
   padding: 4px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -3164,6 +3168,56 @@ button.busy {
     --vscode-menu-selectionForeground,
     var(--vscode-list-activeSelectionForeground)
   );
+}
+/* Switch branch is sized rather than fitted - see openBranchMenu. Wide enough
+   for a real branch name, and never wider than the panel it opens in. */
+.card-menu.card-menu-branch {
+  width: min(340px, calc(100vw - 8px));
+}
+/* --- Switch branch's list ---------------------------------------------------
+   The heading and the filter field, pinned while the branches scroll under them.
+   The filter is how you reach a branch that is not in the first screenful, so it
+   has to still be there once you have scrolled looking for one; the heading
+   comes with it because the two are one block, and because a list of branch
+   names with nothing over it stops saying what picking one does.
+   The negative margins and matching padding pull the strip out to the menu's own
+   4px padding on three sides, so no row shows in the gap above or beside it. */
+.card-menu-head {
+  position: sticky;
+  top: -4px;
+  z-index: 1;
+  margin: -4px -4px 0;
+  padding: 4px 4px 0;
+  background: var(
+    --vscode-menu-background,
+    var(--vscode-editorWidget-background, #252526)
+  );
+}
+.card-menu-filter {
+  display: block;
+  width: 100%;
+  margin: 2px 0 4px;
+  padding: 4px 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.28)));
+  border-radius: 4px;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font-family: inherit;
+  font-size: 12px;
+}
+.card-menu-filter:focus {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+/* Loading, an error, an empty list, a capped one: a line that says what the rows
+   are not, in the place they would be. Indented to the items' text, like the
+   label above them, and not focusable - there is nothing here to activate. */
+.card-menu-note {
+  padding: 5px 8px 5px 30px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: normal;
 }
 .card-menu-sep {
   height: 1px;
