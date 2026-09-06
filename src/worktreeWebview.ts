@@ -277,6 +277,7 @@ interface ActionMessage {
     | "showLog"
     | "scopeScm"
     | "openBranches"
+    | "branchOptions"
     | "loadBranches"
     | "fetchBranches"
     | "refreshGithub"
@@ -318,8 +319,13 @@ interface ActionMessage {
   groupId?: string;
   /** The name typed into a group's header, for renameGroup. */
   name?: string;
-  /** Branch name, for worktreeFromBranch / deleteBranch. */
+  /** Branch name, for worktreeFromBranch / deleteBranch, and for changeBranch:
+   *  which entry of the card's Switch branch menu was pressed. */
   branch?: string;
+  /** True when changeBranch is the menu's "Create new branch" entry rather than
+   *  one of the branches: the name is asked for, and the branch made, instead of
+   *  checked out. */
+  createBranch?: boolean;
   /** Repo-relative file path, for addLinkedPath / removeLinkedPath. */
   linkPath?: string;
   /** Whether the branch is remote-only, for worktreeFromBranch. */
@@ -1562,7 +1568,9 @@ export class WorktreeWebviewProvider
       case "removeWorktree":
         return this.removeWorktreeAction(msg.path);
       case "changeBranch":
-        return this.changeBranchAction(msg.path);
+        return this.changeBranchAction(msg.path, msg.branch, msg.createBranch);
+      case "branchOptions":
+        return this.postBranchOptions(msg.path);
       case "openWindow":
         return this.openWindow(msg.path);
       case "searchWorktree":
@@ -3443,94 +3451,79 @@ export class WorktreeWebviewProvider
   }
 
   /**
-   * Switch the branch a worktree has checked out. Offers a quick pick of the
-   * branches that can be checked out here (every local/remote branch except the
-   * one already checked out and any held by another worktree, since git allows a
-   * branch in only one worktree) plus a "Create new branch" entry that prompts
-   * for a name and branches off the worktree's current HEAD. On success both
-   * views refresh so the card's branch name and the branches panel update.
+   * Answer the panel's Switch branch menu with the branches this worktree could
+   * check out: every local or remote-only branch except the ones a worktree
+   * already holds, which rules out both the branch checked out here and any held
+   * elsewhere (git allows a branch in one worktree at a time).
+   *
+   * Asked for when the menu opens rather than carried on the payload. The list
+   * costs a pair of `for-each-ref` passes plus an ahead/behind sweep to build,
+   * and the panel is re-posted about once a second while an agent works - paying
+   * that on every payload would be the cost of a whole gather again, for a list
+   * a worktree needs perhaps once in its life.
+   *
+   * Most recently updated first, the order the branches view sorts by: the menu
+   * is capped to the room it has, so what leads the list is what a user reads
+   * before reaching for the filter, and "the branch I was on this morning" beats
+   * "the branch beginning with a".
+   *
+   * Errors come back as a line for the menu to draw in place of the rows. A
+   * dialog would be the very thing this menu exists to avoid, and the menu is
+   * already open and waiting on this answer.
    */
-  private async changeBranchAction(fsPath?: string): Promise<void> {
-    if (!fsPath) return;
+  private async postBranchOptions(fsPath?: string): Promise<void> {
+    if (!fsPath || !this.view) return;
+    const post = (payload: Record<string, unknown>): void => {
+      void this.view?.webview.postMessage({
+        type: "branchOptions",
+        path: fsPath,
+        ...payload,
+      });
+    };
     const primary = await this.primaryWorktree();
-    if (!primary) {
-      vscode.window.showErrorMessage("No git repository in this window.");
-      return;
-    }
-    const target = normalize(fsPath);
-    const worktree = (await listWorktrees(primary)).find(
-      (w) => normalize(w.path) === target
-    );
-    if (!worktree) {
-      vscode.window.showErrorMessage("That worktree no longer exists.");
-      return;
-    }
-    const current = worktree.detached ? undefined : worktree.branch;
+    if (!primary) return post({ error: "No git repository in this window." });
 
     let branches: BranchInfo[];
     try {
       branches = await listBranches(primary);
     } catch (err) {
-      vscode.window.showErrorMessage(
-        `Could not list branches: ${(err as Error).message}`
-      );
-      return;
-    }
-
-    const CREATE = "$(add) Create new branch...";
-    // Branches you can switch onto: not the one already here, and not held by
-    // another worktree (git refuses a second checkout of the same branch).
-    const switchable = branches.filter(
-      (b) => b.name !== current && !b.hasWorktree
-    );
-    const items: vscode.QuickPickItem[] = [
-      { label: CREATE },
-      ...(switchable.length
-        ? [
-            {
-              label: "",
-              kind: vscode.QuickPickItemKind.Separator,
-            } as vscode.QuickPickItem,
-          ]
-        : []),
-      ...switchable.map((b) => ({
-        label: b.name,
-        description: b.remoteOnly ? "remote only" : undefined,
-      })),
-    ];
-
-    const picked = await vscode.window.showQuickPick(items, {
-      title: current ? `Switch branch (currently on ${current})` : "Switch branch",
-      placeHolder: "Choose a branch to check out, or create a new one",
-    });
-    if (!picked) return;
-
-    let name: string;
-    let create = false;
-    if (picked.label === CREATE) {
-      const existing = new Set(branches.map((b) => b.name));
-      const input = await vscode.window.showInputBox({
-        title: "New branch name",
-        prompt: `Branch off ${
-          current ?? "the current commit"
-        } and switch this worktree to it`,
-        validateInput: (v) => {
-          const t = v.trim();
-          if (!t) return "Enter a branch name.";
-          if (/\s/.test(t)) return "Branch names cannot contain spaces.";
-          if (existing.has(t)) return "A branch with that name already exists.";
-          return undefined;
-        },
+      return post({
+        error: `Could not list branches: ${(err as Error).message}`,
       });
-      if (!input) return;
-      name = input.trim();
-      create = true;
-    } else {
-      name = picked.label;
     }
+
+    post({
+      branches: branches
+        .filter((b) => !b.hasWorktree)
+        // Undated branches (a ref git could not read a committer date for) sort
+        // last rather than first, which a plain string compare would do.
+        .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
+        .map((b) => ({ name: b.name, remoteOnly: b.remoteOnly })),
+    });
+  }
+
+  /**
+   * Switch a worktree onto the branch its card menu picked, or - with
+   * `createBranch` - onto a new branch off the worktree's current HEAD.
+   *
+   * The choosing is the panel's now: it draws the branches as a menu where the
+   * pointer is, so nothing here opens a quick pick at the top of the window for
+   * a control at the bottom of the sidebar. On success both views refresh so the
+   * card's branch name and the branches panel update.
+   */
+  private async changeBranchAction(
+    fsPath?: string,
+    branch?: string,
+    createBranch?: boolean
+  ): Promise<void> {
+    if (!fsPath) return;
+    const name = createBranch
+      ? await this.promptNewBranch(fsPath)
+      : branch?.trim();
+    if (!name) return;
 
     try {
-      await switchWorktreeBranch(fsPath, name, { create });
+      await switchWorktreeBranch(fsPath, name, { create: !!createBranch });
     } catch (err) {
       vscode.window.showErrorMessage(
         `Could not switch branch: ${(err as Error).message}`
@@ -3539,6 +3532,50 @@ export class WorktreeWebviewProvider
     }
     await this.refresh();
     await this.postBranches();
+  }
+
+  /**
+   * The one dialog Switch branch still opens: the name for a new branch. There
+   * is no list to put under the pointer for it - it is a name that does not
+   * exist yet - and the menu that asked for it is already shut.
+   *
+   * The existing names are only for the "already exists" check, so a repo whose
+   * branches cannot be listed still gets the box: git refuses the duplicate
+   * itself, and the error says so.
+   */
+  private async promptNewBranch(fsPath: string): Promise<string | undefined> {
+    const primary = await this.primaryWorktree();
+    if (!primary) {
+      vscode.window.showErrorMessage("No git repository in this window.");
+      return undefined;
+    }
+    let existing = new Set<string>();
+    try {
+      existing = new Set((await listBranches(primary)).map((b) => b.name));
+    } catch {
+      // Left empty: validation loses the duplicate check, nothing else.
+    }
+    // The current branch, from the payload the card was drawn from rather than
+    // a fresh git read: it is the prompt's wording, not what the branch is cut
+    // from (git does that from HEAD).
+    const wt = this.lastData?.worktrees.find(
+      (w) => normalize(w.path) === normalize(fsPath)
+    );
+    const current = wt && !wt.detached ? wt.branch : undefined;
+    const input = await vscode.window.showInputBox({
+      title: "New branch name",
+      prompt: `Branch off ${
+        current ?? "the current commit"
+      } and switch this worktree to it`,
+      validateInput: (v) => {
+        const t = v.trim();
+        if (!t) return "Enter a branch name.";
+        if (/\s/.test(t)) return "Branch names cannot contain spaces.";
+        if (existing.has(t)) return "A branch with that name already exists.";
+        return undefined;
+      },
+    });
+    return input?.trim() || undefined;
   }
 
   /**

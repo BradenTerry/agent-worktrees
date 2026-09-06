@@ -269,7 +269,9 @@ A worktree is not part of your open workspace, so **Find in Files** and
 ## Also included
 
 - **Open in a new window**, focusing an existing one rather than duplicating it.
-- **Switch a worktree's branch**, or create a new one.
+- **Switch a worktree's branch** from a list that opens where you click, filtered
+  as you type, most recently updated first - or create a new branch from the same
+  list.
 - **Delete a worktree** in one confirmation that says upfront what it touches
   (agents, uncommitted changes, unpushed commits) and can delete the branch too.
   Leftover folders git could not remove are cleaned up.

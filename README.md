@@ -49,9 +49,11 @@ its running agents in one view.
   after, behind a progress line, rather than holding the panel on the old payload
   until they answer: see [Refresh coalescing](docs/refresh-coalescing.md).
 - **New Worktree**, **Open in new window** (focuses an existing window via the
-  `code` CLI when it is on `PATH`), and **Change branch** via a quick pick of the
-  branches free to check out, plus a create-new-branch entry. The switch runs
-  `git switch` in that worktree only.
+  `code` CLI when it is on `PATH`), and **[Switch branch](docs/switch-branch.md)**
+  as a filtered menu in the card's own menu, at the pointer rather than in a quick
+  pick at the top of the window. The branches are fetched when it opens rather
+  than carried on every payload. The switch runs `git switch` in that worktree
+  only.
 - **[Searching a worktree](docs/worktree-search.md)** from this window, since a
   worktree is not a workspace folder and so neither Find in Files nor `Ctrl/Cmd+P`
   reaches it. Two per-card actions scope those to the worktree instead: a search
@@ -217,6 +219,7 @@ The rationale behind the parts that are easy to get wrong twice:
 | [Subagents](docs/subagents.md) | The per-subagent files, which card a row lands on, and what retires it |
 | [Refresh coalescing](docs/refresh-coalescing.md) | Which signals refresh, why the Refresh button does not wait on the network, the two status tiers, the agent-only path, why there is no `**/*` watcher, and the Performance tab |
 | [Branches view](docs/branches-view.md) | Branch listing, the bulk PR fetch, filters, deletes, flicker guards |
+| [Switching a worktree's branch](docs/switch-branch.md) | Why the branch list is a menu at the pointer and not a quick pick, why it is a round trip and not payload data, the filter and the row cap |
 | [Run and Debug in a worktree](docs/debug-sessions.md) | Why the debug view can't be retargeted, launch.json parsing, session tracking |
 | [Terminal tab titles](docs/terminal-titles.md) | Why the extension does not pass `name` to `createTerminal` |
 | [Linked files](docs/linked-files.md) | The symlink list and the Windows junction/hard-link fallbacks |

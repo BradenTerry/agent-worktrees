@@ -18,6 +18,14 @@ the menu open behind it. `onMenuKey` supplies the rest of the pattern.
 | Escape | Close, focus back on the caret |
 | Tab | Close, focus back on the caret |
 
+The Switch branch menu opens with a filter field above its rows, and the field
+is part of that model rather than an exception to it: the menu focuses it instead
+of the first item, Down and Enter go to the **rows** (not to the menu's first
+item, which is Create new branch - what was being typed was a branch name), Up
+goes to the last row, and Home / End stay in the field, where they belong to the
+text. Escape and Tab still close the whole menu. See
+[Switching a worktree's branch](switch-branch.md).
+
 Tab is deliberately "leave", not "move within". A menu is a dead end for
 sequential navigation, and the alternative (trapping Tab inside it) leaves no way
 out that does not involve knowing about Escape.
