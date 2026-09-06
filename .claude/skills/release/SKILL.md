@@ -126,7 +126,11 @@ half-finished release.
    already be merged to `origin/main`. Add a `## X.Y.Z` section at the top of
    `CHANGELOG.md` (match the existing style: bold lead-in, `-` separators, no
    em dashes, no emojis) and keep `README.md` (mechanism) + `MARKETPLACE.md`
-   (user-facing) in sync per the project CLAUDE.md. Regenerate screenshots if
+   (user-facing) in sync per the project CLAUDE.md. **A pre-release section is
+   headed `## X.Y.Z (pre-release)`**, and the regular release that follows a
+   run of them rolls up everything since the last regular release, pre-release
+   items included, so a reader on the regular channel gets the whole list in
+   one section rather than having to know which earlier ones they skipped. Regenerate screenshots if
    `panel.js`/`panel.css` changed. A pre-release skips this: it may be tagged
    on a PR branch head to preview unmerged work, and its changelog entry is
    the upcoming stable section on that branch. Verify locally either way:
