@@ -102,6 +102,7 @@ test("notifyMode keeps known values and defaults anything else", () => {
   assert.strictEqual(notifyMode("off"), "off");
   assert.strictEqual(notifyMode("always"), "always");
   assert.strictEqual(notifyMode("unfocused"), "unfocused");
+  assert.strictEqual(notifyMode("focused"), "focused");
   // A hand-edited settings.json must never be guessed at in the direction of
   // interrupting more often than the user asked for.
   for (const bad of [undefined, null, "", "ALWAYS", true, 1, {}]) {
@@ -116,6 +117,8 @@ test("shouldNotify honours the mode and window focus", () => {
   assert.strictEqual(shouldNotify("always", false), true);
   assert.strictEqual(shouldNotify("unfocused", true), false);
   assert.strictEqual(shouldNotify("unfocused", false), true);
+  assert.strictEqual(shouldNotify("focused", true), true);
+  assert.strictEqual(shouldNotify("focused", false), false);
 });
 
 test("noticeText names the worktree so stacked toasts differ", () => {

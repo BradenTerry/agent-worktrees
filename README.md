@@ -118,6 +118,12 @@ its running agents in one view.
   silently so opening a window onto blocked agents announces nothing. Default
   `unfocused` (`agentWorktrees.notifyWaiting`): the case no other signal covers,
   since neither the dot nor the badge reaches you behind another application.
+  A second notification, with an **Open PR** button, when a PR the panel saw
+  open with **auto-merge** on is merged (`agentWorktrees.notifyPrMerged`, same
+  values); it is decided by a transition in the PR poll, so a PR already merged
+  at window open, or one merged by hand, never announces. Both take `off`,
+  `unfocused`, `focused` or `always`, and both are switches under
+  **Settings → Notifications**.
 - **[Agents view](docs/agents-view.md)**: a tab strip under the panel header
   (Worktrees / Agents) swaps the cards for every agent in the repository as one
   flat list, each row carrying the branch it is working on. Both views render

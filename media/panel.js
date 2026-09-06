@@ -120,6 +120,7 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5v-9"/><path d="M4.5 7L8 3.5 11.5 7"/></svg>',
     arrowDown:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9"/><path d="M4.5 9l3.5 3.5L11.5 9"/></svg>',
+    bell: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11V7.2a4 4 0 0 1 8 0V11l1 1.3H3z"/><path d="M6.6 13.5a1.5 1.5 0 0 0 2.8 0"/></svg>',
     gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>',
     pr: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8M12 11V7a2.5 2.5 0 0 0-2.5-2.5H7M9 2.5L7 4.5l2 2"/></svg>',
     branch:
@@ -3274,6 +3275,8 @@
       (data && data.prEnabled) !== false,
       (data && data.scmEnabled) === true,
       (data && data.traceEnabled) === true,
+      (data && data.notifyWaiting) || "",
+      (data && data.notifyPrMerged) || "",
       (data && data.linkedPaths) || [],
       // The Performance tab's state arrives after the tab asks for it, so it has
       // to be part of the signature or the section would sit on "Checking…".
@@ -3293,6 +3296,12 @@
       icon: "gear",
       label: "Preferences",
       section: preferencesSection,
+    },
+    {
+      id: "notifications",
+      icon: "bell",
+      label: "Notifications",
+      section: notificationsSection,
     },
     { id: "github", icon: "pr", label: "GitHub", section: githubSection },
     {
@@ -3396,6 +3405,135 @@
       "Stored as <code>agentWorktrees.agentStatusOrder</code> and " +
       "applies to every repository; the worktree cards are unaffected, since " +
       "there each agent is already on the card for the code it is working on.</p>" +
+      "</section>"
+    );
+  }
+
+  /**
+   * One notification, as a row shaped like the Performance rows: a switch that
+   * is the on/off the tab exists for, and under it the choice of when. Off
+   * writes "off"; on writes "unfocused", the default, and the dropdown then
+   * moves between that, "focused" and "always". All are the values the setting
+   * takes, so nothing here can write a mode the extension would not read back.
+   * What the values mean is said once, above the rows, rather than under each.
+   *
+   * The dropdown stays in the row while the switch is off, disabled, rather
+   * than being removed: the row keeps its height, so flipping the switch does
+   * not shift everything under it, and the value it will come back to is
+   * visible. Disabled shows the last "when" (or the default); it never shows
+   * "off", which is the switch's job.
+   */
+  function notifyRow(kind, mode, label, aria, detail) {
+    const on = mode !== "off";
+    const when = on ? mode : "unfocused";
+    const option = (value, text) =>
+      '<option value="' +
+      value +
+      '"' +
+      (when === value ? " selected" : "") +
+      ">" +
+      text +
+      "</option>";
+    const whenField =
+      '<label class="notify-when' +
+      (on ? "" : " off") +
+      '">' +
+      '<span class="notify-when-label">When</span>' +
+      '<select class="perf-select" data-notify-when="' +
+      kind +
+      '"' +
+      (on ? "" : " disabled") +
+      ' aria-label="When to show: ' +
+      esc(aria) +
+      '">' +
+      option("unfocused", "In the background") +
+      option("focused", "In view") +
+      option("always", "Always") +
+      "</select>" +
+      "</label>";
+    return (
+      '<li class="perf-row notify-row' +
+      (on ? " on" : "") +
+      '">' +
+      '<label class="perf-toggle">' +
+      '<span class="perf-name">' +
+      label +
+      "</span>" +
+      '<input type="checkbox" class="switch-input" data-notify-kind="' +
+      kind +
+      '"' +
+      (on ? " checked" : "") +
+      ' role="switch" aria-label="' +
+      esc(aria) +
+      '" />' +
+      '<span class="switch" aria-hidden="true"></span>' +
+      "</label>" +
+      '<span class="perf-detail dim">' +
+      detail +
+      "</span>" +
+      whenField +
+      "</li>"
+    );
+  }
+
+  /**
+   * Settings → Notifications: the two things the panel will interrupt you for,
+   * each with its own switch. They are separate settings because they are
+   * separate interruptions: someone who wants to hear about a blocked agent may
+   * still not want a toast for every PR that lands.
+   */
+  function notificationsSection(data) {
+    const waiting = (data && data.notifyWaiting) || "unfocused";
+    const merged = (data && data.notifyPrMerged) || "unfocused";
+    const prOff = !!data && data.prEnabled === false;
+    return (
+      '<section class="gh-section">' +
+      '<h3 class="gh-h">' +
+      icons.bell +
+      " Notifications</h3>" +
+      '<p class="gh-lead">The pulsing dot and the Activity Bar badge only reach ' +
+      "you while the panel is on screen. These are the notifications that " +
+      "reach you when VS Code is behind another window. Each has four " +
+      "settings:</p>" +
+      '<ul class="notify-modes">' +
+      "<li><b>Off.</b> No notification. The panel's own signals (the pulsing " +
+      "dot, the Activity Bar badge, the PR pill) are all you get, and none of " +
+      "them reaches you outside VS Code.</li>" +
+      "<li><b>In the background.</b> Shown only while VS Code is behind " +
+      "another window. While you are in VS Code the panel shows it instead. " +
+      "The default.</li>" +
+      "<li><b>In view.</b> Shown only while you are in VS Code, for when the " +
+      "panel is hidden behind another view. Nothing piles up while you are " +
+      "away.</li>" +
+      "<li><b>Always.</b> Shown every time, in VS Code or not.</li>" +
+      "</ul>" +
+      '<ul class="perf-list">' +
+      notifyRow(
+        "waiting",
+        waiting,
+        "An agent needs you",
+        "Notify when an agent needs you",
+        "When an agent starts waiting on a permission prompt or a question, " +
+          "with an <b>Open terminal</b> button. One per agent, raised once per " +
+          "time it starts waiting."
+      ) +
+      notifyRow(
+        "prMerged",
+        merged,
+        "A PR auto-merged",
+        "Notify when a PR auto-merges",
+        "When GitHub merges a pull request you enabled auto-merge on, with an " +
+          "<b>Open PR</b> button. Only for PRs the panel saw open with " +
+          "auto-merge on, so a PR you merge yourself is not announced." +
+          (prOff
+            ? ' <span class="notify-needs">Needs PR status, which is off under ' +
+              "GitHub.</span>"
+            : "")
+      ) +
+      "</ul>" +
+      '<p class="gh-help dim">Stored as <code>agentWorktrees.notifyWaiting</code> ' +
+      "and <code>agentWorktrees.notifyPrMerged</code>, and apply to every " +
+      "repository.</p>" +
       "</section>"
     );
   }
@@ -3857,10 +3995,37 @@
     );
   }
 
+  /**
+   * The settings page is rebuilt from a string on every payload that changes
+   * it, which includes the confirming push after each switch or dropdown the
+   * user touches. Rebuilding scrolls the body back to the top and drops focus
+   * from the control that was just used, so both are carried across: the
+   * body's scrollTop, and the control, found again by the same attribute that
+   * identifies it to the change handler. Same treatment the cards list gets.
+   */
+  const FOCUS_KEYS = ["id", "data-notify-kind", "data-notify-when", "data-perf", "data-tab"];
+  function settingsFocusSelector(el) {
+    if (!el || el === document.body || !root.contains(el)) return null;
+    for (const key of FOCUS_KEYS) {
+      const v = el.getAttribute(key);
+      if (v) return "[" + key + '="' + cssEscape(v) + '"]';
+    }
+    return null;
+  }
+
   function renderSettings() {
     if (!settingsOpen) return;
+    const prevBody = root.querySelector(".settings-body");
+    const y = prevBody ? prevBody.scrollTop : 0;
+    const refocus = settingsFocusSelector(document.activeElement);
     root.innerHTML = settingsContent(lastData);
     lastGhSig = ghSig(lastData);
+    const nextBody = root.querySelector(".settings-body");
+    if (nextBody && y) nextBody.scrollTop = y;
+    if (refocus) {
+      const el = root.querySelector(refocus);
+      if (el && !el.disabled) el.focus({ preventScroll: true });
+    }
     const input = root.querySelector("#gh-token");
     if (input) {
       input.onkeydown = (e) => {
@@ -5084,6 +5249,18 @@
       send("toggleScm", { value: !!e.target.checked });
     } else if (e.target && e.target.id === "debug-trace") {
       send("toggleTrace", { value: !!e.target.checked });
+    } else if (e.target && e.target.getAttribute("data-notify-kind")) {
+      // The switch is on/off; on lands on the default ("unfocused"), and the
+      // dropdown underneath is where "always" is chosen from.
+      send("setNotify", {
+        kind: e.target.getAttribute("data-notify-kind"),
+        mode: e.target.checked ? "unfocused" : "off",
+      });
+    } else if (e.target && e.target.getAttribute("data-notify-when")) {
+      send("setNotify", {
+        kind: e.target.getAttribute("data-notify-when"),
+        mode: e.target.value,
+      });
     } else if (e.target && e.target.id === "poll-seconds") {
       send("setPollSeconds", { seconds: Number(e.target.value) });
     } else if (e.target && e.target.getAttribute("data-perf")) {

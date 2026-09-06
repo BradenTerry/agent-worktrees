@@ -24,6 +24,12 @@ import {
   waitingAgents,
   NOTIFY_WAITING_SETTING,
 } from "./waitingNotices";
+import type { NotifyMode } from "./waitingNotices";
+import {
+  NOTIFY_PR_MERGED_SETTING,
+  mergedText,
+  newlyMerged,
+} from "./mergeNotices";
 import {
   countWaitingAgents,
   pathKey,
@@ -214,6 +220,8 @@ const TRACE_SETTING = "agentWorktrees.trace";
  *  what showInformationMessage resolves to, so it has to be the same string
  *  both times - hence a constant rather than two literals that can drift. */
 const OPEN_TERMINAL = "Open terminal";
+/** The one action on an auto-merged-PR notification; same reasoning. */
+const OPEN_PR = "Open PR";
 
 /** Config key for the order the agents view groups its rows in, surfaced in
  *  Settings → Preferences. A real setting rather than webview state: it is a
@@ -264,6 +272,7 @@ interface ActionMessage {
     | "togglePr"
     | "toggleScm"
     | "toggleTrace"
+    | "setNotify"
     | "loadGitPerf"
     | "setGitPerf"
     | "setPollSeconds"
@@ -312,6 +321,10 @@ interface ActionMessage {
   perfKey?: PerfKey;
   /** New poll rate in seconds, for setPollSeconds. */
   seconds?: number;
+  /** Which notification setNotify is about: "waiting" or "prMerged". */
+  kind?: string;
+  /** Its new mode: off, unfocused or always. Normalized on receipt. */
+  mode?: string;
   /** Which agent status to move, for moveAgentStatus. */
   status?: string;
   /** Which way to move it: -1 up, +1 down. Also moveGroup. */
@@ -491,6 +504,10 @@ export class WorktreeWebviewProvider
    *  extension host) onto agents that were already blocked does not fire a
    *  toast per agent for news that is not new. */
   private notifySeeded = false;
+  /** Worktree path -> the PR number last seen open there with auto-merge on.
+   *  A PR only announces its merge if it was armed here first, which is what
+   *  keeps a window opened onto an already-merged PR silent. */
+  private readonly armedMerges = new Map<string, number>();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     initGithub(context);
@@ -888,6 +905,7 @@ export class WorktreeWebviewProvider
       .get<boolean>(TRACE_SETTING, false);
     data.statusPollSeconds = this.pollMs() / 1_000;
     data.agentStatusOrder = this.agentStatusOrder();
+    this.attachNotifyModes(data);
     // Keyed by the primary worktree, not by data.repoRoot: in a window with a
     // linked worktree open the repo root *is* that worktree, so reading by it
     // would miss the list every writer stored under the primary's path.
@@ -1069,6 +1087,7 @@ export class WorktreeWebviewProvider
     // once VS Code is behind another window. Before the unchanged-payload
     // return below for the same reason as the badge.
     this.notifyWaiting(data);
+    this.notifyMerged(data);
     // lastActivity is a per-hook-event heartbeat the panel never renders;
     // including it in the signature would defeat this guard on every tool call
     // and rebuild the webview DOM for a byte-identical render.
@@ -1124,6 +1143,34 @@ export class WorktreeWebviewProvider
         vscode.window.showInformationMessage(noticeText(agent), OPEN_TERMINAL)
       ).then((choice) => {
         if (choice === OPEN_TERMINAL) void this.focusAgent(agent.sessionId);
+      });
+    }
+  }
+
+  /**
+   * Raise a notification for each PR that GitHub has just auto-merged, with a
+   * button that opens it. Same shape as notifyWaiting: the transition is decided
+   * by `newlyMerged` against a map this class only stores, every toast in a
+   * batch is created in one tick, and the map is reconciled before the mode is
+   * read so arming happens even while the setting is off.
+   *
+   * PR data reaches postData two ways, the gather's attachPrStatus and the
+   * poll's postPrState, and both land here, so a merge is seen whichever path
+   * noticed it first.
+   */
+  private notifyMerged(data: WorktreeData): void {
+    const fresh = newlyMerged(data.worktrees, this.armedMerges);
+    if (!fresh.length) return;
+    const mode = notifyMode(
+      vscode.workspace.getConfiguration().get(NOTIFY_PR_MERGED_SETTING)
+    );
+    if (!shouldNotify(mode, vscode.window.state.focused)) return;
+    for (const pr of fresh) {
+      diag(`notifying: #${pr.number} auto-merged in ${pr.where}`);
+      void Promise.resolve(
+        vscode.window.showInformationMessage(mergedText(pr), OPEN_PR)
+      ).then((choice) => {
+        if (choice === OPEN_PR) void vscode.env.openExternal(vscode.Uri.parse(pr.url));
       });
     }
   }
@@ -1588,6 +1635,8 @@ export class WorktreeWebviewProvider
         return this.toggleScm(msg.value);
       case "toggleTrace":
         return this.toggleTrace(msg.value);
+      case "setNotify":
+        return this.setNotify(msg.kind, msg.mode);
       case "loadGitPerf":
         return this.loadGitPerf();
       case "setGitPerf":
@@ -1888,8 +1937,40 @@ export class WorktreeWebviewProvider
     if (this.gitPerf) data.gitPerf = this.withSlowFlag(this.gitPerf);
     data.statusPollSeconds = this.pollMs() / 1_000;
     data.agentStatusOrder = this.agentStatusOrder();
+    this.attachNotifyModes(data);
     this.lastPosted = ""; // the user clicked; always show the result
     this.postData(data, this.updateSeq);
+  }
+
+  // --- Notifications (Settings → Notifications) -------------------------------
+
+  /** The two notification modes, normalized exactly as the notifiers read them,
+   *  so the tab shows the value that is in force and not the raw string. */
+  private attachNotifyModes(data: WorktreeData): void {
+    const cfg = vscode.workspace.getConfiguration();
+    data.notifyWaiting = notifyMode(cfg.get(NOTIFY_WAITING_SETTING));
+    data.notifyPrMerged = notifyMode(cfg.get(NOTIFY_PR_MERGED_SETTING));
+  }
+
+  /**
+   * Write one notification mode from the Settings → Notifications tab. The
+   * value is normalized before the write, so a malformed message from the
+   * webview cannot put an unrecognized string into settings.json. Reposts the
+   * cached payload rather than refreshing: nothing about the worktrees moved.
+   */
+  private async setNotify(kind: unknown, mode: unknown): Promise<void> {
+    const key =
+      kind === "waiting"
+        ? NOTIFY_WAITING_SETTING
+        : kind === "prMerged"
+          ? NOTIFY_PR_MERGED_SETTING
+          : undefined;
+    if (!key) return;
+    const value: NotifyMode = notifyMode(mode);
+    await vscode.workspace
+      .getConfiguration()
+      .update(key, value, vscode.ConfigurationTarget.Global);
+    this.repostSettings();
   }
 
   // --- Source Control --------------------------------------------------------
