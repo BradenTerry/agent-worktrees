@@ -498,6 +498,39 @@ test("completePrInfo: unchanged + settled + no aux makes zero requests", async (
   );
 });
 
+test("completePrInfo: an unchanged PR takes auto-merge from the list row", async () => {
+  // Flipping auto-merge does not bump updated_at, so the reuse path must read
+  // it from the row every poll refetches rather than carry the prior value.
+  resetGithubCache();
+  await withFetch(
+    () => {
+      throw new Error("no request expected");
+    },
+    async (calls) => {
+      const off = await completePrInfo(
+        "tok",
+        REPO2,
+        rawPr({ auto_merge: null }),
+        priorInfo({ autoMerge: true }),
+        false
+      );
+      assert.strictEqual(calls.length, 0);
+      assert.strictEqual(off.autoMerge, false);
+      const on = await completePrInfo(
+        "tok",
+        REPO2,
+        rawPr({ auto_merge: { enabled_by: { login: "alice" } } }),
+        priorInfo({ autoMerge: false }),
+        false
+      );
+      assert.strictEqual(on.autoMerge, true);
+      // A row without the field keeps what was known.
+      const kept = await completePrInfo("tok", REPO2, rawPr(), priorInfo({ autoMerge: true }), false);
+      assert.strictEqual(kept.autoMerge, true);
+    }
+  );
+});
+
 test("completePrInfo: unchanged with pending checks refetches only checks + status", async () => {
   resetGithubCache();
   await withFetch(
