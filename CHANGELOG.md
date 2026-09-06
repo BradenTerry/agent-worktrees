@@ -2,6 +2,34 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.5.30
+
+The regular release of the 4.5 line, which shipped as pre-releases 4.5.0 to
+4.5.3 (their entries follow below). New since 4.5.3:
+
+### Changes
+
+- **Notifications tab in Settings.** One switch per notification, with a
+  choice of when it shows: off, only while VS Code is in the background (the
+  default), only while you are in VS Code (**In view**, new, for when the panel
+  is hidden behind another view), or always. Settings are
+  `agentWorktrees.notifyWaiting` and `agentWorktrees.notifyPrMerged`.
+- **A notification when a PR auto-merges**, with an **Open PR** button. Raised
+  only for a PR the panel saw open with auto-merge on, so one you merge yourself
+  or one already merged when the window opened stays quiet.
+- **Switch branch opens where you clicked.** The branch list is now a menu over
+  the card menu it came from, with a filter and a create-branch entry, instead
+  of a picker at the top of the window.
+- **Restart a debug session from its card row.** The same configuration and
+  pre-launch task run again in the worktree, with no target pick or prompts
+  repeated.
+- **The General group is always drawn**, so the section a new worktree lands in
+  is there before it arrives and the cards no longer jump under a header.
+- **Settings keeps its place.** Changing a setting no longer scrolls the page
+  back to the top, and a switch near the bottom of a scrolled tab no longer
+  shifts the whole view.
+- **Minor bug fixes and improvements.**
+
 ## 4.5.3
 
 ### Changes

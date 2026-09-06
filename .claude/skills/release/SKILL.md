@@ -90,16 +90,22 @@ half-finished release.
 
 2. **Compute the next version** from that latest version. Plain `X.Y.Z`, higher
    than the last release, and nothing else is reserved:
-   - patch: bump Z (`v4.4.31` -> `v4.4.32`) - bug fixes, packaging, docs, screenshots
-   - minor: bump Y, reset Z (`v4.4.32` -> `v4.5.0`) - new features
-   - major: bump X (`v4.5.0` -> `v5.0.0`) - breaking changes
+   - patch: bump Z (`v4.5.30` -> `v4.5.31`) - bug fixes, packaging, docs, screenshots
+   - minor: bump Y, reset Z to **10** (`v4.5.31` -> `v4.6.10`) - new features
+   - major: bump X, reset Y and Z (`v4.6.10` -> `v5.0.10`) - breaking changes
+
+   **Z always has at least two digits.** A new minor or major starts at
+   `X.Y.10`, never `X.Y.0`, so every released version reads the same shape
+   (`v4.5.30`, `v4.6.10`) and a single-digit patch is a typo. `release.yml`
+   rejects a tag whose patch is under 10. The older single-digit tags
+   (`v4.5.0-pre` to `v4.5.3-pre`) predate the rule and stay spent.
 
    The same numbers serve both channels; the tag's `-pre` suffix is what picks
    one. Since a version is only publishable once, a preview spends it: after
    `v4.5.0-pre`, the stable release of that work is `v4.5.1`.
 
-   **Z is a number, not a digit.** It keeps counting past 9 - `v4.4.9` ->
-   `v4.4.10` -> `v4.4.31` -> `v4.4.1001` - and reaching two or four figures is
+   **Z is a number, not a digit.** It keeps counting - `v4.5.10` ->
+   `v4.5.31` -> `v4.5.1001` - and reaching three or four figures is
    never a reason to bump the minor. The minor means "new features"; a long run
    of bug fixes is still a run of bug fixes, and rolling it over would burn a
    feature version on nothing. `release.yml` takes any `X.Y.Z` of plain numbers,
