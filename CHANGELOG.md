@@ -2,7 +2,50 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
-## 4.5.3
+## 4.5.30
+
+The first regular release of the 4.5 line. Everything since 4.4.31, including
+what shipped in the 4.5.1 to 4.5.3 pre-releases.
+
+### Changes
+
+- **Notifications when you are not looking at VS Code.** One when an agent
+  starts waiting on you, with an **Open terminal** button, and one when GitHub
+  auto-merges a pull request you enabled auto-merge on, with an **Open PR**
+  button. Each is raised once per event, one per agent or PR, and never for
+  anything already in that state when you opened the window. A **Notifications**
+  tab in Settings has a switch for each and a choice of when it shows: off,
+  only while VS Code is in the background (the default), only while you are in
+  VS Code (**In view**), or always. Stored as `agentWorktrees.notifyWaiting`
+  and `agentWorktrees.notifyPrMerged`.
+- **Worktree groups.** User-named, collapsible sections over the cards list, for
+  the worktrees you keep checked out until a PR merges. File a worktree from its
+  menu, reorder sections by dragging a header, and rename one in the header
+  itself. A folded section still reports the agents waiting inside it, and the
+  **General** section is always drawn so the cards do not jump under a header
+  when the first worktree arrives.
+- **Refresh no longer waits on the network.** The worktrees repaint as soon as
+  local git status is read; the `git fetch` and the GitHub PR/CI status land
+  afterwards, behind a progress line. **A failed refresh says so** instead of
+  leaving stale worktrees on screen, and no longer takes the rest of the panel
+  down with it.
+- **Menus open where you clicked.** Run and Debug and Switch branch are menus
+  over the card menu you opened them from, instead of pickers at the top of the
+  window. The branch list has a filter and a create-branch entry.
+- **Restart a debug session from its card row.** The same configuration and
+  pre-launch task run again in the worktree, with no target pick or prompts
+  repeated.
+- **The panel works at its narrowest.** Cards, agent rows and the settings view
+  stay usable down to 240px, and every control in the panel is reachable from
+  the keyboard. Settings keeps its place when you change something, rather than
+  scrolling back to the top.
+- **An agent row keeps its work summary** instead of falling back to "Claude 1"
+  as its session runs on.
+- **The Auto-merge pill follows GitHub.** Turning auto-merge on or off shows
+  on the card at the next poll instead of up to five minutes later.
+- **Minor bug fixes and improvements.**
+
+## 4.5.3 (pre-release)
 
 ### Changes
 
@@ -10,7 +53,7 @@ All notable changes to the Agent Worktrees extension are documented here.
   "Claude 1" as its session ran on, and a session titled once (by the app, or by
   a rename) could show the ordinal from the start.
 
-## 4.5.2
+## 4.5.2 (pre-release)
 
 ### Changes
 
@@ -20,7 +63,7 @@ All notable changes to the Agent Worktrees extension are documented here.
   they answer. Most noticeable on a repo with several worktrees, where the
   GitHub half was what made the click feel like a freeze.
 
-## 4.5.1
+## 4.5.1 (pre-release)
 
 ### Changes
 

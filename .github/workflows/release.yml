@@ -14,9 +14,11 @@ name: Release
 # never reaches the manifest. The manual workflow_dispatch run takes the channel
 # as an input instead.
 #
-# So the version is free: any X.Y.Z that is higher than the last one. Bump the
-# patch as far as you like (4.4.31, 4.4.32, ... 4.4.1001), bump the minor by one,
-# whatever suits the change. This replaced a scheme where the minor's PARITY
+# So the version is free: any X.Y.Z that is higher than the last one, with one
+# house rule - the patch is always at least two digits (Z >= 10), so a fresh
+# minor starts at X.Y.10 and never X.Y.0. Bump the patch as far as you like
+# (4.4.31, 4.4.32, ... 4.4.1001), bump the minor by one, whatever suits the
+# change. This replaced a scheme where the minor's PARITY
 # picked the channel (odd = pre-release, even = regular), which is what the VS
 # Code docs recommend but nothing enforces: vsce validates only that the version
 # is valid semver with no prerelease suffix (see validateVersion /
@@ -135,6 +137,14 @@ jobs:
           # RELEASED version. Caught here, where the message can say what is wrong.
           if ! printf '%s' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
             echo "::error::'$version' is not a plain X.Y.Z version. Each part must be a number with no leading zero (4.4.10, not 4.4.010). The only suffix a tag may carry is '-pre', which selects the pre-release channel (v4.5.0-pre publishes 4.5.0)."
+            exit 1
+          fi
+          # House rule: the patch is always at least two digits. A new minor
+          # starts at X.Y.10, not X.Y.0, so every released version reads the
+          # same shape (v4.5.30, v4.6.10) and a single-digit patch is caught as
+          # a typo here rather than published.
+          if [ "${version##*.}" -lt 10 ]; then
+            echo "::error::'$version' has a single-digit patch. The patch is always at least two digits: a new minor starts at X.Y.10 (v4.6.10, not v4.6.0), and a patch release bumps from there (v4.5.31)."
             exit 1
           fi
           if [ "$channel" = "pre-release" ]; then

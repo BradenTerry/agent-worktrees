@@ -145,11 +145,18 @@ patch, a single line under a **Changes** heading is a perfectly good entry, and
 is an acceptable one when nothing in it needs the user to do or know anything
 different. Don't pad a patch out to match the shape of a feature release.
 
+A pre-release's section is headed `## X.Y.Z (pre-release)`. The regular release
+that follows a run of them rolls up **everything since the last regular
+release**, pre-release items included, so the regular channel's reader gets one
+complete section.
+
 The release **channel is the tag's suffix**, not the version: `vX.Y.Z` publishes
 to the regular channel and `vX.Y.Z-pre` publishes the same plain `X.Y.Z` to the
 pre-release one. The version itself is any `X.Y.Z` higher than the last release
-(the patch runs on into `v4.4.1001` if that suits) - nothing is reserved, and no
-minor is skipped. Both channels draw on one number line, so **a version is spent
+(the patch runs on into `v4.5.1001` if that suits), with one shape rule: **the
+patch always has at least two digits**, so a new minor starts at `X.Y.10` and
+`release.yml` rejects a patch under 10. Nothing else is reserved, and no minor
+is skipped. Both channels draw on one number line, so **a version is spent
 by whichever channel publishes it first**: preview `4.5.0` as `v4.5.0-pre` and the
 stable release of that work is `4.5.1`. See `.claude/skills/release/SKILL.md`.
 
