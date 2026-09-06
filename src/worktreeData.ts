@@ -16,6 +16,7 @@ import { DebugSessionVM } from "./debugRun";
 import type { DebugTarget } from "./debugTargets";
 import { GithubConnection, PrInfo, BranchPrInfo } from "./github";
 import type { WorktreeGroupVM } from "./groups";
+import type { NotifyMode } from "./waitingNotices";
 import { diag } from "./diagnostics";
 
 /**
@@ -185,6 +186,11 @@ export interface WorktreeData {
   scmEnabled?: boolean;
   /** Whether debug tracing (the diagnostics output channel) is enabled. */
   traceEnabled?: boolean;
+  /** When a blocked agent raises a notification (Settings -> Notifications).
+   *  Normalized, so the tab never shows a value it cannot write back. */
+  notifyWaiting?: NotifyMode;
+  /** When an auto-merged PR raises a notification (Settings -> Notifications). */
+  notifyPrMerged?: NotifyMode;
   /** Configured `git status` poll rate in seconds, for the worktrees the Git
    *  extension has no repository open for; shown in Settings → Performance. */
   statusPollSeconds?: number;

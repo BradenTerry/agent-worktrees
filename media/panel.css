@@ -1921,7 +1921,15 @@ button.busy {
   line-height: 1.5;
   color: var(--vscode-descriptionForeground);
 }
+/* position: relative on the labels (here and .perf-toggle): the visually hidden
+   .switch-input is position: absolute, and without a positioned ancestor it is
+   placed against the page rather than inside the scrolling settings body. A
+   switch near the bottom of a scrolled tab then sits below the viewport, and
+   clicking its label focuses it, which scrolls the whole page (rail and all)
+   to bring it into view. body's overflow: hidden stops the scrollbar, not a
+   scroll driven by focus. */
 .gh-toggle {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2128,6 +2136,7 @@ button.busy {
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
 }
 .perf-toggle {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2167,6 +2176,61 @@ button.busy {
 .perf-select:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
+}
+
+/* Settings -> Notifications: the Performance rows' shape, plus the "when" line
+   that only an enabled row has. The dropdown is the same one the poll rate
+   uses: a choice among values, not a second thing being turned on. */
+.notify-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 7px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+}
+/* With the switch off the field stays put but reads as inert, like a locked
+   Performance row; the select itself is disabled so it cannot be changed. */
+.notify-when.off {
+  opacity: 0.6;
+  cursor: default;
+}
+.notify-when.off .perf-select {
+  cursor: default;
+}
+.notify-when-label {
+  flex: 0 0 auto;
+}
+/* Grows to the row, and drops onto its own line once the row is too narrow to
+   show the longer option beside the label (the 240px sidebar). */
+.notify-when .perf-select {
+  flex: 1 1 150px;
+  min-width: 0;
+  max-width: 100%;
+}
+/* What the three values mean, said once above the rows. Sized like the lead
+   it follows, since it is the rest of that explanation. */
+.notify-modes {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground);
+}
+.notify-modes li + li {
+  margin-top: 4px;
+}
+.notify-modes b {
+  color: var(--vscode-foreground);
+  font-weight: 600;
+}
+/* The PR row's "needs PR status" aside: foreground rather than the description
+   gray, since it is the reason the switch is not doing anything. */
+.notify-needs {
+  color: var(--vscode-foreground);
 }
 
 /* Settings → Preferences: the agents view's status order, one row per status in

@@ -120,13 +120,26 @@
         "agentWorktrees.notifyWaiting": {
           "type": "string",
           "default": "unfocused",
-          "enum": ["off", "unfocused", "always"],
+          "enum": ["off", "unfocused", "focused", "always"],
           "enumDescriptions": [
             "Never. The pulsing dot, the collapsed-group badge and the Activity Bar count are the only signals.",
             "Only while the VS Code window is not focused, which is when nothing else reaches you.",
+            "Only while the VS Code window is focused, so nothing piles up while you are away.",
             "Every time an agent starts waiting, focused or not."
           ],
-          "markdownDescription": "Show a notification with an **Open terminal** button when an agent starts waiting for you. One notification per agent, so two agents prompting at the same time raise two, each opening its own terminal. Raised once per time an agent starts waiting, never repeated while it stays there, and never for agents that were already waiting when the window opened."
+          "markdownDescription": "Show a notification with an **Open terminal** button when an agent starts waiting for you. One notification per agent, so two agents prompting at the same time raise two, each opening its own terminal. Raised once per time an agent starts waiting, never repeated while it stays there, and never for agents that were already waiting when the window opened. Also in Settings → Notifications in the panel."
+        },
+        "agentWorktrees.notifyPrMerged": {
+          "type": "string",
+          "default": "unfocused",
+          "enum": ["off", "unfocused", "focused", "always"],
+          "enumDescriptions": [
+            "Never. The card's PR pill is the only signal.",
+            "Only while the VS Code window is not focused, which is when nothing else reaches you.",
+            "Only while the VS Code window is focused, so nothing piles up while you are away.",
+            "Every time an auto-merged PR lands, focused or not."
+          ],
+          "markdownDescription": "Show a notification with an **Open PR** button when a pull request you enabled **auto-merge** on is merged by GitHub. Only for PRs the panel saw open with auto-merge on, so a PR that was already merged when the window opened, or one you merged yourself, is never announced. Needs the GitHub PR status integration. Also in Settings → Notifications in the panel."
         },
         "agentWorktrees.statusPollSeconds": {
           "type": "number",

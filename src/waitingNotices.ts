@@ -22,13 +22,14 @@ export interface WaitingAgent {
   where: string;
 }
 
-/** When to interrupt with a toast. */
-export type NotifyWaitingMode = "off" | "unfocused" | "always";
+/** When to interrupt with a toast. Shared by every notification the panel
+ *  raises (a blocked agent, an auto-merged PR), each under its own setting. */
+export type NotifyMode = "off" | "unfocused" | "focused" | "always";
 
-/** Config key for the mode. */
+/** Config key for the waiting-agent mode. */
 export const NOTIFY_WAITING_SETTING = "agentWorktrees.notifyWaiting";
 
-const MODES: readonly NotifyWaitingMode[] = ["off", "unfocused", "always"];
+const MODES: readonly NotifyMode[] = ["off", "unfocused", "focused", "always"];
 
 /**
  * The setting, made safe to act on. It is hand-editable like any other, and a
@@ -36,16 +37,15 @@ const MODES: readonly NotifyWaitingMode[] = ["off", "unfocused", "always"];
  * interrupting the user - so anything unknown reads as the default rather than
  * as "always".
  */
-export function notifyMode(raw: unknown): NotifyWaitingMode {
-  return MODES.includes(raw as NotifyWaitingMode)
-    ? (raw as NotifyWaitingMode)
-    : "unfocused";
+export function notifyMode(raw: unknown): NotifyMode {
+  return MODES.includes(raw as NotifyMode) ? (raw as NotifyMode) : "unfocused";
 }
 
 /** Whether a toast should be raised at all, given the mode and window focus. */
-export function shouldNotify(mode: NotifyWaitingMode, focused: boolean): boolean {
+export function shouldNotify(mode: NotifyMode, focused: boolean): boolean {
   if (mode === "off") return false;
   if (mode === "always") return true;
+  if (mode === "focused") return focused;
   return !focused;
 }
 

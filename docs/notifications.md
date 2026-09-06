@@ -1,7 +1,15 @@
-# Notifications for a blocked agent
+# Notifications
 
-A VS Code notification, with a button that reveals that agent's terminal, raised
-when an agent starts **waiting**.
+Two VS Code notifications, each under its own switch in **Settings →
+Notifications**:
+
+- a blocked agent: raised when an agent starts **waiting**, with a button that
+  reveals its terminal;
+- an auto-merged PR: raised when GitHub merges a PR the panel saw open with
+  auto-merge on, with a button that opens it.
+
+Most of this document is about the first, which set the rules the second
+follows; the PR one is described at the end.
 
 ## Why the existing signals were not enough
 
@@ -81,12 +89,20 @@ Config: `agentWorktrees.notifyWaiting`.
 | ----------- | -------------------------------------------------------------- |
 | `off`       | Never. The dot, the group badge and the Activity Bar count only. |
 | `unfocused` | **Default.** Only while the VS Code window is not focused.       |
+| `focused`   | Only while the VS Code window is focused.                        |
 | `always`    | Every time an agent starts waiting, focused or not.              |
 
 `unfocused` is the default because it is the case nothing else covers. With the
 window focused the user is already in VS Code and the pulse, the badge and the
 repo-wide summary are all doing their job; interrupting them there is a second
 copy of news they can already see. With it unfocused, none of those exist.
+
+`focused` is the inverse, for two cases the default misses: the panel is not
+on screen while the user is in VS Code (another sidebar view is active, or the
+sidebar is closed), so nothing signals them until they open it; and a user who
+wants in-editor alerts but not a stack of notifications waiting when they come
+back from a browser. VS Code notifications are in-window, so anything raised
+while unfocused is only seen on return anyway.
 
 The setting is hand-editable like any other, so it is **normalized rather than
 validated** on every read (`notifyMode`), and an unrecognized value falls back to
@@ -140,10 +156,66 @@ right on a refresh that re-posts nothing.
 Consequence, shared with the badge: nothing fires until the panel's view has been
 resolved at least once, because that is the extension's only refresh path.
 
+## Auto-merged pull requests
+
+A PR with auto-merge enabled lands without the user doing anything, which is the
+one merge they were not watching for: they turned auto-merge on so they could go
+and do something else. The card's PR pill flips to **merged** when the poll
+notices, but the pill terminates inside the panel like every other signal there.
+
+Config: `agentWorktrees.notifyPrMerged`, the same four values with the same
+default and the same normalizer. The button is **Open PR** (`env.openExternal` on
+the PR's URL).
+
+The rule is a **transition this extension watched happen**, held in
+`armedMerges`, a map of worktree path to PR number:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unarmed
+  Unarmed --> Armed: PR seen open or draft<br/>with auto-merge on
+  Armed --> Armed: still open on the next poll
+  Armed --> Unarmed: seen merged, same number<br/>→ raise one notification
+  Armed --> Unarmed: auto-merge turned off,<br/>closed unmerged, PR gone,<br/>or a different PR number<br/>→ silence
+```
+
+Arming requires *open with auto-merge on*, so a PR the user merges by hand,
+one that was already merged when the window opened, and one a worktree
+switched onto after the fact all stay silent without needing a seeding step:
+nothing can fire on the first payload because nothing was armed before it.
+Keying the arm by PR number as well as worktree is what keeps a card that
+changes branches onto a merged PR from announcing a merge nobody was waiting on.
+
+PR data reaches `postData` two ways, the gather (`attachPrStatus`) and the poll
+(`postPrState`), and the check hangs off `postData` next to the waiting-agent
+one, so the merge is seen whichever path noticed it first. Like that one, the
+map is reconciled before the mode is read, so arming happens while the setting
+is `off` and turning it on announces the next merge rather than nothing.
+
+## The settings tab
+
+**Settings → Notifications** renders the two as rows, each a switch with a
+dropdown for *when* under it. The switch writes `off` or `unfocused`; the
+dropdown moves between `unfocused`, `focused` and `always`. With the switch off
+the dropdown stays in place, disabled, so the row keeps its height and flipping
+the switch does not shift what is under it. What the four values mean is said once,
+in a list above the rows, rather than repeated under each. They are separate settings because they
+are separate interruptions: someone who wants to hear about a blocked agent may
+still not want a toast for every PR that lands. The webview sends `setNotify`
+with the kind and mode; the host normalizes the mode before writing it, so a
+malformed message cannot put an unrecognized string into `settings.json`, and
+reposts the cached payload rather than refreshing, since nothing about the
+worktrees moved. The PR row says so when PR status is off under GitHub, since
+the switch does nothing without it.
+
 ## Testing
 
-The decisions are all in `src/waitingNotices.ts`, which imports no `vscode` API
-and holds no state of its own - the set is passed in. `test/waitingNotices.test.js`
-covers the poll not repeating, two agents batching together, re-announcing after
-an agent unblocks, seeding staying silent, the mode normalizer, the focus gate,
-and the notification text.
+The decisions are all in `src/waitingNotices.ts` and `src/mergeNotices.ts`,
+which import no `vscode` API and hold no state of their own - the set and the
+map are passed in. `test/waitingNotices.test.js` covers the poll not repeating,
+two agents batching together, re-announcing after an agent unblocks, seeding
+staying silent, the mode normalizer, the focus gate, and the notification text.
+`test/mergeNotices.test.js` covers arming and firing once, the already-merged
+and hand-merged cases staying silent, auto-merge being turned off, closing
+unmerged, a branch switch onto another PR, two PRs landing on one poll, and the
+text.

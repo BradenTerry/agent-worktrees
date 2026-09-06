@@ -110,8 +110,17 @@ per agent**, side by side, each with its own button. It is raised once per time
 an agent starts waiting, never repeated while it sits there, and never for
 agents that were already waiting when you opened the window.
 
-Set `agentWorktrees.notifyWaiting` to change when they appear: `unfocused` (the
-default, only while VS Code is in the background), `always`, or `off`.
+You also get a notification when GitHub **auto-merges** one of your pull
+requests, with an **Open PR** button. It is only raised for a PR the panel saw
+open with auto-merge on, so a PR you merge yourself, or one that was already
+merged when you opened the window, stays quiet.
+
+Each one has its own switch under **Settings → Notifications**, with a choice
+of showing it only while VS Code is in the background (the default), only while
+you are in VS Code (for when the panel is hidden behind another view), or
+always.
+The same values live in `agentWorktrees.notifyWaiting` and
+`agentWorktrees.notifyPrMerged`.
 
 <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/skills.png" alt="The skills modal listing the Claude skills one agent has invoked" width="380">
 
