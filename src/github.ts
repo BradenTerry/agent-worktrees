@@ -463,6 +463,17 @@ export async function completePrInfo(
     !unchanged || refreshAux || (prior as PrInfo).checks === "pending";
   const needDetail = !unchanged || refreshAux;
   const needReviews = !unchanged;
+  // Auto-merge comes from the list row, which every poll refetches, not from
+  // the detail call: enabling or disabling auto-merge does not bump the PR's
+  // updated_at, so an unchanged PR would otherwise keep the stale value for up
+  // to the aux-refresh interval (five minutes) after the user flipped it. The
+  // detail is the fallback only for a row that did not carry the field.
+  const autoMerge =
+    raw.auto_merge !== undefined
+      ? !!raw.auto_merge
+      : needDetail
+        ? undefined
+        : (prior as PrInfo).autoMerge;
 
   if (unchanged && !needChecks && !needDetail) {
     // Nothing to refetch; the list already carries the freshest cheap fields.
@@ -471,6 +482,7 @@ export async function completePrInfo(
       title: raw.title,
       url: raw.html_url,
       state: prState(raw),
+      autoMerge: autoMerge ?? (prior as PrInfo).autoMerge,
     };
   }
 
@@ -538,9 +550,7 @@ export async function completePrInfo(
     mergeState: needDetail
       ? mapMergeState(detail?.mergeable_state)
       : (prior as PrInfo).mergeState,
-    autoMerge: needDetail
-      ? !!detail?.auto_merge
-      : (prior as PrInfo).autoMerge,
+    autoMerge: autoMerge ?? !!detail?.auto_merge,
     updatedAt: raw.updated_at,
     headSha: sha,
   };
