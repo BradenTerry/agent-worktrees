@@ -316,7 +316,10 @@ export function readTitle(file: string): string {
 export class TranscriptReader {
   /** Only sessions whose transcript has been found; see transcript(). */
   private readonly located = new Map<string, string>();
-  private readonly cache = new Map<string, { mtimeMs: number; tail: TranscriptTail }>();
+  private readonly cache = new Map<
+    string,
+    { mtimeMs: number; size: number; tail: TranscriptTail }
+  >();
   /** Skills this session has invoked, seeded from the tail and completed by one
    *  background scan (see fillFromScan), then topped up from every tail read. */
   private readonly skills = new Map<string, string[]>();
@@ -361,13 +364,25 @@ export class TranscriptReader {
     return found;
   }
 
-  /** The tail, re-read only when the transcript has been written since. */
+  /**
+   * The tail, re-read only when the transcript has been written since.
+   *
+   * "Written since" is judged by mtime AND size. The mtime alone is not enough:
+   * filesystem timestamps are coarse (NTFS in particular reports two appends a
+   * few milliseconds apart with the same stamp), and Claude writes a burst of
+   * records per turn, so a poll that read the first record of a burst would
+   * otherwise serve that read for as long as the burst shared its stamp - the
+   * title written by the second record would not be seen until the next turn.
+   * A transcript is append-only, so its size moves on every write even when
+   * the stamp does not.
+   */
   private async tailFor(sessionId: string): Promise<TranscriptTail> {
     const file = await this.transcript(sessionId);
     if (!file) return { title: "", finished: [], skills: [] };
     let mtimeMs: number;
+    let size: number;
     try {
-      mtimeMs = (await fs.promises.stat(file)).mtimeMs;
+      ({ mtimeMs, size } = await fs.promises.stat(file));
     } catch {
       // Gone (a deleted session): forget it, so a new transcript for the same
       // id would be found again rather than serving a stale read forever.
@@ -377,9 +392,9 @@ export class TranscriptReader {
       return { title: "", finished: [], skills: [] };
     }
     const hit = this.cache.get(sessionId);
-    if (hit && hit.mtimeMs === mtimeMs) return hit.tail;
+    if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.tail;
     const tail = readTail(file);
-    this.cache.set(sessionId, { mtimeMs, tail });
+    this.cache.set(sessionId, { mtimeMs, size, tail });
     const seen = this.finished.get(sessionId) ?? new Set<string>();
     for (const id of tail.finished) seen.add(id);
     this.finished.set(sessionId, seen);
