@@ -134,11 +134,11 @@ repository with only its primary worktree there is nothing a card menu could mov
 menu cannot carry, and that repository is exactly the one showing an empty
 General.
 
-**The primary worktree leads, under a labelled rule.** `cardsBody` lifts it out
-before partitioning and renders it first, then a `Worktrees` divider, then the
-sections. The divider is labelled rather than a bare hairline: a line on its own
-says "these are apart" without saying why, and what is below it is every other
-worktree in the repository, however the user has since divided them up.
+**The primary worktree leads.** `cardsBody` lifts it out before partitioning and
+renders it first, then the sections. There is no divider between them any more:
+the Worktrees tab already names what the list is, and General's header - always
+drawn, so the cards never jump under one the moment a first group is made -
+separates the primary from the rest on its own.
 
 A section header is deliberately quieter than a card: a fold, a name, a count and
 a caret, with no border, no fill and no card gutter. It labels the list rather

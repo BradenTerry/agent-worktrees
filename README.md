@@ -27,8 +27,10 @@ its running agents in one view.
   house beside its name; detached and locked show as glyphs on the card's summary
   line. Per-card refresh forces that worktree's PR/CI and re-gathers git status
   (the gather itself covers every card - only the PR call is scoped).
-- **[Card layout](docs/card-layout.md)**: two lines at rest, the PR block
-  tightened to three, every per-worktree action behind a caret menu, and a header
+- **[Card layout](docs/card-layout.md)**: a stripe down the card's left edge
+  carrying one derived state (needs you, working, idle), a status line in words
+  with a git cell on its right, the PR as a line of the card rather than a box,
+  every per-worktree action behind a caret menu, and a header
   that is both the expand toggle and a sticky one, so an agent row is never
   scrolled away from the name of the worktree it belongs to. The panel used to
   ship a second, roomier density with a toolbar toggle; it was removed rather than
@@ -36,13 +38,14 @@ its running agents in one view.
 - **[Worktree groups](docs/groups.md)**: user-named, collapsible sections over the
   cards list, for the worktrees you keep checked out until a PR merges. Filed by
   hand from a card's menu; sections reorder by dragging a header and are named in
-  the header itself. The primary worktree sits above them all under a `Worktrees`
-  divider and cannot be filed; **General** is the always-drawn default, neither
-  renamable nor removable, and where a new worktree lands. Stored per repo in
+  the header itself. The primary worktree sits above them all and cannot be
+  filed; **General** is the always-drawn default, neither renamable nor
+  removable, and where a new worktree lands. Stored per repo in
   `globalState`, and a collapsed section reports the agents waiting inside it so
   folding one cannot hide an agent that needs you.
-- Git status per card: clean/changed count, `+`/`−` line totals, ahead/behind vs
-  upstream. Recomputed on discrete signals (saves, the Git extension's repo state,
+- Git status per card, as one git cell in the same place on every card and every
+  collapsed row: changed-file count, `+`/`−` line totals, ahead/behind vs
+  upstream, or `clean`. Recomputed on discrete signals (saves, the Git extension's repo state,
   a poll for the worktrees nothing else watches), never a workspace-wide file
   watcher, so a card does not disagree with the Source Control view. Refresh
   paints from the local gather and lets its `git fetch` and GitHub poll land
@@ -150,9 +153,13 @@ its running agents in one view.
   is there whether or not the PR integration is on. Absent for a non-GitHub
   origin, for a detached worktree (no branch page), and for a branch with no
   upstream, which has not been pushed and so has no tree to open.
-- **PR status** on a card when a stored token resolves a PR for the branch: title,
-  lifecycle state, CI rollup, review decision, comment counts, plus `Out of date`
-  and `Auto-merge` pills (`src/github.ts`, `src/prs.ts`).
+- **PR status** on a card when a stored token resolves a PR for the branch: number,
+  title, an outlined state badge, `Out of date` and `Auto-merge` flags, and a
+  line of words for the reviews and the checks. Each of those two also has a
+  glyph - a circle for CI, a speech bubble for the review decision, coloured by
+  state - which is what a collapsed card carries beside the PR number, so
+  whether CI passed and whether the PR is approved is readable without opening
+  it (`src/github.ts`, `src/prs.ts`). A `?` button in the toolbar opens the key.
 - **[Branches view](docs/branches-view.md)** in a dedicated editor tab: every local
   and remote-only branch with worktree association, ahead/behind, last-updated,
   git-based filters and sort, optional PR status, **Create worktree & start

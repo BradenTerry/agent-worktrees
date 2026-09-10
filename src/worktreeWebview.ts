@@ -3912,12 +3912,23 @@ export class WorktreeWebviewProvider
 
   // --- HTML ------------------------------------------------------------------
 
+  /**
+   * A media asset's webview URI, stamped with the time this webview's HTML was
+   * built. The webview serves `asWebviewUri` resources through a service
+   * worker that caches them, so an edited panel.js or panel.css could keep
+   * coming back stale across reloads of the extension host - the new HTML
+   * pointed at the same URL and the cache answered it. A query the cache has
+   * not seen forces a fresh read; the file on disk is what is served either way.
+   */
+  private mediaUri(webview: vscode.Webview, ...p: string[]): vscode.Uri {
+    return webview
+      .asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "media", ...p))
+      .with({ query: `v=${Date.now()}` });
+  }
+
   private html(webview: vscode.Webview): string {
     const nonce = makeNonce();
-    const uri = (...p: string[]) =>
-      webview.asWebviewUri(
-        vscode.Uri.joinPath(this.extensionUri, "media", ...p)
-      );
+    const uri = (...p: string[]) => this.mediaUri(webview, ...p);
     const csp = [
       `default-src 'none'`,
       `style-src ${webview.cspSource}`,
@@ -3993,10 +4004,7 @@ export class WorktreeWebviewProvider
    */
   private branchesHtml(webview: vscode.Webview): string {
     const nonce = makeNonce();
-    const uri = (...p: string[]) =>
-      webview.asWebviewUri(
-        vscode.Uri.joinPath(this.extensionUri, "media", ...p)
-      );
+    const uri = (...p: string[]) => this.mediaUri(webview, ...p);
     const csp = [
       `default-src 'none'`,
       `style-src ${webview.cspSource}`,

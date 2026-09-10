@@ -6,9 +6,10 @@ Each worktree is an isolated checkout, so parallel agents never step on each
 other's files. This panel puts every worktree, its git state, its pull request
 and its running agents in one view.
 
-<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="The Agent Worktrees panel: three worktrees with branch names, git status, PR rollups and their running Claude agents" width="380">
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/overview.png" alt="The Agent Worktrees panel: four worktrees, each with a status stripe, a status line, its pull request and its running Claude agents" width="380">
 
-- Every worktree at once: changed files, `+`/`-` lines, ahead/behind.
+- Every worktree at once: a stripe that says whether it needs you, and changed
+  files, `+`/`-` lines and ahead/behind in the same place on every card.
 - Start a Claude agent in any worktree in one click, or create a worktree and an
   agent together.
 - Live agent status: active, waiting, idle. Activity Bar badge when one is
@@ -129,8 +130,12 @@ The same values live in `agentWorktrees.notifyWaiting` and
 Every card links its branch to GitHub with no token and no setup. Connect a token
 and the card grows a PR rollup:
 
-- Title, state, CI checks, reviews, comment count.
-- **Out of date** and **Auto-merge** pills.
+- Number, title, state, and the reviews and checks spelled out in words.
+- **Out of date** and **Auto-merge** flags.
+- A collapsed card keeps the PR number and two glyphs, a circle for CI and a
+  speech bubble for the review, so you can see whether checks passed and whether
+  it is approved without opening the card. The `?` button in the toolbar opens
+  the key.
 - Refreshed as your agents work, plus a per-card refresh.
 - Refresh never blocks the panel. The worktrees repaint straight away and
   the PR badges fill in as GitHub answers, with a progress line above the
@@ -140,18 +145,20 @@ and the card grows a PR rollup:
 
 | On the worktree card | Connecting a token |
 | :--- | :--- |
-| <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="A worktree card showing its PR state, auto-merge pill, review counts and CI check rollup" width="380"> | <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="Settings, GitHub tab: the PR status toggle and the connected token" width="380"> |
+| <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="A worktree card showing its PR number, title, state badge, auto-merge flag, and its reviews and checks in words" width="380"> | <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="Settings, GitHub tab: the PR status toggle and the connected token" width="380"> |
 
 ## Branches view
 
 A full editor tab listing every branch in the repo, local and remote-only.
 
-<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png" alt="The Branches editor tab: every branch with last-updated time and author, location tags, PR status and create-worktree actions" width="860">
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/branches.png" alt="The Branches editor tab: every branch with last-updated time and author, its PR with checks and review glyphs, and create-worktree actions in a fixed column" width="860">
 
 - **Start agent** on branches with a worktree, **Create worktree & start agent**
   on the rest. A remote-only branch is checked out as a new local tracking branch.
-- Last-updated time, author, location tag and ahead/behind, all from local git
+- Last-updated time, author, location and ahead/behind, all from local git
   with no token.
+- The same PR block as the panel, with the checks and review glyphs on the name
+  line, so a branch whose PR needs you stands out down the list.
 - Filter and sort by updater, location, PR status, or review-requested-from-you.
   Your choices are remembered.
 - **Fetch and prune** to refresh ahead/behind and drop dead refs.
@@ -210,9 +217,8 @@ still taking up the list. File them into a section and fold it.
 
 <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/groups.png" alt="The panel with its cards filed into three named sections, Working, In review and On ice, one of them folded and showing a waiting-agent count" width="380">
 
-- **Your main worktree stays on top**, above a `Worktrees` divider and outside
-  the sections. It is the one every other worktree hangs off, so it is not
-  something you file away.
+- **Your main worktree stays on top**, outside the sections. It is the one every
+  other worktree hangs off, so it is not something you file away.
 - **Name your own sections.** Make as many as you want, and **drag them into the
   order you want** (or move them a place at a time from the header menu).
 - **General is the default section**, always there, and cannot be renamed or
@@ -237,12 +243,19 @@ still taking up the list. File them into a section and fold it.
 
 Every card is two lines at rest, and one click shuts them all.
 
-<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/collapsed.png" alt="Four worktrees with every card collapsed: one header line each with agent counts, git totals and the PR rollup" width="380">
+<img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/collapsed.png" alt="Four worktrees with every card collapsed: a status stripe, the branch and its PR signal on one line, agent status and the git cell on the next" width="380">
 
-- **Nothing is dropped at two lines**: branch, agent and subagent counts, status
-  dots and git totals.
-- **The PR stays one block**, with reviews and checks sharing a line, split by a
-  rule so the two sets of checkmarks never blur together.
+- **One stripe per worktree.** Yellow down the left edge means it needs you: an
+  agent is waiting, or the PR has changes requested, a failed check, or is out of
+  date. Green means work is running. No stripe means idle. Changes alone never
+  colour a card.
+- **Nothing is dropped at two lines**: the branch, the PR number with its checks
+  and review glyphs, then the agent counts in words and the git cell.
+- **Counts are words.** `1 waiting · 2 working · 3 subagents`, on the card and in
+  the summary under the repository name, with zero counts left out.
+- **The PR is a line, not a box.** Number, title and state on one line, reviews
+  and checks in words on the next, and `No pull request` where there is none yet
+  so every card has the same shape.
 - **Names stay put while you scroll**: a card's header pins above its own agent
   rows, so you never reveal a terminal from the card below the one you meant.
 - **Click the name to open a card, not the whole line.** A vertical rule marks
@@ -253,12 +266,13 @@ Every card is two lines at rest, and one click shuts them all.
   pill and a caret menu holding switch branch, refresh, search, find file, run or
   debug, open in a new window, view on GitHub and delete. **New agent** sits
   beside the Agents heading.
-- **The worktree's own directory** is a labelled `Worktree` line in the body, with
-  the full path on hover. Cards are titled by branch, which is what you scan for.
+- **The worktree's own directory** sits muted beside the branch name, with the
+  full path on hover. Cards are titled by branch, which is what you scan for.
 - **Glyphs instead of pills** for your primary working directory (a house) and for
   locked or detached worktrees.
-- **The outlined card is the one you are typing into**, not the one that happens
-  to be your open folder.
+- **The agent you are typing into** carries a blue bar down its row, and one
+  waiting on you a yellow one; rows are lines of the card, not boxes inside it.
+- **A `?` in the toolbar** opens the key to all of it.
 - **A repo-wide agent summary** under the repository name, so "is anything waiting
   on me" is one glance.
 - **The agent list scrolls instead of folding**, so a busy worktree cannot push
