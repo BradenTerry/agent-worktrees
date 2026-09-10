@@ -22,9 +22,25 @@ failures follow from the scrolling that causes:
 
 ## The shape
 
-**Two lines at rest, plus the PR block.** The header carries the branch name. One meta line underneath carries two unrelated readings of the worktree at
-opposite ends of it: what is running in it on the left - agent count, live
-subagents, per-status dots - and what its working tree looks like on the right.
+**A stripe, two lines at rest, and a fixed slot order underneath.** The card's
+left edge carries one derived state, `worktreeState`: yellow when something here
+needs you (an agent waiting, a subagent asking its waiting parent for a
+permission, or a PR with changes requested, a failed check, or a branch behind
+its base), green when an agent or subagent is running and nothing is blocked,
+nothing when idle. It is the answer to the one question a column of cards is
+scanned for, and the agent status colours are spent on it and on the agent rows
+and nowhere else - a hue on a card always means the same thing. Local changes
+never colour it: they are progress, not a request.
+
+The header carries the branch name, with the worktree's directory muted beside
+it, and - while the card is shut - the PR signal: the number in its state badge
+and two glyphs, a circle for the CI rollup and a speech bubble for the review
+decision, coloured by state. A status line underneath carries two unrelated
+readings of the worktree at opposite ends of it: what is running in it on the
+left, as words - `1 waiting · 2 working · 3 subagents`, zero counts left out,
+`No agents` when nothing is - and the git cell on the right: changed-file count,
+`+`/`−` line totals and ahead/behind, or `clean`. When the PR is what stripes
+the card the line says so, `PR needs you`, in the stripe's colour.
 
 The agents take the left because that is the reading the panel exists for, and
 the left edge is where a column of cards is scanned; the git totals hold the
@@ -33,13 +49,21 @@ right edge against them. Neither is measured or breakpointed: the totals carry
 both wraps them to a row of their own and keeps them right-aligned there, at
 whatever width that particular card runs out.
 
-The PR rollup keeps its frame. It is one thing about the branch and the border is
-what says so; unpacked into the meta line beside the git totals it reads as more
-unrelated chips. Compact buys its rows back inside the block instead: tighter
-padding, and the labelled "Reviews" and "Checks" rows merged onto one line as two
-runs with a rule between them - so the CI checkmarks and the review checkmarks
-still cannot be read as one ambiguous sequence, which is what the two labels
-exist to prevent. Four rows become three.
+Under the fold the slots are in a fixed order: the PR, the debug sessions, the
+agents. A card missing one keeps the order of the rest, and the PR slot is kept
+as a muted `No pull request` while the integration is on, so the same fact is in
+the same place on every card.
+
+The PR is a line of the card, not a box in it (`prBlock`). The card is the one
+bordered object; the framed rollup inside it was heavier than the header above it
+and made every card with a PR read as a box with a box in it. One line carries
+the number, the title, an outlined state badge and the merge flags and links out;
+a muted line under it spells the reviews and the checks out in words, each led by
+the glyph that stands for it in the header - so the shorthand a collapsed card
+uses is learned where it has a label next to it. Only what is wrong or unfinished
+takes a colour there. The badges are outlined in the state's chart-token colour
+rather than filled: a filled OPEN pill was the most saturated thing on the panel,
+on every card with a PR, for the state a PR is in nearly all of its life.
 
 **The name half of the header is the toggle, and the header sticks.** `.head-toggle`
 - the chevron and the name - carries `data-toggle` and expands the card; the
@@ -58,9 +82,9 @@ since rows pass under it.
 
 **The body opens on a horizontal rule**, so where the fold is is drawn rather
 than remembered: above it is what the card shows at rest, below it is what
-expanding got you. It sits on `.card-body` rather than on the Worktree line,
-which is the body's usual first row but is dropped on the primary worktree - the
-rule has to mark the boundary on every card, not on most of them.
+expanding got you. It sits on `.card-body`, which every card has, rather than on the PR slot, which
+the primary worktree and a repo with the integration off do not - the rule has to
+mark the boundary on every card, not on most of them.
 
 The rule used to hang a vertical rail off itself down the side of the body. That
 went when [groups](groups.md) arrived: a group's rail already brackets its cards
@@ -130,9 +154,8 @@ button after a single-card toggle.
 
 ### The repo-wide agent summary
 
-Under the repository name, in the glyphs a card uses for its own: how many
-agents, how many live subagents, and the per-status breakdown across every
-worktree. It answers "is anything waiting on me anywhere" without scanning down
+Under the repository name, in the words a card uses for its own: the per-status
+breakdown, the agent total and the live subagents across every worktree. It answers "is anything waiting on me anywhere" without scanning down
 the cards - the question the panel exists to answer, and the one that gets harder
 with every worktree added.
 
@@ -154,10 +177,10 @@ star or a pin - it is the checkout you came from, not one you favoured - drawn i
 `descriptionForeground`, since it is orientation rather than news and should not
 compete with the name it sits against.
 
-**locked** and **detached** are glyphs on the meta line, beside the agent counts,
+**locked** and **detached** are glyphs on the status line, beside the agent counts,
 in the warning colour. They are exceptions - most worktrees are neither - and a
 row that exists only to carry one short word costs more than the word tells you.
-On the meta line they sit with the other readings of the worktree. They follow the
+On the status line they sit with the other readings of the worktree. They follow the
 agent counts rather than leading them, so the counts keep the left edge on every
 card and stay a column you can scan down. Carrying no text, their `data-tip` is
 the label: a padlock for a worktree git will refuse to remove, a broken chain for
@@ -170,7 +193,7 @@ card.
 
 ### The pulse
 
-The waiting dot pulses in both summaries: on a card's meta line and on the
+The waiting dot pulses in both summaries: on a card's status line and on the
 repo-wide line under the repository name. Only waiting, though - the agent rows
 pulse active as well, but a count is not a row. A
 panel with agents working would have a green dot ticking on every card and again
@@ -185,24 +208,26 @@ each frame.
 
 The card is titled by the branch - `worktreeData` sends `name` as the branch when
 there is one - which is the right thing to scan a column of cards for. Which
-*directory* the card is was then not answerable from it at all, so the card body
-carries a labelled `Worktree` line, derived in the webview from `wt.path` rather
-than added to the payload.
+*directory* the card is sits muted beside it in the header, derived in the
+webview from `wt.path` rather than added to the payload, with the full path as
+the tooltip. It used to be a labelled `Worktree` line in the body; that spent a
+row on every card for a name that mostly restates the branch. Muted and inline
+it is readable when you want it and costs nothing when you do not, and the
+weight difference is what says which of the two names is the title. The primary
+worktree skips it: its directory is the repository, named at the top of the
+panel.
 
-Labelled, and in the body, rather than a bare second name beside the branch: two
-names side by side in a header is a guessing game about which is which, and the
-directory is not what the card is scanned for. The label takes the muted colour
-and the name takes the foreground - a directory name is something you might be
-reading off to type somewhere, not decoration. The full path is the tooltip, since
-the name alone does not say which repo's worktree directory it sits in.
+### Which row is barred
 
-### Which card is outlined
-
-The card outline marks the worktree whose agent owns **the terminal you are typing
-into**, and it is set on the card rather than only on its header, so it is
-findable when the card is collapsed and the header is all there is. The terminal
-glyph that says the same thing closes the meta line's left group, after the agent
-counts and the state flags. Beside the branch name it competed with the name for
+The agent whose terminal is **the one you are typing into** carries a blue bar
+down the left edge of its row and a tint, and an agent waiting on you a yellow
+bar; on a card the rows are hairline-separated lines, not outlined boxes, since
+a box round a row on a card inside a group's rail was the third rectangle around
+one line of text. The card itself no longer takes an outline for the terminal.
+Its left edge is the state stripe, and a second meaning on the same border would
+have made the one hue that is spent carefully mean two things. The `.card` still
+carries `.terminal-open`, for the terminal glyph on the status line: it closes
+the line's left group, after the agent counts and the state flags. Beside the branch name it competed with the name for
 the first line and pushed a long one to wrap sooner; in a column of its own ahead
 of the counts it held 12px open on every card to say something true of one of
 them. At the end of the run it costs width only on the card it applies to, and
@@ -215,12 +240,11 @@ can act on by mistake.
 
 One thing has to move with it: `applyActiveTerminal` re-tints in place on a
 terminal switch, without a re-render, so the card has to be in the set of elements
-it toggles - left out, the row highlighted immediately and the outline caught up
+it toggles - left out, the row highlighted immediately and the glyph caught up
 only on the next data push.
 
-Nothing else touches a card's border now. There used to be a hover rule that
-brightened it, carrying `:not(.terminal-open)` so hovering the outlined card would
-not overwrite the one border on the panel that means something. That rule is gone.
+Nothing else touches a card's border. There used to be a hover rule that
+brightened it. That rule is gone.
 It was answering a real question - which card the pointer is in, since the
 near-miss this density prevents is clicking the right-looking agent on the wrong
 worktree - but answering it card-wide made a whole card look like a click target
@@ -263,9 +287,18 @@ caret. It is a card-level control like those, and matching them is what makes th
 icon buttons down a card read as one set rather than as several. The only trim is
 the plus, 14px to 12px, so it sits beside the glyph instead of over it.
 
-The Agents bar carries no count. The meta line above already has the agent total
-beside the live subagents and the per-status dots, where it can be read against
-them; repeated on the bar it was the same number twice on one card.
+The Agents bar carries no count. The status line above already has the agents by
+status beside the live subagents, where they can be read against each other;
+repeated on the bar it was the same number twice on one card. The subagent and
+skill counts on a row are text, not pills: outlined, they read as controls beside
+the one control on the row, and the subagent count is not clickable at all.
+
+### The key
+
+A `?` button in the toolbar opens a dialog with all of it: the three stripe
+states, the agent markers, the six PR glyphs, and a sample git cell. It is built
+from the same markup the cards emit (`openHelp`), so it cannot drift from what
+they draw.
 
 ### The header line, when the name is long
 
@@ -358,7 +391,7 @@ four cards take roughly a third of that again.
   outline) and its header (the tint). Leaving the card out of that set is what
   made the outline lag a terminal switch by a data push.
 - The only width media query is at **240px**, the narrowest the sidebar goes.
-  Between that and a comfortable width nothing is dropped: the meta line simply
+  Between that and a comfortable width nothing is dropped: the status line simply
   wraps the git totals under the counts, which is why there is no second
   breakpoint to keep in step with the markup.
 - **A repaint preserves what the payload does not know about.** `render` replaces

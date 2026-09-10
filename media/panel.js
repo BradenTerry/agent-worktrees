@@ -159,6 +159,26 @@
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v7M5 6.5l3 3 3-3"/><path d="M3.5 13.5h9"/></svg>',
     autoMerge:
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6"/><path d="M11.7 7.4C11 10 7 9.5 4 9.5"/></svg>',
+    // The PR signal glyphs. A circle is the CI rollup and a speech bubble is the
+    // review decision; the colour says the state and the shape says which of
+    // the two it is, so a collapsed card can carry both in the width of two
+    // characters and the expanded PR line can label them.
+    checkCircle:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M5.2 8.2l2 2 3.8-4"/></svg>',
+    crossCircle:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M5.7 5.7l4.6 4.6M10.3 5.7l-4.6 4.6"/></svg>',
+    dotCircle:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.7" fill="currentColor" stroke="none"/></svg>',
+    reviewOk:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7.5H8l-3 2.5v-2.5H2.5z"/><path d="M5.5 7.3l1.7 1.7 3.3-3.3"/></svg>',
+    reviewBad:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7.5H8l-3 2.5v-2.5H2.5z"/><path d="M6 5.6l4 3.8M10 5.6l-4 3.8"/></svg>',
+    reviewNone:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7.5H8l-3 2.5v-2.5H2.5z"/></svg>',
+    // The toolbar's help button: opens the key to the stripe, the agent
+    // markers, the PR glyphs and the git cell.
+    help:
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M6.2 6.3a1.9 1.9 0 1 1 3 1.6c-.8.5-1.2.9-1.2 1.7"/><circle cx="8" cy="11.8" r="0.6" fill="currentColor" stroke="none"/></svg>',
     // In-progress spinner: a faint full ring with a brighter arc that the .spin
     // CSS animation rotates. Swapped in for a button's own icon while its action
     // is running (see markBusy).
@@ -772,46 +792,92 @@
       subTotal += (a.subagents || []).filter((s) => !s.worktree).length;
     }
 
-    // Live subagents across the worktree. The individual ones are rows in the
-    // (collapsible) agent list, so this keeps them visible when it is closed.
-    const subStat = subTotal
-      ? '<span class="agents-bar-subagents" title="' +
-        subTotal +
-        " subagent" +
-        (subTotal === 1 ? "" : "s") +
-        ' running in this worktree">' +
-        icons.subagent +
-        subTotal +
-        "</span>"
-      : "";
-
-    const stat = (key) =>
-      counts[key]
-        ? '<span class="stat ' +
+    // Each status as a counted word beside its marker - "1 waiting", "2
+    // working" - rather than a bare number beside a glyph. The dot still carries
+    // the colour and shape, so the phrase is readable without either. Waiting
+    // leads: it is the one that wants you. Zero counts are not drawn.
+    const WORD = { waiting: "waiting", active: "working", idle: "idle" };
+    const statusPhrases = [];
+    for (const key of ["waiting", "active", "idle"]) {
+      if (!counts[key]) continue;
+      statusPhrases.push(
+        '<span class="stat ' +
           key +
           '" title="' +
           counts[key] +
+          " agent" +
+          (counts[key] === 1 ? "" : "s") +
           " " +
-          STATUS[key].label.toLowerCase() +
+          WORD[key] +
           '"><span class="status-dot ' +
           key +
           '"></span>' +
           counts[key] +
+          " " +
+          WORD[key] +
           "</span>"
-        : "";
-    const single = statusOf(agents[0]);
-    const stats =
-      agents.length === 1
-        ? '<span class="stat ' +
-          single +
-          '" title="' +
-          STATUS[single].label +
-          '"><span class="status-dot ' +
-          single +
-          '"></span></span>'
-        : stat("active") + stat("waiting") + stat("idle");
+      );
+    }
 
-    return { subTotal, subStat, stats };
+    // Live subagents across the worktree. The individual ones are rows in the
+    // agent list, so this keeps them visible when the card is shut.
+    const subPhrase = subTotal
+      ? '<span class="stat subagents" title="' +
+        subTotal +
+        " subagent" +
+        (subTotal === 1 ? "" : "s") +
+        ' running in this worktree">' +
+        subTotal +
+        " subagent" +
+        (subTotal === 1 ? "" : "s") +
+        "</span>"
+      : "";
+
+    return { counts, subTotal, statusPhrases, subPhrase };
+  }
+
+  /** The separator between the phrases of a status line. */
+  const DOT_SEP = '<span class="dot-sep" aria-hidden="true">&middot;</span>';
+
+  /**
+   * Whether the PR is asking something of you: a review came back with changes
+   * requested, CI failed, or the branch has fallen behind its base and GitHub
+   * will not merge it until it is updated. A merged or closed PR asks nothing.
+   */
+  function prNeedsYou(pr) {
+    if (!pr) return false;
+    if (pr.state === "merged" || pr.state === "closed") return false;
+    return (
+      !!pr.changesRequested || !!pr.checksFail || pr.mergeState === "behind"
+    );
+  }
+
+  /**
+   * One derived state per worktree, drawn as the card's left stripe. It answers
+   * a single question - do I need to look at this worktree - in this order:
+   *
+   *   attn   an agent here is waiting on you, a subagent here is asking its
+   *          (waiting) parent for a permission, or the PR needs you
+   *   work   an agent or a subagent is running here and nothing is blocked
+   *   ""     idle: nothing running, nothing blocked
+   *
+   * Local git changes alone never colour the card. They are progress, not a
+   * request, and they stay in the git cell of the status line.
+   */
+  function worktreeState(wt) {
+    const agents = wt.agents || [];
+    const foreign = wt.subagents || [];
+    if (agents.some((a) => statusOf(a) === "waiting")) return "attn";
+    if (
+      foreign.some((s) => s.parentStatus === "waiting" && !!s.awaitingPermission)
+    )
+      return "attn";
+    if (prNeedsYou(wt.pr)) return "attn";
+    if (agents.some((a) => statusOf(a) === "active")) return "work";
+    if (foreign.length) return "work";
+    if (agents.some((a) => (a.subagents || []).some((s) => !s.worktree)))
+      return "work";
+    return "";
   }
 
 
@@ -887,46 +953,262 @@
   }
 
   /**
-   * Git working-tree summary line: diff totals and ahead/behind, with the change
-   * count as a counted dot rather than "4 changes", so it fits on one line
-   * beside the agent counts.
+   * The git cell: how far this worktree has got. The changed-file count, the
+   * diff stat, and commits ahead of and behind the upstream, as one phrase that
+   * sits in the same place on every card and every collapsed row. The +/- keep
+   * git's own green and red - that convention is older than the panel, and it
+   * is what says work has happened here - and nothing else about git spends a
+   * hue. A clean tree says "clean" rather than showing nothing, so the cell is
+   * never empty and a card with nothing to report still has the slot.
    */
-  function gitLine(g) {
+  function gitCell(g) {
     if (!g) return "";
     const segs = [];
-    if (g.dirty)
+    if (g.dirty || g.insertions || g.deletions) {
       segs.push(
-        '<span class="seg dirty" title="' +
+        '<span class="changed" title="' +
           g.dirty +
-          (g.dirty === 1 ? " change" : " changes") +
-          '"><span class="gdot"></span>' +
+          (g.dirty === 1 ? " file changed" : " files changed") +
+          '">' +
           g.dirty +
+          " changed</span>" +
+          (g.insertions || g.deletions
+            ? ' <span class="ins" title="Lines added">+' +
+              (g.insertions || 0) +
+              '</span> <span class="del" title="Lines removed">&minus;' +
+              (g.deletions || 0) +
+              "</span>"
+            : "")
+      );
+    } else {
+      segs.push('<span class="clean" title="No local changes">clean</span>');
+    }
+    const sync = [];
+    if (g.ahead)
+      sync.push(
+        '<span class="ahead" title="' +
+          g.ahead +
+          " commit" +
+          (g.ahead === 1 ? "" : "s") +
+          ' to push">&uarr;' +
+          g.ahead +
           "</span>"
       );
-    // Zero-value segments are hidden: the nonzero counts are the signal, and a
-    // row of zeros just buries them. A fully quiet worktree gets a single
-    // "Clean" segment instead of an empty line.
-    if (g.insertions || g.deletions) {
-      segs.push('<span class="seg ins">+' + (g.insertions || 0) + "</span>");
-      segs.push('<span class="seg del">−' + (g.deletions || 0) + "</span>");
-    }
-    if (g.ahead)
-      segs.push(
-        '<span class="seg ahead" title="Commits to push">↑' + g.ahead + "</span>"
-      );
     if (g.behind)
-      segs.push(
-        '<span class="seg behind" title="Commits to pull">↓' +
+      sync.push(
+        '<span class="behind" title="' +
+          g.behind +
+          " commit" +
+          (g.behind === 1 ? "" : "s") +
+          ' to pull">&darr;' +
           g.behind +
           "</span>"
       );
-    if (!segs.length)
-      segs.push(
-        '<span class="seg clean" title="No local changes, in sync with upstream">' +
-          icons.check +
-          "Clean</span>"
+    if (sync.length) segs.push(sync.join(" "));
+    return '<span class="git-cell">' + segs.join(DOT_SEP) + "</span>";
+  }
+
+  /**
+   * The two PR glyphs: the CI rollup as a circle, the review decision as a
+   * speech bubble. Colour is the state - green passed or approved, red failed
+   * or changes requested, yellow pending, muted for no review - and the shape
+   * says which of the two it is. The same pair leads the labelled Reviews and
+   * Checks lines on an expanded card, so the shorthand a collapsed card uses is
+   * learned where it has words next to it.
+   */
+  function prGlyphs(pr) {
+    const plural = (n) => (n === 1 ? "" : "s");
+    const glyph = (cls, icon, tip) =>
+      '<span class="pr-glyph ' +
+      cls +
+      '" data-tip="' +
+      esc(tip) +
+      '" aria-label="' +
+      esc(tip) +
+      '">' +
+      icon +
+      "</span>";
+    let checks = "";
+    if (pr.checks === "pass")
+      checks = glyph(
+        "checks ok",
+        icons.checkCircle,
+        "Checks: all " + (pr.checksPass || 0) + " passed"
       );
-    return '<div class="gitline">' + segs.join("") + "</div>";
+    else if (pr.checks === "fail")
+      checks = glyph(
+        "checks bad",
+        icons.crossCircle,
+        "Checks: " + pr.checksFail + " failed"
+      );
+    else if (pr.checks === "pending")
+      checks = glyph(
+        "checks warn",
+        icons.dotCircle,
+        "Checks: " +
+          pr.checksPending +
+          " still running" +
+          (pr.checksFail ? ", " + pr.checksFail + " failed" : "")
+      );
+    let review = "";
+    if (pr.review === "approved")
+      review = glyph(
+        "review ok",
+        icons.reviewOk,
+        "Reviews: approved (" +
+          pr.approvals +
+          " approval" +
+          plural(pr.approvals) +
+          ")"
+      );
+    else if (pr.review === "changes")
+      review = glyph("review bad", icons.reviewBad, "Reviews: changes requested");
+    else
+      review = glyph(
+        "review none",
+        icons.reviewNone,
+        pr.reviewsPending
+          ? "Reviews: " +
+              pr.reviewsPending +
+              " reviewer" +
+              plural(pr.reviewsPending) +
+              " requested, none given yet"
+          : "Reviews: none yet"
+      );
+    return { checks, review };
+  }
+
+  /**
+   * The PR signal a collapsed card carries in its header: the number in the
+   * state badge, then the two glyphs. Not a link - the header is the fold, and
+   * a link inside it would open GitHub on a click meant to open the card - so
+   * the tooltip says what the expanded PR line will.
+   */
+  function headPr(pr) {
+    if (!pr) return "";
+    const st = PR_STATE[pr.state] || PR_STATE.open;
+    const g = prGlyphs(pr);
+    return (
+      '<span class="head-pr" data-tip="' +
+      esc("PR #" + pr.number + ", " + st.label.toLowerCase() + ": " + pr.title) +
+      '"><span class="pr-state ' +
+      st.cls +
+      '">#' +
+      pr.number +
+      "</span>" +
+      g.checks +
+      g.review +
+      "</span>"
+    );
+  }
+
+  /**
+   * The card's PR slot. One line for the PR itself - number, title, the state
+   * badge and the merge flags, linking out - and one muted line under it that
+   * spells out the reviews and the checks in words, with the glyph that stands
+   * for each in front of its label. Only what is wrong or unfinished takes a
+   * colour: passed and approved are the expected state and stay muted.
+   *
+   * The slot is kept when the integration is on and there is no PR yet, as a
+   * muted "No pull request", so the same fact sits in the same place on every
+   * card. The primary worktree never has one and skips the slot.
+   */
+  function prBlock(wt) {
+    if (!lastData || !lastData.prEnabled) return "";
+    const pr = wt.pr;
+    if (!pr) {
+      return wt.isPrimary ? "" : '<div class="pr-none">No pull request</div>';
+    }
+    return prSummary(pr);
+  }
+
+  /** The PR itself, as the two-line block a card and a branch row both draw. */
+  function prSummary(pr) {
+    const st = PR_STATE[pr.state] || PR_STATE.open;
+    const plural = (n) => (n === 1 ? "" : "s");
+    const g = prGlyphs(pr);
+
+    const flags =
+      (pr.mergeState === "behind"
+        ? '<span class="pr-flag behind" title="This branch is out-of-date with the base branch">Out of date</span>'
+        : "") +
+      (pr.autoMerge
+        ? '<span class="pr-flag automerge" title="Auto-merge is enabled. GitHub will merge once requirements pass">Auto-merge</span>'
+        : "");
+
+    const reviewWords = [];
+    // "changes requested" is GitHub's term for the decision, so one reviewer
+    // asking for changes is that phrase alone; more than one gets the count.
+    if (pr.changesRequested)
+      reviewWords.push(
+        '<span class="bad">' +
+          (pr.changesRequested === 1 ? "" : pr.changesRequested + " ") +
+          "changes requested</span>"
+      );
+    if (pr.approvals)
+      reviewWords.push(pr.approvals + " approved");
+    if (pr.reviewsPending)
+      reviewWords.push(
+        '<span class="warn">' +
+          pr.reviewsPending +
+          " pending</span>"
+      );
+    if (pr.comments)
+      reviewWords.push(pr.comments + " comment" + plural(pr.comments));
+
+    const checkWords = [];
+    if (pr.checks && pr.checks !== "none") {
+      if (pr.checksFail)
+        checkWords.push(
+          '<span class="bad">' + pr.checksFail + " failed</span>"
+        );
+      if (pr.checksPass) checkWords.push(pr.checksPass + " passed");
+      if (pr.checksPending)
+        checkWords.push(
+          '<span class="warn">' + pr.checksPending + " pending</span>"
+        );
+    }
+
+    const group = (glyph, label, words) =>
+      '<span class="pr-group">' +
+      glyph +
+      '<span class="pr-group-label">' +
+      label +
+      "</span>" +
+      words.join(DOT_SEP) +
+      "</span>";
+
+    return (
+      '<a class="pr-summary" href="' +
+      esc(pr.url) +
+      '" title="' +
+      esc(pr.title) +
+      '. Open on GitHub">' +
+      '<span class="pr-line">' +
+      '<span class="pr-num">#' +
+      pr.number +
+      "</span>" +
+      '<span class="pr-title">' +
+      esc(pr.title) +
+      "</span>" +
+      '<span class="pr-state ' +
+      st.cls +
+      '">' +
+      st.label +
+      "</span>" +
+      flags +
+      '<span class="pr-open">' +
+      icons.external +
+      "</span>" +
+      "</span>" +
+      (reviewWords.length || checkWords.length
+        ? '<span class="pr-detail">' +
+          (reviewWords.length ? group(g.review, "Reviews", reviewWords) : "") +
+          (checkWords.length ? group(g.checks, "Checks", checkWords) : "") +
+          "</span>"
+        : "") +
+      "</a>"
+    );
   }
 
   // PR-state badge labels and the CSS class that colors them.
@@ -936,209 +1218,6 @@
     merged: { label: "Merged", cls: "merged" },
     closed: { label: "Closed", cls: "closed" },
   };
-
-  /**
-   * PR summary for a worktree branch, linking out to the PR. A header row with
-   * the state badge, then separate "Checks" and "Reviews" rows so the CI rollup
-   * and the review decision don't read as one ambiguous run of checkmarks.
-   * Rendered only when PR data is present (the integration is on and a PR
-   * exists).
-   *
-   * `stacked` keeps the two labelled rows one above the other, which is what the
-   * branches view wants: its rows are full editor width and it is not fighting
-   * for vertical space. A worktree card passes nothing and gets the side-by-side
-   * rollup and the tighter padding that goes with it - a card is in a sidebar,
-   * and the block is one thing about the branch either way.
-   */
-  function prLine(pr, stacked) {
-    if (!pr) return "";
-    const st = PR_STATE[pr.state] || PR_STATE.open;
-    const plural = (n) => (n === 1 ? "" : "s");
-
-    // CI checks: one colored, counted segment per non-zero state (passing,
-    // failing, running) so the whole rollup is visible at a glance.
-    const checkSegs = [];
-    if (pr.checks && pr.checks !== "none") {
-      const pass = pr.checksPass || 0;
-      const fail = pr.checksFail || 0;
-      const pending = pr.checksPending || 0;
-      const total = pass + fail + pending;
-      if (pass)
-        checkSegs.push(
-          '<span class="pr-seg pass" title="' +
-            pass +
-            " of " +
-            total +
-            " check" +
-            plural(total) +
-            ' passing">' +
-            icons.check +
-            pass +
-            "</span>"
-        );
-      if (fail)
-        checkSegs.push(
-          '<span class="pr-seg fail" title="' +
-            fail +
-            " of " +
-            total +
-            " check" +
-            plural(total) +
-            ' failing">' +
-            icons.cross +
-            fail +
-            "</span>"
-        );
-      if (pending)
-        checkSegs.push(
-          '<span class="pr-seg pending" title="' +
-            pending +
-            " of " +
-            total +
-            " check" +
-            plural(total) +
-            ' running">' +
-            icons.dot +
-            pending +
-            "</span>"
-        );
-    }
-
-    // Review decision + comments. Counted segments are additive so a mixed
-    // state (e.g. some approvals with reviewers still pending) shows all of it.
-    const reviewSegs = [];
-    if (pr.approvals)
-      reviewSegs.push(
-        '<span class="pr-seg approved" title="' +
-          pr.approvals +
-          " approval" +
-          plural(pr.approvals) +
-          '">' +
-          icons.check +
-          pr.approvals +
-          "</span>"
-      );
-    if (pr.changesRequested)
-      reviewSegs.push(
-        '<span class="pr-seg changes" title="' +
-          pr.changesRequested +
-          " change request" +
-          plural(pr.changesRequested) +
-          '">' +
-          icons.cross +
-          pr.changesRequested +
-          "</span>"
-      );
-    if (pr.reviewsPending)
-      reviewSegs.push(
-        '<span class="pr-seg review-pending" title="' +
-          pr.reviewsPending +
-          " review" +
-          plural(pr.reviewsPending) +
-          ' pending">' +
-          icons.eye +
-          pr.reviewsPending +
-          "</span>"
-      );
-    if (pr.comments)
-      reviewSegs.push(
-        '<span class="pr-seg comments" title="' +
-          pr.comments +
-          " comment" +
-          plural(pr.comments) +
-          '">' +
-          icons.comment +
-          pr.comments +
-          "</span>"
-      );
-
-    // Merge-readiness flags shown beside the state badge. "Out of date" is
-    // GitHub's "This branch is out-of-date with the base branch" (mergeState
-    // "behind"); "Auto-merge" means GitHub will merge once requirements pass.
-    // These keep their words in both densities: stripped to the glyph they are
-    // two unlabelled colored pills, and the compact meta line wraps anyway.
-    const flagSegs = [];
-    if (pr.mergeState === "behind")
-      flagSegs.push(
-        '<span class="pr-flag behind" title="This branch is out-of-date with the base branch">' +
-          icons.behind +
-          "Out of date</span>"
-      );
-    if (pr.autoMerge)
-      flagSegs.push(
-        '<span class="pr-flag automerge" title="Auto-merge is enabled. GitHub will merge once requirements pass">' +
-          icons.autoMerge +
-          "Auto-merge</span>"
-      );
-
-    const rows = [];
-    if (pr.title)
-      rows.push(
-        '<div class="pr-row pr-title">' + esc(pr.title) + "</div>"
-      );
-    rows.push(
-      '<div class="pr-row pr-head">' +
-        '<span class="pr-ico">' +
-        icons.pr +
-        "</span>" +
-        '<span class="pr-state ' +
-        st.cls +
-        '">' +
-        st.label +
-        " #" +
-        pr.number +
-        "</span>" +
-        flagSegs.join("") +
-        '<span class="pr-open">' +
-        icons.external +
-        "</span>" +
-        "</div>"
-    );
-    // A card buys a row by putting the review and check runs side by side instead
-    // of one above the other. Both runs are mostly ticks and crosses, so each
-    // keeps its label either way: without one there is nothing to say which
-    // sequence is CI and which is the review decision.
-    if (stacked) {
-      if (reviewSegs.length)
-        rows.push(
-          '<div class="pr-row"><span class="pr-row-label">Reviews</span>' +
-            reviewSegs.join("") +
-            "</div>"
-        );
-      if (checkSegs.length)
-        rows.push(
-          '<div class="pr-row"><span class="pr-row-label">Checks</span>' +
-            checkSegs.join("") +
-            "</div>"
-        );
-    } else {
-      const group = (label, segs) =>
-        '<span class="pr-group"><span class="pr-group-label">' +
-        label +
-        "</span>" +
-        segs.join("") +
-        "</span>";
-      if (reviewSegs.length || checkSegs.length)
-        rows.push(
-          '<div class="pr-row pr-rollup">' +
-            (reviewSegs.length ? group("Reviews", reviewSegs) : "") +
-            (checkSegs.length ? group("Checks", checkSegs) : "") +
-            "</div>"
-        );
-    }
-
-    return (
-      '<a class="prline' +
-      (stacked ? "" : " tight") +
-      '" href="' +
-      esc(pr.url) +
-      '" title="' +
-      esc(pr.title) +
-      '. Open on GitHub">' +
-      rows.join("") +
-      "</a>"
-    );
-  }
 
   /**
    * A card's branch on GitHub, or "" when there is nothing to link: no
@@ -1162,33 +1241,6 @@
     if (!wt.branch || wt.detached) return "";
     if (!wt.git || !wt.git.upstream) return "";
     return branchUrl(lastData, wt.branch);
-  }
-
-  /**
-   * The worktree's own directory name, as a labelled line in the card. The header
-   * is titled by the branch - worktreeData sends `name` as the branch when there
-   * is one - which is the right thing to scan a column of cards for; this answers
-   * the other question, which directory on disk the card is, and it is labelled
-   * rather than left as a bare second name sitting next to the first.
-   *
-   * The full path is the tooltip: the name alone does not say where among several
-   * repos' worktree directories this one lives.
-   */
-  function worktreeNameRow(wt) {
-    // Not the primary worktree: its directory is the repository itself, whose
-    // name is already at the top of the panel, so the line would restate it on
-    // the one card that never needed it.
-    if (wt.isPrimary) return "";
-    const base = baseName(wt.path);
-    if (!base) return "";
-    return (
-      '<div class="worktree-name" data-tip="' +
-      esc(wt.path) +
-      '"><span class="worktree-name-label">Worktree</span>' +
-      '<span class="worktree-name-value">' +
-      esc(base) +
-      "</span></div>"
-    );
   }
 
   function card(wt) {
@@ -1317,8 +1369,14 @@
       !!activeSessionId &&
       (wt.agents || []).some((a) => a.sessionId === activeSessionId);
 
+    // The card's left stripe is its one derived state (see worktreeState). The
+    // open terminal used to be a border on the whole card; it is the agent row's
+    // accent bar now, and the card keeps only the class the meta-terminal glyph
+    // reads.
+    const state = worktreeState(wt);
     const shell = (inner) =>
       '<div class="card' +
+      (state ? " state-" + state : "") +
       (hasActiveTerminal ? " terminal-open" : "") +
       (isCollapsed ? " collapsed" : "") +
       // Names the card for the two things that have to survive a repaint: the
@@ -1329,53 +1387,74 @@
       inner +
       "</div>";
 
-    // One sticky header line, one meta line, and the agents. The header is the
+    // One sticky header line, one status line, and the body. The header is the
     // expand toggle, and it stays pinned while its own agent rows scroll under
     // it, so a row is never separated from the name of the worktree it belongs
     // to - no scrolling back up to check whose agent you are about to click.
-    const { subTotal, subStat, stats } = agentStats(agents, foreign);
-    const countStat =
-      agents.length || subTotal
-        ? '<span class="meta-count" title="' +
-          agents.length +
-          " agent" +
-          (agents.length === 1 ? "" : "s") +
-          ' in this worktree">' +
-          icons.agentMark +
-          agents.length +
-          "</span>"
-        : "";
-    const git = gitLine(wt.git);
+    //
+    // The status line carries two unrelated readings of the same worktree -
+    // what is running in it, and how far the working tree has got - as two
+    // groups at opposite ends of the line. The agents lead: they are the
+    // reading the panel exists for, and the left edge is where a column of
+    // cards is scanned. The git cell holds the right edge. When the panel is
+    // too narrow for both, the auto margin wraps the cell to a line of its own
+    // and keeps it right-aligned there.
+    //
+    // Every phrase is words, not a glyph with a number. A worktree with nothing
+    // running says so, so the line is never empty and the slot never moves.
+    const { statusPhrases, subPhrase } = agentStats(agents, foreign);
+    const phrases = statusPhrases.slice();
+    if (subPhrase) phrases.push(subPhrase);
+    if (!phrases.length)
+      phrases.push('<span class="stat none">No agents</span>');
+    // The PR asking for you is a reason the card is striped, and the stripe
+    // cannot say which reason. This names it, in the stripe's colour.
+    if (prNeedsYou(wt.pr))
+      phrases.push(
+        '<span class="stat pr-attn" data-tip="' +
+          esc(
+            (wt.pr.changesRequested ? "Changes requested. " : "") +
+              (wt.pr.checksFail ? "A check failed. " : "") +
+              (wt.pr.mergeState === "behind"
+                ? "The branch is out of date with its base. "
+                : "")
+          ).trim() +
+          '">PR needs you</span>'
+      );
 
-    // The meta line carries two unrelated readings of the same worktree - what
-    // is running in it, and what its working tree looks like - so they sit as
-    // two groups at opposite ends of the line rather than as one
-    // undifferentiated run of glyphs. Either side can be absent (a clean
-    // worktree with no agents, an agent working on a worktree with nothing to
-    // report).
-    //
-    // The agents lead. They are the reading the panel exists for, and the left
-    // edge is where a column of cards is scanned; the git totals hold the right
-    // edge against them. Plain flex does the rest: an auto margin applies per
-    // flex line, so when the panel is too narrow to hold both, the totals wrap
-    // to a row of their own and stay right-aligned there.
-    //
     // The terminal glyph closes the group. It is the one item here that is about
     // you rather than about the worktree - which of these cards you are typing
     // into - so it sits at the end of the run instead of leading it from a column
-    // of its own, and the counts and flags keep a left edge that does not move
-    // between cards.
+    // of its own, and the phrases keep a left edge that does not move between
+    // cards.
     const terminalMark =
       '<span class="meta-terminal" data-tip="The open terminal belongs to an agent in this worktree">' +
       icons.terminal +
       "</span>";
-    const agentGroup = countStat + subStat + stats;
-    const leftGroup = agentGroup + stateFlags;
-    const meta =
-      (leftGroup
-        ? '<span class="meta-stats">' + leftGroup + terminalMark + "</span>"
-        : "") + git;
+    const statusLine =
+      '<div class="status-line">' +
+      '<span class="status-agents">' +
+      phrases.join(DOT_SEP) +
+      stateFlags +
+      terminalMark +
+      "</span>" +
+      gitCell(wt.git) +
+      "</div>";
 
+    // The worktree's own directory, muted beside the branch. The header is
+    // titled by the branch - worktreeData sends `name` as the branch when there
+    // is one - which is what a column of cards is scanned for; this answers the
+    // other question, which directory on disk the card is, without spending a
+    // row on it. The full path is the tooltip. Not on the primary worktree: its
+    // directory is the repository itself, whose name is at the top of the panel.
+    const folder =
+      !wt.isPrimary && baseName(wt.path)
+        ? '<span class="folder" data-tip="' +
+          esc(wt.path) +
+          '">' +
+          esc(baseName(wt.path)) +
+          "</span>"
+        : "";
 
     return shell(
       '<div class="card-head' +
@@ -1407,6 +1486,10 @@
         '<span class="branch">' +
         esc(wt.name) +
         "</span>" +
+        folder +
+        // The PR signal, drawn only while the card is shut (CSS): open, the
+        // PR line in the body says all of it in words.
+        (lastData && lastData.prEnabled ? headPr(wt.pr) : "") +
         "</span>" +
         "</div>" +
         // The actions pinned to the header, held against the right edge and
@@ -1441,12 +1524,12 @@
         "</button>" +
         "</span>" +
         "</div>" +
-        // Indented to the branch name above it, like the Worktree line below, so
-        // the card's facts share one left edge.
-        (meta ? '<div class="card-meta">' + meta + "</div>" : "") +
-        prLine(wt.pr) +
+        statusLine +
+        // Fixed slot order under the fold: the PR, then the debug sessions,
+        // then the agents. A card without one of them keeps the order of the
+        // rest, so the same fact is always in the same place.
         '<div class="card-body">' +
-        worktreeNameRow(wt) +
+        prBlock(wt) +
         debugRows +
         agentSection(wt.path, agents, foreign, agentBtn) +
         "</div>"
@@ -1726,24 +1809,29 @@
       if (wt.agents) agents.push.apply(agents, wt.agents);
       if (wt.subagents) foreign.push.apply(foreign, wt.subagents);
     }
-    const { subStat, stats } = agentStats(agents, foreign);
+    const { subTotal, statusPhrases, subPhrase } = agentStats(agents, foreign);
+    if (!agents.length && !subTotal) return "";
     const withAgents = wts.filter((wt) => (wt.agents || []).length).length;
-    const count =
-      '<span class="meta-count" data-tip="' +
-      agents.length +
-      " agent" +
-      (agents.length === 1 ? "" : "s") +
-      " in " +
-      withAgents +
-      " of " +
-      wts.length +
-      " worktree" +
-      (wts.length === 1 ? "" : "s") +
-      '">' +
-      icons.agentMark +
-      agents.length +
-      "</span>";
-    return count + subStat + stats;
+    const phrases = statusPhrases.slice();
+    phrases.push(
+      '<span class="stat total" data-tip="' +
+        agents.length +
+        " agent" +
+        (agents.length === 1 ? "" : "s") +
+        " in " +
+        withAgents +
+        " of " +
+        wts.length +
+        " worktree" +
+        (wts.length === 1 ? "" : "s") +
+        '">' +
+        agents.length +
+        " agent" +
+        (agents.length === 1 ? "" : "s") +
+        "</span>"
+    );
+    if (subPhrase) phrases.push(subPhrase);
+    return phrases.join(DOT_SEP);
   }
 
   function toolbar(data) {
@@ -1771,6 +1859,12 @@
       "</button>" +
       '<button class="tbtn ghost" data-action="openBranches" aria-label="Branches" data-tip="Branches: list every branch and create a worktree from one">' +
       icons.branch +
+      "</button>" +
+      // The key to the panel's marks, on demand. It used to be nowhere: the
+      // stripe, the agent markers and the PR glyphs are learnable, but nothing
+      // said what they meant until you had seen every state once.
+      '<button class="tbtn ghost" data-tool="help" aria-label="What the panel shows" data-tip="What the panel shows: the stripe, the agent markers, the PR glyphs and the git cell">' +
+      icons.help +
       "</button>" +
       "</span>" +
       "</div>" +
@@ -1829,22 +1923,12 @@
       const list = members.get(wt.group) || members.get("general");
       if (list) list.push(wt);
     }
+    // No divider between the primary and the sections any more: the Worktrees
+    // tab already names what the list is, and General's own header - always
+    // drawn, see above - separates the primary from the rest.
     return (
       primary.map(card).join("") +
-      (primary.length ? divider("Worktrees") : "") +
       groups.map((g) => groupSection(g, members.get(g.id) || [])).join("")
-    );
-  }
-
-  /**
-   * The rule between the primary worktree and the groups. A label rather than a
-   * bare line: a hairline on its own says "these are apart" without saying why,
-   * and what is below it is every other worktree in the repository, however the
-   * user has since divided them up.
-   */
-  function divider(label) {
-    return (
-      '<div class="cards-divider"><span>' + esc(label) + "</span></div>"
     );
   }
 
@@ -3252,6 +3336,86 @@
     if (close) close.focus();
   }
 
+  /**
+   * The key to the panel, as a dialog off the toolbar's ? button. Built from
+   * the same markup the cards use - status dots, a git cell, the PR glyphs -
+   * so it cannot drift from what the cards actually draw.
+   */
+  function openHelp() {
+    closeModal();
+    modalReturnFocus =
+      document.activeElement && document.activeElement !== document.body
+        ? document.activeElement
+        : null;
+    const section = (label) =>
+      '<div class="help-section">' + label + "</div>";
+    const row = (mark, text) =>
+      '<div class="help-row">' +
+      '<span class="help-mark">' +
+      mark +
+      "</span>" +
+      "<span>" +
+      text +
+      "</span>" +
+      "</div>";
+    const stripe = (cls) => '<span class="help-stripe ' + cls + '"></span>';
+    const glyph = (cls, icon) =>
+      '<span class="pr-glyph ' + cls + '">' + icon + "</span>";
+    const gitSample = gitCell({
+      dirty: 4,
+      insertions: 212,
+      deletions: 38,
+      ahead: 3,
+      behind: 2,
+    });
+    modalEl = document.createElement("div");
+    modalEl.className = "modal-backdrop";
+    modalEl.innerHTML =
+      '<div class="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title">' +
+      '<div class="modal-head">' +
+      '<span class="modal-title" id="help-title">What the panel shows</span>' +
+      '<button class="iconbtn modal-close" aria-label="Close" data-tip="Close">' +
+      icons.stop +
+      "</button>" +
+      "</div>" +
+      '<div class="help-body">' +
+      section("Worktree stripe") +
+      row(
+        stripe("attn"),
+        "Needs you: an agent is waiting, or the PR has changes requested, a failed check, or is out of date with its base"
+      ) +
+      row(stripe("work"), "Working: an agent or a subagent is running here") +
+      row(stripe("idle"), "Idle: nothing running, nothing blocked") +
+      section("Agents") +
+      row('<span class="status-dot active"></span>', "Working") +
+      row('<span class="status-dot waiting"></span>', "Waiting for your input") +
+      row('<span class="status-dot idle"></span>', "Idle") +
+      section("Pull request") +
+      '<div class="help-grid">' +
+      row(glyph("checks ok", icons.checkCircle), "Checks passed") +
+      row(glyph("checks bad", icons.crossCircle), "A check failed") +
+      row(glyph("checks warn", icons.dotCircle), "Checks pending") +
+      row(glyph("review ok", icons.reviewOk), "Approved") +
+      row(glyph("review bad", icons.reviewBad), "Changes requested") +
+      row(glyph("review none", icons.reviewNone), "No review yet") +
+      "</div>" +
+      section("Git") +
+      '<div class="help-row">' +
+      gitSample +
+      "</div>" +
+      '<div class="help-note">Files changed, lines added and removed, and commits ahead of and behind the upstream. Changes alone never colour the stripe.</div>' +
+      "</div>" +
+      "</div>";
+    modalEl.addEventListener("click", (ev) => {
+      if (ev.target === modalEl || ev.target.closest(".modal-close")) {
+        closeModal();
+      }
+    });
+    document.body.appendChild(modalEl);
+    const close = modalEl.querySelector(".modal-close");
+    if (close) close.focus();
+  }
+
   // --- Settings modal --------------------------------------------------------
   // Holds the GitHub PR-status integration controls. Like the skills modal it
   // lives on document.body so a data re-render never wipes it; it only re-renders
@@ -4126,7 +4290,7 @@
   // --- Branches view ---------------------------------------------------------
   // Rendered only in the dedicated editor-tab webview (VIEW === "branches"),
   // where it fills the whole page. Lists every branch of the repo, its PR
-  // rollup (via prLine), and a create-worktree action. All filtering/sorting is
+  // block (via prSummary), and a create-worktree action. All filtering/sorting is
   // client-side over the single BranchData payload the extension posts; no extra
   // network calls. The sidebar (VIEW === "panel") never renders this; its
   // "Branches" toolbar button just asks the extension to open this tab.
@@ -4540,23 +4704,39 @@
           b.behind +
           "</span>"
       );
+    // The PR's two glyphs on the name line - whether CI passed and whether it
+    // is approved - so a branch that needs you is findable down the list
+    // without reading each PR block. The same pair a collapsed card carries.
+    const prMark = pr
+      ? (function () {
+          const g = prGlyphs(pr);
+          return '<span class="head-pr">' + g.checks + g.review + "</span>";
+        })()
+      : "";
     const remoteMark =
-      tag + (segs.length ? '<span class="bsync">' + segs.join("") + "</span>" : "");
-    // A worktree already exists: show the marker, and (when we know its path)
-    // still let the user start a Claude agent in that existing worktree.
-    const control = b.hasWorktree
+      tag +
+      (segs.length ? '<span class="bsync">' + segs.join("") + "</span>" : "") +
+      prMark;
+    // Three slots, always in the same place: the worktree-exists marker, the
+    // primary action, and Delete. A slot with nothing in it stays a slot, so
+    // the same button sits at the same x down the whole list and a column can
+    // be scanned for it. The marker is a reading, not a control - plain text
+    // with the check, not a pill that looks like the buttons beside it.
+    const exists = b.hasWorktree
       ? '<span class="bworktree" title="' +
         (b.worktreePath ? esc(b.worktreePath) : "") +
         '">' +
         icons.check +
-        "Worktree exists</span>" +
-        (b.worktreePath
-          ? '<button class="bagent" data-action="agent" data-path="' +
-            esc(b.worktreePath) +
-            '" title="Start a Claude agent in this worktree">' +
-            icons.agentMark +
-            "Start agent</button>"
-          : "")
+        "Worktree exists</span>"
+      : '<span class="bworktree"></span>';
+    const primary = b.hasWorktree
+      ? b.worktreePath
+        ? '<button class="bagent" data-action="agent" data-path="' +
+          esc(b.worktreePath) +
+          '" title="Start a Claude agent in this worktree">' +
+          icons.agentMark +
+          "Start agent</button>"
+        : "<span></span>"
       : '<button class="bcreate" data-action="worktreeFromBranch" data-branch="' +
         esc(b.name) +
         '" data-remote="' +
@@ -4564,6 +4744,7 @@
         '" title="Create a worktree for this branch and start a Claude agent in it">' +
         icons.agentMark +
         "Create worktree &amp; start agent</button>";
+    const control = exists + primary;
 
     // Delete is local-only: it removes the local branch and never touches the
     // remote. A remote-only branch has no local ref to delete, so the button is
@@ -4578,7 +4759,7 @@
         '" title="Delete this local branch (the remote branch is left untouched)">' +
         icons.trash +
         "Delete Local</button>"
-      : "";
+      : "<span></span>";
 
     const url = branchUrl(data, b.name);
     const nameLink = url
@@ -4621,7 +4802,7 @@
       "</span>" +
       "</div>" +
       meta +
-      (pr ? prLine(pr, true) : "") +
+      (pr ? prSummary(pr) : "") +
       "</div>"
     );
   }
@@ -4829,6 +5010,11 @@
     if (tab && settingsOpen) {
       settingsTab = tab.getAttribute("data-tab") || "github";
       renderSettings();
+      return;
+    }
+    const helpBtn = e.target.closest("[data-tool='help']");
+    if (helpBtn) {
+      openHelp();
       return;
     }
     const tool = e.target.closest("[data-tool='collapseAll']");

@@ -125,7 +125,7 @@ show checks and reviews.
 - Two blind spots `updated_at` cannot see are covered separately: checks are
   refetched while the cached rollup is pending (check completion does not bump
   `updated_at`), and an aux refresh of detail + checks runs at most every five
-  minutes to catch base-branch movement (the "Out of date" pill) and re-runs of
+  minutes to catch base-branch movement (the "Out of date" flag) and re-runs of
   completed checks.
 - Reviews and comments refetch only on an `updated_at` change.
 - For a branch with no open PR in the bulk list: a cached merged/closed PR is
@@ -192,15 +192,25 @@ Selected filters and sort persist across reopens via the webview state. The
 filtered list is paginated client-side, 25 per page with a Prev/Next pager, and the
 page resets to the first whenever a filter or sort changes.
 
-A branch's open (or draft) PR rollup is rendered as a hint on its row when one
-exists. Merged/closed PRs are not loaded, which is why deleting a squash-merged
-branch relies on its own unpushed count rather than the `merged` flag.
+A branch's open (or draft) PR is rendered on its row when one exists, as the
+same two-line block a worktree card draws (`prSummary` in panel.js): number,
+title, outlined state badge and merge flags, then the reviews and the checks in
+words. The name line also carries the PR's two glyphs - a circle for CI, a
+speech bubble for the review decision, coloured by state - so a branch whose PR
+needs you is findable down the list without reading each block. Merged/closed
+PRs are not loaded, which is why deleting a squash-merged branch relies on its
+own unpushed count rather than the `merged` flag.
 
 ## Creating a worktree from a branch
 
 - A branch with no worktree shows **Create worktree & start agent**; one that
   already has a worktree shows a **Worktree exists** marker plus **Start agent**,
   which posts an `agent` message to launch a Claude agent in that existing worktree.
+  The row's controls sit in three fixed slots - marker, primary action, Delete -
+  with an empty slot kept as a slot, so the same button lands at the same place
+  on every row. The marker is muted text with a green check, not a pill: it is a
+  reading, and it sits beside real buttons. The location tag ("local only",
+  "local + remote", "remote only") is muted text for the same reason.
 - Clicking create posts `worktreeFromBranch`. The provider runs
   `git.addBranchWorktree` (checking out an existing local branch, or creating a
   local tracking branch for a remote-only branch), starts a Claude agent in it via

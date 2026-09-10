@@ -43,25 +43,6 @@ body {
    the description colour - since it names a region of the panel rather than an
    item in it, and the rule runs off to the right so the label reads as the head
    of what follows rather than as a caption between two things. */
-.cards-divider {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 10px 2px 2px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--vscode-descriptionForeground);
-  user-select: none;
-}
-.cards-divider::after {
-  content: "";
-  flex: 1 1 auto;
-  height: 1px;
-  background: rgba(127, 127, 127, 0.3);
-}
-
 /* --- Worktree groups -----------------------------------------------------
    The user's own sections over the cards list (see src/groups.ts). Drawn only
    once a second group exists, so a panel nobody has grouped looks exactly as it
@@ -307,20 +288,17 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--vscode-foreground);
 }
-.repo-stats .meta-count,
-.repo-stats .agents-bar-subagents {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  opacity: 0.9;
-}
-.repo-stats .meta-count svg,
-.repo-stats .agents-bar-subagents svg {
-  width: 13px;
-  height: 13px;
+/* The separator between the phrases of a status line, here and on a card. */
+.dot-sep {
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.7;
 }
 .repo-stats .stat {
-  gap: 3px;
+  gap: 4px;
+}
+.repo-stats .stat.total,
+.repo-stats .stat.subagents {
+  color: var(--vscode-descriptionForeground);
 }
 /* The repository name gives up width to the tools rather than pushing them off
    the row: the view switch added a control to a line that was already full. */
@@ -496,12 +474,31 @@ body {
     rgba(127, 127, 127, 0.14)
   );
 }
-/* The worktree whose agent owns the terminal you are typing into. Marked on the
-   card, not just on its header, so it is findable when the card is collapsed and
-   the header is all there is. It used to mark the open workspace folder instead -
-   which is one card, forever, and not news. */
-.card.terminal-open {
-  border-color: var(--vscode-focusBorder);
+/* The card's one derived state, as a stripe down its left edge (see
+   worktreeState in panel.js): yellow when something here needs you, green when
+   work is running, nothing when idle. The agent status colours are spent on this
+   and on the agent rows, and on nothing else, so a hue on a card always means
+   the same thing. Drawn over the border rather than inside the padding, so the
+   rows keep their left edge whether or not the card is striped. */
+.card {
+  position: relative;
+}
+.card::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+  pointer-events: none;
+}
+.card.state-attn::before {
+  background: var(--vscode-charts-yellow, #cca700);
+}
+.card.state-work::before {
+  background: var(--vscode-charts-green, #89d185);
 }
 
 
@@ -638,54 +635,35 @@ body {
   background: transparent;
 }
 /* Git working-tree summary line. */
-.gitline {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--vscode-foreground);
-}
-.gitline .seg {
+/* The git cell: changed-file count, diff stat, ahead/behind, in the same place
+   on every card. The count takes the foreground - it is the number that says
+   work has happened - and the +/- keep git's own green and red, at the chart
+   tokens so they hold up in a light theme. Everything else is muted: git state
+   is progress, not a request, and the stripe does not read it. */
+.git-cell {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-
-
-
-.gitline .clean {
-  color: var(--vscode-charts-green, #89d185);
-}
-.gitline .clean svg {
-  width: 12px;
-  height: 12px;
-}
-.gitline .dirty {
-  color: var(--vscode-charts-yellow, #cca700);
-}
-.gitline .ins {
-  color: var(--vscode-charts-green, #89d185);
+  flex-wrap: wrap;
+  gap: 0 5px;
+  margin-left: auto;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-}
-.gitline .del {
-  color: var(--vscode-charts-red, #f14c4c);
-  font-variant-numeric: tabular-nums;
-}
-.gitline .none {
   color: var(--vscode-descriptionForeground);
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.gitline .ahead,
-.gitline .behind {
-  font-variant-numeric: tabular-nums;
+.git-cell .changed {
+  color: var(--vscode-foreground);
+  font-weight: 500;
 }
-.gitline .gdot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
+.git-cell .ins {
+  color: var(--vscode-charts-green, #89d185);
+}
+.git-cell .del {
+  color: var(--vscode-charts-red, #f14c4c);
+}
+.git-cell .ahead,
+.git-cell .behind {
+  color: var(--vscode-foreground);
 }
 
 /* Status colors, sourced from VS Code chart variables with safe fallbacks.
@@ -733,14 +711,14 @@ body {
    counts. */
 .agent-row .status-dot.active,
 .agent-row .status-dot.waiting,
-.card .meta-stats .stat.waiting .status-dot,
+.card .status-line .stat.waiting .status-dot,
 .repo-stats .stat.waiting .status-dot {
   position: relative;
   animation: status-fade 1.4s ease-in-out infinite;
 }
 .agent-row .status-dot.active::after,
 .agent-row .status-dot.waiting::after,
-.card .meta-stats .stat.waiting .status-dot::after,
+.card .status-line .stat.waiting .status-dot::after,
 .repo-stats .stat.waiting .status-dot::after {
   content: "";
   position: absolute;
@@ -770,8 +748,7 @@ body {
 }
 /* Honor reduced-motion: keep the dots colored, just stop them pulsing. */
 @media (prefers-reduced-motion: reduce) {
-  .status-dot,
-  .pr-seg.pending svg {
+  .status-dot {
     animation: none;
   }
   .status-dot::after {
@@ -844,21 +821,41 @@ body {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
 }
-.agent-row.attention {
-  outline: 1px solid var(--vscode-charts-yellow, #cca700);
-  outline-offset: -1px;
+/* A row's state is a bar down its left edge - yellow for an agent waiting on
+   you, blue for the one whose terminal you are typing into - the same mark in
+   the agents view and on a card, so the two tabs say one thing one way. It used
+   to be an outline round the whole row, which on a card inside a group's rail
+   was the third rectangle around one line of text. The row keeps room for it
+   in its left padding, so the words do not move when the bar appears. */
+.agent-row {
+  padding-left: 12px;
 }
-/* The agent whose terminal is currently active in the terminal panel — the one
-   the user is talking to. Blue outline + tint plus a terminal glyph; declared
-   after .attention so the blue outline wins when a row is both. */
+.agent-row::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: transparent;
+  pointer-events: none;
+}
+.agent-row.attention::after {
+  background: var(--vscode-charts-yellow, #cca700);
+}
+/* The agent whose terminal is currently active in the terminal panel - the one
+   the user is talking to. Blue bar + tint plus a terminal glyph; declared after
+   .attention so the blue bar wins when a row is both. */
 .agent-row.terminal-open {
-  outline: 1px solid var(--vscode-focusBorder, #007fd4);
-  outline-offset: -1px;
   background: color-mix(
     in srgb,
     var(--vscode-focusBorder, #007fd4) 12%,
     var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.06))
   );
+}
+.agent-row.terminal-open::after {
+  background: var(--vscode-focusBorder, #007fd4);
 }
 /* Terminal chips are always in the markup so the highlight can be toggled with
    classes alone; CSS shows them only where relevant. */
@@ -1348,17 +1345,23 @@ button.busy {
 }
 
 /* Per-agent skill counter; opens the skills modal on click. */
+/* A count, not a pill. The outline it wore made it read as a control beside
+   the one control on the row (the stop button), and the subagent count next to
+   it - which is not clickable - wore the same outline. Text for both; this one
+   keeps a hover, because it does open something. */
 .skill-chip {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 1px 6px 1px 5px;
+  padding: 0 3px;
+  margin: 0 -3px;
   font-size: 11px;
-  border-radius: 999px;
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  border-radius: 3px;
+  border: none;
   color: var(--vscode-descriptionForeground);
   background: transparent;
+  cursor: pointer;
 }
 .skill-chip:hover {
   color: var(--vscode-foreground);
@@ -1379,10 +1382,7 @@ button.busy {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 1px 6px 1px 5px;
   font-size: 11px;
-  border-radius: 999px;
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
   color: var(--vscode-descriptionForeground);
 }
 .subagent-count svg {
@@ -1511,17 +1511,73 @@ button.busy {
   }
 }
 
-/* Count of subagents running across the worktree, shown in the Agents bar so
- * they stay visible while the agent list is collapsed. */
-.agents-bar-subagents {
+/* The help dialog: the key to the panel, off the toolbar's ? button. */
+.help-modal {
+  max-width: 340px;
+}
+.help-body {
+  padding: 4px 12px 12px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.help-section {
+  margin: 10px 0 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.25));
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+.help-section:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 4px;
+}
+.help-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0;
+  line-height: 1.4;
+}
+.help-mark {
+  flex: 0 0 18px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  opacity: 0.85;
+  justify-content: center;
+  height: 1.4em;
 }
-.agents-bar-subagents svg {
-  width: 13px;
-  height: 13px;
+.help-stripe {
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: transparent;
+}
+.help-stripe.attn {
+  background: var(--vscode-charts-yellow, #cca700);
+}
+.help-stripe.work {
+  background: var(--vscode-charts-green, #89d185);
+}
+.help-stripe.idle {
+  border: 1px dashed var(--vscode-descriptionForeground);
+  width: 1px;
+}
+.help-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+.help-body .git-cell {
+  margin-left: 0;
+  font-size: 12px;
+}
+.help-note {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
 }
 
 /* Skills modal. */
@@ -1593,163 +1649,79 @@ button.busy {
   opacity: 0.7;
 }
 
-/* --- PR status line on a worktree card ----------------------------------- */
-.prline {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  text-decoration: none;
-  color: var(--vscode-foreground);
-  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
-}
-.pr-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.pr-row-label {
-  flex: 0 0 auto;
-  min-width: 52px;
-  color: var(--vscode-descriptionForeground);
-}
-/* PR title sits above the status row. It can wrap across lines when long, so it
-   stays on its own row (no flex-wrap onto the status badges). */
-.pr-title {
-  display: block;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--vscode-foreground);
-  overflow-wrap: anywhere;
-}
-.prline:hover {
-  color: var(--vscode-foreground);
-  border-color: var(--vscode-focusBorder);
-}
-.prline .pr-ico {
-  display: inline-flex;
-  flex: 0 0 auto;
-  opacity: 0.8;
-}
-.prline .pr-ico svg {
-  width: 13px;
-  height: 13px;
-}
+/* --- Pull request badges and glyphs ---------------------------------------- */
+/* The state badge and the merge flags, outlined rather than filled. A filled
+   OPEN pill was the most saturated thing on the panel, on every card with a PR,
+   for the state a PR is in nearly all of its life. Outlined in the state's own
+   colour it still names the state and stops shouting it. The chart tokens are
+   tuned per theme, so the text holds its contrast on a light ground too. */
 .pr-state {
+  display: inline-flex;
+  align-items: center;
   font-weight: 600;
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 2px 7px;
+  line-height: 1;
+  padding: 2px 6px;
   border-radius: 999px;
-  /* Fixed, saturated fills (GitHub's state colors) chosen for legible white
-     text — VS Code chart vars are too light/pastel under white. */
-  color: #fff;
-}
-.pr-state.open {
-  background: #1f883d;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  color: var(--vscode-charts-green, #89d185);
 }
 .pr-state.draft {
-  background: #57606a;
+  color: var(--vscode-descriptionForeground);
 }
 .pr-state.merged {
-  background: #8250df;
+  color: var(--vscode-charts-purple, #b180d7);
 }
 .pr-state.closed {
-  background: #cf222e;
+  color: var(--vscode-charts-red, #f14c4c);
 }
-/* Merge-readiness flags. Filled pills with fixed, saturated backgrounds so the
-   white text stays legible in both themes (the chart vars are too light). */
 .pr-flag {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   font-weight: 600;
   font-size: 11px;
-  padding: 2px 7px;
+  line-height: 1;
+  padding: 2px 6px;
   border-radius: 999px;
-  color: #fff;
+  border: 1px solid currentColor;
+  white-space: nowrap;
 }
 .pr-flag svg {
   width: 11px;
   height: 11px;
 }
 .pr-flag.behind {
-  /* GitHub's "attention" amber, darkened for white-text contrast. */
-  background: #9a6700;
+  color: var(--vscode-charts-yellow, #cca700);
 }
 .pr-flag.automerge {
-  background: #0969da;
+  color: var(--vscode-charts-blue, #3794ff);
 }
-.pr-seg {
+/* The PR glyphs: a circle for the checks, a bubble for the review. Colour is
+   the state, shape is which. */
+.pr-glyph {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
 }
-.pr-seg svg {
-  width: 12px;
-  height: 12px;
+.pr-glyph svg {
+  width: 13px;
+  height: 13px;
 }
-.pr-seg.pass,
-.pr-seg.approved {
+.pr-glyph.ok {
   color: var(--vscode-charts-green, #89d185);
 }
-.pr-seg.fail,
-.pr-seg.changes {
+.pr-glyph.bad {
   color: var(--vscode-charts-red, #f14c4c);
 }
-.pr-seg.pending {
+.pr-glyph.warn {
   color: var(--vscode-charts-yellow, #cca700);
 }
-.pr-seg.pending svg {
-  width: 8px;
-  height: 8px;
-  /* CI is still running: pulse the dot so "checks in progress" reads at a glance,
-     mirroring the active agent's pulsing status dot. */
-  transform-origin: center;
-  animation: dot-pulse 1.4s ease-in-out infinite;
-}
-@keyframes dot-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.4;
-    transform: scale(0.82);
-  }
-}
-.pr-seg.required {
-  color: var(--vscode-charts-yellow, #cca700);
-  font-weight: 600;
-}
-.pr-seg.review-pending {
+.pr-glyph.none {
   color: var(--vscode-descriptionForeground);
+  opacity: 0.75;
 }
-.pr-seg.comments {
-  opacity: 0.8;
-}
-.prline .pr-open {
-  margin-left: auto;
-  display: inline-flex;
-  flex: 0 0 auto;
-  opacity: 0.5;
-}
-.prline:hover .pr-open {
-  opacity: 1;
-}
-.prline .pr-open svg {
-  width: 12px;
-  height: 12px;
-}
-
 /* --- Settings page (full-window) ----------------------------------------- */
 .settings-view {
   display: flex;
@@ -2714,21 +2686,12 @@ button.busy {
   text-overflow: ellipsis;
 }
 /* Locality tag: local only / local + remote / remote only. */
+/* Text, not a coloured pill: where a branch lives rarely decides anything, and
+   blue and purple beside the PR badges made it compete with what does. */
 .btag {
   flex: 0 0 auto;
   font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid currentColor;
-}
-.btag.local {
   color: var(--vscode-descriptionForeground);
-}
-.btag.both {
-  color: var(--vscode-charts-blue, #3794ff);
-}
-.btag.remote-only {
-  color: var(--vscode-charts-purple, #b180d7);
 }
 /* Ahead/behind vs upstream, next to the tag. */
 .bsync {
@@ -2745,12 +2708,22 @@ button.busy {
   align-items: center;
   font-variant-numeric: tabular-nums;
 }
+/* Three slots - worktree-exists marker, primary action, Delete - each always
+   in the same place. The last column is fixed, so Delete lands at the same x on
+   every row and the primary action's right edge does too; an empty slot keeps
+   the column. */
 .brow-control {
   margin-left: auto;
   flex: 0 0 auto;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: max-content max-content 118px;
   align-items: center;
+  justify-items: end;
   gap: 8px;
+}
+.brow-control .bdelete {
+  width: 100%;
+  justify-content: center;
 }
 /* Git-native "last updated" line: when, and by whom. The signal the view sorts
    and filters on. */
@@ -2799,20 +2772,20 @@ button.busy {
   width: 13px;
   height: 13px;
 }
-/* Non-clickable "worktree exists" marker. */
+/* "Worktree exists": a reading, not a control, so plain muted text with the
+   check in green rather than a pill that looks like the buttons beside it. */
 .bworktree {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: var(--vscode-charts-green, #89d185);
-  border: 1px solid color-mix(in srgb, var(--vscode-charts-green, #89d185) 45%, transparent);
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
 }
 .bworktree svg {
   width: 12px;
   height: 12px;
+  color: var(--vscode-charts-green, #89d185);
 }
 /* Delete-branch button: subtle ghost until hovered, then danger-red. Shown only
    on branches the signed-in user authored. */
@@ -2831,9 +2804,14 @@ button.busy {
   width: 13px;
   height: 13px;
 }
-/* PR line inside a branch row: top margin only when it follows the name row. */
-.brow .prline {
-  margin-top: 8px;
+/* The PR block inside a branch row, under the name and meta lines. */
+.brow .pr-summary {
+  margin: 8px 0 0;
+}
+.brow .head-pr {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ===========================================================================
@@ -2961,32 +2939,15 @@ button.busy {
   min-width: 0;
   line-height: 1.35;
 }
-/* The worktree's own directory name, labelled, as a line of the card rather than
-   a bare second name beside the branch. The label is the secondary half and takes
-   the muted colour; the name itself is content, so it takes the foreground - a
-   directory name is not decoration and 11px grey-on-grey is not readable enough
-   for something you might be copying. */
-.worktree-name {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
+/* The worktree's directory, muted beside the branch. Inline, so it follows the
+   name's last word and wraps with it rather than sitting beside a two-line
+   block. */
+.card .folder {
+  margin-left: 6px;
   font-size: 11px;
-}
-.worktree-name-label {
-  flex: 0 0 auto;
+  font-weight: 400;
   color: var(--vscode-descriptionForeground);
-}
-.worktree-name-value {
-  color: var(--vscode-foreground);
-  overflow-wrap: break-word;
-  min-width: 0;
-}
-/* Indented to the branch name, like the rows above it. */
-.card .worktree-name {
-  /* More room under it than above: it is the last of the card's own facts, and
-     what follows is the debug rows and the agent list - a separate subject. */
-  padding: 0 6px 8px 19px;
+  overflow-wrap: anywhere;
 }
 .card .branch {
   display: inline;
@@ -3325,15 +3286,39 @@ button.busy {
 .card .meta-flag.warn {
   color: var(--vscode-charts-yellow, #cca700);
 }
-.card .card-meta {
+/* The status line: what is running here on the left, the git cell on the
+   right. Flush with the chevron above it - the card's rows share the card's own
+   left edge rather than an indent to the name. */
+.card .status-line {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 8px;
-  /* Indented past the chevron to the branch name's left edge (3px of header
-     padding, a 12px chevron, a 4px gap), the same inset the Worktree line takes,
-     so the card's facts line up under the name rather than under the chevron. */
-  padding: 0 6px 5px 19px;
+  gap: 3px 8px;
+  padding: 0 6px 6px 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.card .status-agents {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 5px;
+  min-width: 0;
+  color: var(--vscode-foreground);
+}
+.card .status-line .stat {
+  gap: 4px;
+  white-space: nowrap;
+}
+.card .status-line .stat.subagents,
+.card .status-line .stat.none {
+  color: var(--vscode-descriptionForeground);
+}
+/* The PR asking for you, named in the stripe's colour: the stripe says the
+   card needs a look and this says which reason. */
+.card .status-line .stat.pr-attn {
+  color: var(--vscode-charts-yellow, #cca700);
+  font-weight: 500;
 }
 /* The terminal glyph: this worktree's agent owns the terminal you are typing
    into. Last in the meta line's left group - not beside the name, where it
@@ -3352,99 +3337,101 @@ button.busy {
 .card.terminal-open .meta-terminal {
   display: inline-flex;
 }
-/* Refresh, at the head of the line it re-reads. Sized down to the line rather
-   than to the header's run - this is 11px text, and a 20px button beside it
-   would set the row's height instead of the words doing it. */
-.card .card-meta .act {
-  flex: 0 0 auto;
-  padding: 1px 3px;
-  /* Its own gap to the totals, tighter than the line's 8px: it leads them rather
-     than being another item in the run. */
-  margin-right: -3px;
+/* The card's PR slot: one line for the PR, one muted line of words under it.
+   No frame and no fill - the card is the one bordered object, and the PR is a
+   line of it, not a box inside it. */
+.pr-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-size: 11px;
+  text-decoration: none;
+  color: var(--vscode-foreground);
+  border-radius: 3px;
 }
-.card .card-meta .act svg {
+.pr-summary:hover .pr-title {
+  text-decoration: underline;
+}
+.pr-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+  min-width: 0;
+}
+.pr-num {
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+}
+.pr-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.pr-summary .pr-open {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  opacity: 0.5;
+}
+.pr-summary:hover .pr-open {
+  opacity: 1;
+}
+.pr-summary .pr-open svg {
   width: 12px;
   height: 12px;
 }
-.card .gitline {
-  margin-top: 0;
-  gap: 8px;
-  font-size: 11px;
-  /* Pushed to the right edge, with the agent counts holding the left: two
-     readings of the worktree at opposite ends of one line. The auto margin
-     applies per flex line, so a panel too narrow to hold both wraps the totals
-     to a row of their own and keeps them right-aligned there - no measuring, no
-     breakpoint, and it happens per card at whatever width that card actually
-     runs out. */
-  margin-left: auto;
-}
-/* Agent count, live subagents and the per-status dots. The same summary the
-   Agents bar carries in the comfortable layout, moved next to the diff totals -
-   they answer different questions about the worktree, so a rule separates them
-   rather than leaving one run of glyphs to be parsed as a single group. */
-.card .meta-stats {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 7px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--vscode-foreground);
-}
-.card .meta-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  opacity: 0.9;
-}
-.card .meta-count svg {
-  width: 13px;
-  height: 13px;
-}
-.card .meta-stats .stat {
-  gap: 3px;
-}
-/* The PR rollup keeps its frame here: it is one thing about the branch, and the
-   border is what says so. Compact buys its rows back by dropping the padding and
-   merging the two labelled rows into one, not by unpacking the block into the
-   meta line - loose beside the git totals it reads as more unrelated chips. */
-.prline.tight {
-  gap: 3px;
-  margin: 0 6px 6px 19px;
-  padding: 4px 7px;
-  font-size: 11px;
-}
-.prline.tight .pr-title {
-  font-size: 12px;
-  line-height: 1.3;
-}
-.prline.tight .pr-row {
-  gap: 6px;
-}
-.prline.tight .pr-state {
-  padding: 1px 6px;
-}
-.prline.tight .pr-flag {
-  padding: 1px 5px;
-}
-.prline.tight .pr-seg svg {
-  width: 11px;
-  height: 11px;
-}
-/* Reviews and checks share a row, side by side rather than stacked. Both runs
-   are mostly ticks and crosses, so each keeps the label the roomy layout gives
-   it: it is the label, not the position, that says which sequence is CI and
-   which is the review decision. */
-.prline.tight .pr-rollup {
-  gap: 4px 14px;
-}
-.prline.tight .pr-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.prline.tight .pr-group-label {
+.pr-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
   color: var(--vscode-descriptionForeground);
+}
+.pr-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.pr-group-label {
+  color: var(--vscode-descriptionForeground);
+}
+.pr-detail .bad {
+  color: var(--vscode-charts-red, #f14c4c);
+}
+.pr-detail .warn {
+  color: var(--vscode-charts-yellow, #cca700);
+}
+/* The slot with nothing in it: kept, muted, so a card without a PR has the same
+   shape as one with. */
+.pr-none {
+  margin: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.card .pr-summary,
+.card .pr-none {
+  margin: 0 6px 6px 6px;
+}
+/* The PR signal in the header: number badge, checks glyph, review glyph. Shown
+   only while the card is shut; open, the body's PR line has the words. Inline
+   after the name, so it follows a long name's last word. */
+.card .head-pr {
+  display: none;
+  vertical-align: middle;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+}
+.card.collapsed .head-pr {
+  display: inline-flex;
+}
+.card .head-pr .pr-state {
+  font-size: 10.5px;
+  padding: 1px 5px;
 }
 
 /* --- Body: actions, then the agents, on a rail back to the header --------- */
@@ -3503,7 +3490,7 @@ button.busy {
   /* The gap under it is wider than the one above: the heading belongs to the list
      it labels, but sitting hard against the first row it read as part of that
      row rather than over the group. */
-  margin: 0 6px 5px 18px;
+  margin: 0 6px 4px 6px;
   font-size: 11px;
 }
 .card .agents-heading-label {
@@ -3658,12 +3645,31 @@ button.busy {
   margin-left: 10px;
   padding: 1px 6px 1px 3px;
 }
+/* On a card the rows are not boxes. The card is the one bordered object; its
+   agents are hairline-separated lines of it (the rule between agents is drawn
+   above, in .agents), with no fill of their own. The state bar is the row's
+   own, shared with the agents view. */
+.card .agent-row {
+  background: transparent;
+  border-radius: 3px;
+  padding-left: 10px;
+}
+.card .agent-row.terminal-open {
+  background: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, #007fd4) 10%,
+    transparent
+  );
+}
+.card .agent-row:hover {
+  background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.2));
+}
 .card .agents-empty {
   margin: 0;
-  padding: 0 6px 4px 19px;
+  padding: 0 6px 4px 6px;
 }
 .card .debug-rows {
-  margin: 0 6px 4px 19px;
+  margin: 0 6px 4px 6px;
 }
 
 /* Toolbar toggle in its on state, matching the active source-control pill. */
