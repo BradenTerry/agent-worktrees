@@ -2,6 +2,47 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.6.10
+
+A redesign of the panel, built to make the differences between worktrees
+readable at a glance.
+
+### Changes
+
+- **One state per worktree, as a stripe down the card's left edge.** Yellow
+  when something needs you: an agent is waiting, or the pull request has changes
+  requested, a failed check, or is out of date with its base. Green when an
+  agent or subagent is running. No stripe when idle. Local changes alone never
+  colour a card.
+- **Counts are words.** A card's status line reads `1 waiting · 2 working · 3
+  subagents`, with zero counts left out and `PR needs you` named when the PR is
+  the reason for the stripe. The summary under the repository name uses the
+  same phrases. On the right of every card and every collapsed card sits one
+  git cell: changed files, `+`/`-` lines, ahead and behind, or `clean`.
+- **The pull request is a line of the card, not a box.** Number, title, an
+  outlined state badge and the Out of date and Auto-merge flags on one line,
+  then the reviews and the checks in words. `No pull request` keeps the slot,
+  so every card has the same shape. A collapsed card keeps the PR number and
+  two glyphs, a circle for CI and a speech bubble for the review decision, so
+  whether checks passed and whether it is approved is readable without opening
+  it.
+- **The worktree's folder sits beside the branch name**, muted, with the full
+  path on hover, instead of on a row of its own.
+- **Agent rows are lines, not boxes.** Hairline-separated, with a bar down the
+  left edge for an agent waiting on you (yellow) and for the one whose terminal
+  you are typing into (blue), in both the card and the agents view. Subagent
+  and skill counts are text rather than pills, so only buttons look pressable.
+- **The Branches tab matches.** The same PR block, the two glyphs on the branch
+  name line, `Worktree exists` and the location tag as plain text, and the
+  controls in fixed slots so the same button sits in the same place down the
+  list. Rows with a pull request take about half the height they did.
+- **A `?` button in the toolbar** opens the key: the stripe, the agent markers,
+  the PR glyphs and the git cell.
+- **The Worktrees divider is gone** from above the General section; the tab
+  already says what the list is.
+- The panel's script and stylesheet are loaded with a cache-busting query, so a
+  rebuilt extension never shows a stale panel.
+
 ## 4.5.30
 
 The first regular release of the 4.5 line. Everything since 4.4.31, including
