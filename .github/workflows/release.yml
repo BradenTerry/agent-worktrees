@@ -44,12 +44,15 @@ name: Release
 # cannot start a release. Two further gates narrow that to the owner:
 #
 #   - the guard job below fails the run unless github.actor is the repository owner;
-#   - the publish job targets the protected "release" environment, which requires an
-#     approval from BradenTerry and only accepts main or a v* tag. VSCE_PAT lives in
-#     that environment, so no other job in any workflow can read it, and editing this
-#     file to drop the guard does not get you the token.
+#   - the publish job targets the protected "release" environment, which only accepts
+#     main or a v* tag. VSCE_PAT lives in that environment, so no other job in any
+#     workflow can read it, and editing this file to drop the guard does not get you
+#     the token.
 #
-# The environment approval is the real enforcement; the guard just fails fast.
+# The environment has no required reviewer: a tag push publishes without a click.
+# Write access is what starts a release, and the owner is the only collaborator, so
+# an approval step only ever guarded the owner against themselves. Fork PRs cannot
+# reach any of this: their workflows need approval before they run at all.
 on:
   push:
     tags:

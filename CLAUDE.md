@@ -162,9 +162,11 @@ stable release of that work is `4.5.1`. See `.claude/skills/release/SKILL.md`.
 
 Releases are owner-only. `release.yml` has a `guard` job that fails unless
 `github.actor` is the repository owner, and its `publish` job targets the
-protected `release` environment (approval required, restricted to `main` and `v*`
-tags). A release run therefore pauses for an approval in the Actions UI before it
-publishes - expect that wait, it is not a hang.
+protected `release` environment, restricted to `main` and `v*` tags. There is no
+required reviewer on it, so pushing a tag publishes without a click: write access
+is what starts a release and the owner is the only collaborator. Workflows from
+fork PRs need the owner's approval before they run at all (Actions settings,
+"all outside collaborators").
 
 ## Conventions
 
