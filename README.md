@@ -154,7 +154,10 @@ its running agents in one view.
   origin, for a detached worktree (no branch page), and for a branch with no
   upstream, which has not been pushed and so has no tree to open.
 - **PR status** on a card when a stored token resolves a PR for the branch: number,
-  title, an outlined state badge, `Out of date` and `Auto-merge` flags, and a
+  title, an outlined state badge, `Ready to merge`, `Out of date` and
+  `Auto-merge` flags (the first two read from GitHub's `mergeable_state`, so
+  "ready" means every required review and check passed, whatever the branch
+  protection requires), and a
   line of words for the reviews and the checks. Each of those two also has a
   glyph - a circle for CI, a speech bubble for the review decision, coloured by
   state - which is what a collapsed card carries beside the PR number, so

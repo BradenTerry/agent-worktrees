@@ -131,7 +131,9 @@ Every card links its branch to GitHub with no token and no setup. Connect a toke
 and the card grows a PR rollup:
 
 - Number, title, state, and the reviews and checks spelled out in words.
-- **Out of date** and **Auto-merge** flags.
+- A **Ready to merge** flag, straight from GitHub: every required review and
+  check has passed and the branch is current with its base, so the merge button
+  is live. Also **Out of date** and **Auto-merge** flags.
 - A collapsed card keeps the PR number and two glyphs, a circle for CI and a
   speech bubble for the review, so you can see whether checks passed and whether
   it is approved without opening the card. The `?` button in the toolbar opens
@@ -145,7 +147,7 @@ and the card grows a PR rollup:
 
 | On the worktree card | Connecting a token |
 | :--- | :--- |
-| <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="A worktree card showing its PR number, title, state badge, auto-merge flag, and its reviews and checks in words" width="380"> | <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="Settings, GitHub tab: the PR status toggle and the connected token" width="380"> |
+| <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/pr-status.png" alt="A worktree card showing its PR number, title, state badge, a Ready to merge flag, and its reviews and checks in words" width="380"> | <img src="https://raw.githubusercontent.com/BradenTerry/agent-worktrees/main/images/settings.png" alt="Settings, GitHub tab: the PR status toggle and the connected token" width="380"> |
 
 ## Branches view
 

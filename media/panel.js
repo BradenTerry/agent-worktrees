@@ -853,6 +853,20 @@
   }
 
   /**
+   * Whether GitHub would accept a merge right now. Read straight from the PR's
+   * mergeable_state rather than counted from approvals and checks: only GitHub
+   * knows how many reviews the branch protection requires and which checks are
+   * required, and "clean" is its word for all of that being satisfied.
+   * "has_hooks" is the same state on a repo with pre-receive hooks. Only an
+   * open PR can be ready: a draft reports "draft", and a merged or closed one
+   * has nothing left to merge.
+   */
+  function prReady(pr) {
+    if (!pr || pr.state !== "open") return false;
+    return pr.mergeState === "clean" || pr.mergeState === "has_hooks";
+  }
+
+  /**
    * One derived state per worktree, drawn as the card's left stripe. It answers
    * a single question - do I need to look at this worktree - in this order:
    *
@@ -1090,7 +1104,15 @@
     const g = prGlyphs(pr);
     return (
       '<span class="head-pr" data-tip="' +
-      esc("PR #" + pr.number + ", " + st.label.toLowerCase() + ": " + pr.title) +
+      esc(
+        "PR #" +
+          pr.number +
+          ", " +
+          st.label.toLowerCase() +
+          (prReady(pr) ? ", ready to merge" : "") +
+          ": " +
+          pr.title
+      ) +
       '"><span class="pr-state ' +
       st.cls +
       '">#' +
@@ -1128,7 +1150,15 @@
     const plural = (n) => (n === 1 ? "" : "s");
     const g = prGlyphs(pr);
 
+    // GitHub's own verdict, not one derived here: mergeable_state is "clean"
+    // (or "has_hooks") only once every required review is in, every required
+    // check has passed, the branch is current with its base and there are no
+    // conflicts. That is the one signal that says "you can press merge", and
+    // it holds however many approvals the branch protection asks for.
     const flags =
+      (prReady(pr)
+        ? '<span class="pr-flag ready" title="Every required review and check has passed and the branch is current with its base. GitHub will accept a merge">Ready to merge</span>'
+        : "") +
       (pr.mergeState === "behind"
         ? '<span class="pr-flag behind" title="This branch is out-of-date with the base branch">Out of date</span>'
         : "") +

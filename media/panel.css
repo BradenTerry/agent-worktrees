@@ -1692,6 +1692,9 @@ button.busy {
   width: 11px;
   height: 11px;
 }
+.pr-flag.ready {
+  color: var(--vscode-charts-green, #89d185);
+}
 .pr-flag.behind {
   color: var(--vscode-charts-yellow, #cca700);
 }

@@ -2,6 +2,15 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.6.11
+
+### Changes
+
+- **A "Ready to merge" flag on the PR line.** Read from GitHub's own
+  mergeable state, so it appears only once every required review and check has
+  passed and the branch is current with its base, whatever the branch
+  protection requires. Cards only; branch rows do not carry the field.
+
 ## 4.6.10
 
 A redesign of the panel, built to make the differences between worktrees

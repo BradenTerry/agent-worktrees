@@ -92,11 +92,15 @@ export interface PrInfo {
   reviewsPending: number;
   /** Issue + review-thread comments. */
   comments: number;
-  /** GitHub's mergeable_state, lowercased. The one users care about here is
-   *  "behind": the branch is out of date with its base and must be updated
-   *  before it can merge (GitHub's "This branch is out-of-date with the base
-   *  branch"), even when every check is green. Others are
-   *  blocked/clean/dirty/draft/has_hooks/unstable/unknown. */
+  /** GitHub's mergeable_state, lowercased. Two values are surfaced:
+   *  "clean" (and "has_hooks", the same on a repo with pre-receive hooks) is
+   *  GitHub's verdict that the merge button is live: every required review and
+   *  required check has passed, the branch is current with its base and there
+   *  are no conflicts. It is the only reliable "can merge" signal, since the
+   *  number of required approvals lives in branch protection, which this
+   *  client never reads. "behind" is the branch being out of date with its
+   *  base, which blocks a merge even when every check is green. The rest
+   *  (blocked/dirty/draft/unstable/unknown) are carried but not drawn. */
   mergeState?:
     | "behind"
     | "blocked"
