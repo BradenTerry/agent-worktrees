@@ -140,10 +140,17 @@ the Worktrees tab already names what the list is, and General's header - always
 drawn, so the cards never jump under one the moment a first group is made -
 separates the primary from the rest on its own.
 
-A section header is deliberately quieter than a card: a fold, a name, a count and
-a caret, with no border, no fill and no card gutter. It labels the list rather
-than being an item in it, and giving it a card's treatment would make every group
-read as a card containing cards - one nesting level more than a sidebar carries.
+A section header is a fold, a name, a count and a caret in a light frame: a
+hairline border and a faint fill, both lighter than a card's. It began with no
+frame at all, on the theory that a bordered header would make every group read
+as a card containing cards - one nesting level more than a sidebar carries. In
+use the bare header failed the other way: a folded section was a word floating
+on the panel background, the dark between one group and the next was the same
+dark as the dark inside a group, and the fold's click target - the whole header
+row - had no visible edge, so a click meant for the space beside it folded the
+section instead. The frame says where the header is and how wide the fold is,
+and it stops at the header: the group's cards are bracketed by the rail below,
+not boxed, which is what keeps the group from becoming a card of cards.
 
 ## Showing that the cards are inside it
 
@@ -153,9 +160,10 @@ header has scrolled away anyway. Two things fix that, and both were needed.
 
 **A rail, and 12px of indent.** The group's cards are held to the right of a 1px
 rail that hangs off the header. It sits on the chevron's centre line, so what it
-descends from is the control that folds them, and it stops at the last card's
-bottom edge rather than in the gutter below it, so where it ends is where the
-group ends.
+descends from is the control that folds them; it starts at the header frame's
+bottom edge and crosses the 6px gap to the first card, so it visibly leaves the
+header; and it stops at the last card's bottom edge rather than in the gutter
+below it, so where it ends is where the group ends.
 
 It took over from the rail a card's own expanded body used to draw
 (`.card-body::before`), which was removed with it: the two ran a few pixels apart
@@ -166,9 +174,10 @@ rule its body opens on.
 
 12px is the entire budget, and it is measured rather than chosen: at 14 the
 longest branch name in the fixtures stops fitting on one line at 260px, and the
-card layout spends its width on exactly that. The section header is flush left to
-buy the chevron's centre line back down to 6px. None of it is paid by a panel
-with no groups, which draws no sections at all.
+card layout spends its width on exactly that. The section header is flush left,
+its border and nothing else before the chevron, to buy the chevron's centre line
+back down to 7px. None of it is paid by a panel with no groups, which draws no
+sections at all.
 
 **Sticky section headers.** Which group you are looking at is precisely what
 scrolling destroys. The header pins at `top: 0` and the card headers - already
