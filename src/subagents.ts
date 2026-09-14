@@ -37,7 +37,9 @@ export interface FoundSubagent extends SubagentVM {
   /** It has issued a tool call whose result has not landed: it is either running
    *  that tool or blocked on a permission decision for it. Which of the two
    *  cannot be told from here - only the parent session's status says whether
-   *  anyone is being asked (see indexRegistry). */
+   *  anyone is being asked (see indexRegistry). Either way it writes nothing
+   *  until the call comes back, which is why it is also what picks the silence
+   *  backstop in liveSubagents. */
   outstanding: boolean;
   /** The parent's `Agent` tool-use this subagent belongs to. Its presence in the
    *  parent's results is what says the subagent has finished. */
@@ -357,12 +359,34 @@ export async function readSubagents(
   return out;
 }
 
-/** How long a subagent may go unwritten before it is treated as finished even
- *  though no result for it was seen. The backstop only matters for subagents
- *  that finished while no window was watching, whose result has since scrolled
- *  out of the parent transcript's tail; a working subagent writes far more
- *  often than this. */
+/** How long a subagent that has ENDED ITS TURN may go unwritten before it is
+ *  treated as finished even though no result for it was seen. The backstop only
+ *  matters for subagents that finished while no window was watching, whose
+ *  result has since scrolled out of the parent transcript's tail; a subagent
+ *  with nothing out is either about to be woken or already over, and ten
+ *  minutes of silence says which. */
 const SILENT_FOR_FINISHED = 10 * 60_000;
+
+/** The same, for a subagent that is MID-CALL.
+ *
+ *  A subagent writes its transcript when a tool call is issued and again when
+ *  the result lands, and nothing in between - so silence while a call is out is
+ *  the tool taking its time, not the subagent going away. Ten minutes does not
+ *  come close to bounding that: a build, a test suite or an install routinely
+ *  runs longer, and a call blocked on a permission prompt writes nothing for
+ *  however long it takes someone to answer it. Judging those by the same
+ *  threshold retired exactly the rows worth watching - the one running a long
+ *  command, and the one asking you to approve it - while they were still there
+ *  in the terminal, which is what "subagents disappear while they are running
+ *  something" was.
+ *
+ *  So silence tells us nothing here, and this is not a judgement about the
+ *  subagent, only a ceiling: a parent session that survives its subagent's
+ *  death mid-call (a crashed tool host, a machine resumed from sleep) has no
+ *  other signal to retire the row with, so one is bounded rather than
+ *  permanent. Twelve hours clears any plausible call, including a prompt left
+ *  overnight, and still clears a ghost out of a window left open for days. */
+const SILENT_MID_CALL_MS = 12 * 60 * 60_000;
 
 /**
  * The subagents still running, oldest first.
@@ -384,6 +408,12 @@ const SILENT_FOR_FINISHED = 10 * 60_000;
  * subagent finished, whose result was never in any tail this window read. Shown
  * as running for at most SILENT_FOR_FINISHED, which is wrong for that long
  * rather than forever.
+ *
+ * That threshold applies only to a subagent with nothing out. One that is
+ * mid-call is silent for as long as its tool runs - or for as long as a
+ * permission prompt goes unanswered - so it is held to SILENT_MID_CALL_MS
+ * instead, which is a ceiling on a ghost row rather than a guess at when the
+ * work ended.
  */
 export function liveSubagents(
   found: FoundSubagent[],
@@ -394,7 +424,9 @@ export function liveSubagents(
     .filter((s) => {
       if (finished.has(s.id)) return false;
       if (s.toolUseId && finished.has(s.toolUseId)) return false;
-      return now - s.lastActivity < SILENT_FOR_FINISHED;
+      // A call is out: its silence is the tool's, not the subagent's.
+      const silence = s.outstanding ? SILENT_MID_CALL_MS : SILENT_FOR_FINISHED;
+      return now - s.lastActivity < silence;
     })
     .sort((a, b) => a.startedAt - b.startedAt);
 }

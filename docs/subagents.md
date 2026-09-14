@@ -138,12 +138,26 @@ when it does.
 That leaves one case: a window opened long after a subagent finished, whose
 result was never in any tail this window read. The backstop is silence — a
 subagent whose transcript has not been written to for **10 minutes** is treated
-as finished. The threshold has to clear the longest plausible single tool call,
-since a subagent blocked on a slow build writes nothing while it waits; the cost
-of it being generous is that such a row can linger for up to that long, rather
-than forever. A row retired this way stops being stat'd every tick (above), and
+as finished. A row retired this way stops being stat'd every tick (above), and
 the minute-long re-check is what still lets it come back if the subagent was only
 parked on something very slow.
+
+Silence only means that much for a subagent with **nothing out**. A subagent
+writes when it issues a tool call and again when the result lands, and nothing in
+between, so one that is mid-call (see the table below) is silent for exactly as
+long as its tool runs — and a call blocked on a permission prompt is silent for
+as long as it takes someone to answer it. Ten minutes does not bound either: a
+build, a test suite or an install routinely runs longer, and a prompt can sit
+overnight. Judging those by the same threshold retired precisely the rows worth
+watching, the one running a long command and the one asking you to approve it,
+while both were still there in the terminal. That is what "subagents disappear
+while they are running something" was.
+
+So a mid-call row is held to **12 hours** instead. That number is not a guess at
+when the work ended — silence says nothing here — it is only a ceiling, so a
+parent session that outlives its subagent's death mid-call (a crashed tool host,
+a machine resumed from sleep) cannot leave a ghost row up forever. Every real
+finish signal above still retires such a row the moment it lands.
 
 The elapsed label on a row ticks in the webview rather than from a repost: the
 extension posts nothing while a subagent quietly works, so an age rendered once

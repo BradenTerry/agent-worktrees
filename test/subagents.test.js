@@ -204,6 +204,41 @@ test("liveSubagents drops one that has gone silent", () => {
   );
 });
 
+test("liveSubagents keeps a silent one that is still mid-call", () => {
+  // A subagent writes nothing between issuing a tool call and its result, so a
+  // long build - or a permission prompt nobody has answered - looks exactly
+  // like silence. Retiring it on the ten minute backstop took away the rows
+  // most worth watching while they were still running.
+  const building = sub({
+    id: "building",
+    outstanding: true,
+    lastActivity: NOW - 45 * 60_000,
+  });
+  const live = liveSubagents([building], new Set(), NOW);
+  assert.deepStrictEqual(
+    live.map((s) => s.id),
+    ["building"]
+  );
+});
+
+test("liveSubagents still bounds a mid-call one that never came back", () => {
+  // Silence says nothing about a mid-call subagent, so the longer threshold is
+  // only a ceiling: nothing lingers forever in a window left open for days.
+  const ghost = sub({
+    id: "ghost",
+    outstanding: true,
+    lastActivity: NOW - 13 * 60 * 60_000,
+  });
+  assert.deepStrictEqual(liveSubagents([ghost], new Set(), NOW), []);
+});
+
+test("liveSubagents retires a mid-call one the parent says is done", () => {
+  // The longer silence allowance is a backstop, not a veto: a real finish
+  // signal still retires the row immediately.
+  const found = [sub({ id: "done", outstanding: true, lastActivity: NOW - 60_000 })];
+  assert.deepStrictEqual(liveSubagents(found, new Set(["done"]), NOW), []);
+});
+
 test("liveSubagents orders by start time, oldest first", () => {
   const live = liveSubagents(
     [
@@ -253,6 +288,25 @@ test("a subagent whose call came back is parked, awaiting its next turn", async 
   const [s] = await readSubagents(dir);
   assert.strictEqual(s.outstanding, false);
   assert.strictEqual(s.paused, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a long command keeps its row, read end to end", async () => {
+  // The whole path: files on disk say a call is out and the transcript has not
+  // been touched in half an hour, which is what a long build looks like.
+  const dir = seed({
+    a1: {
+      meta: meta(),
+      records: [firstRecord(), callRecord("toolu_x")],
+      mtimeMs: NOW - 30 * 60_000,
+    },
+  });
+  const found = await readSubagents(dir, { now: NOW });
+  assert.strictEqual(found[0].outstanding, true);
+  assert.deepStrictEqual(
+    liveSubagents(found, new Set(), NOW).map((s) => s.id),
+    ["a1"]
+  );
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
