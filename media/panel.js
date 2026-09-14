@@ -1965,9 +1965,10 @@
   /**
    * One section: its header, and its cards under it.
    *
-   * The header is a fold, a name, a count and a caret - deliberately quieter
-   * than a card header, since it labels the list rather than being an item in
-   * it. An empty group keeps its header: it is a place the user made to put
+   * The header is a fold, a name, a count and a caret in a light frame (see
+   * .group-head in panel.css for why it has one) - still quieter than a card
+   * header, since it labels the list rather than being an item in it. An empty
+   * group keeps its header: it is a place the user made to put
    * things in, and one that disappeared when the last card left it would look
    * like the panel had deleted it.
    *

@@ -48,11 +48,17 @@ body {
    once a second group exists, so a panel nobody has grouped looks exactly as it
    did before.
 
-   Quieter than a card by design: this labels the list, it is not an item in it.
-   No border, no fill, no card gutter - a name, a count and a fold, with the
-   cards keeping their own frame underneath. Give the header a card's treatment
-   and every group reads as a card containing cards, which is one nesting level
-   more than a sidebar can carry.
+   Framed, but lightly. The header used to be bare - a name, a count and a fold
+   on the panel background - on the theory that a frame would make every group
+   read as a card containing cards. In use the opposite failed: with nothing
+   drawn round it, a folded section was a word floating in the dark, the gap
+   between one group and the next was the same dark as the gap inside a group,
+   and the fold's click target - the whole row - had no visible edge, so clicks
+   meant for the space beside it folded the section instead.
+   So the header row gets a hairline and a faint fill: enough to say "this is a
+   thing, and this is how wide it is", lighter than a card's border so it still
+   reads as a label over cards rather than as one of them. The frame stops at
+   the header; the group's cards are bracketed by the rail below, not boxed.
 
    Both this header and the card headers under it are sticky in the same scroll
    region, which needs the card headers offset by this one's height. That is
@@ -74,13 +80,24 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  /* Flush left, so the chevron's centre line - which the rail below hangs on -
-     lands 6px in and still leaves the cards their width at 260px. */
-  padding: 6px 5px 4px 0;
+  /* Flush left bar the border, so the chevron's centre line - which the rail
+     below hangs on - lands 7px in and still leaves the cards their width at
+     260px. Vertical padding is a pixel under the old 6/4 so the border keeps the
+     header at the same measured height. */
+  padding: 5px 5px 3px 0;
+  /* Room for the rail to be seen leaving the frame before the first card. */
+  margin-bottom: 6px;
   user-select: none;
-  background: var(
+  /* Lighter than a card's 0.42 border and its 0.07/0.14 tints, on purpose. */
+  border: 1px solid rgba(127, 127, 127, 0.32);
+  border-radius: 5px;
+  background-color: var(
     --vscode-sideBar-background,
     var(--vscode-editor-background)
+  );
+  background-image: linear-gradient(
+    rgba(127, 127, 127, 0.1),
+    rgba(127, 127, 127, 0.1)
   );
 }
 /* Three classes deep on purpose: `.card .card-head` pins at top:0 further down
@@ -95,7 +112,8 @@ body {
    This is the same bracket a card's expanded body draws back up to its own
    header, in the same weight, for the same reason. The rail sits on the
    chevron's centre line, so what it descends from is the control that folds
-   them. */
+   them, and it starts at the frame's bottom edge rather than at the first card,
+   so it visibly leaves the header. */
 /* 12px, which is the whole budget: at 14 the longest branch name in the panel
    stops fitting on one line at 260px, and the cards not wrapping their names is
    what the card layout spends its width on. */
@@ -106,8 +124,9 @@ body {
 .group-cards::before {
   content: "";
   position: absolute;
-  left: 6px;
-  top: 0;
+  left: 7px;
+  /* Up through the header's bottom margin to its border. */
+  top: -6px;
   /* Ends at the last card's bottom edge rather than in the gutter below it, so
      where the rail stops is where the group stops. */
   bottom: var(--card-gap);
@@ -123,8 +142,8 @@ body {
   gap: 5px;
   flex: 1 1 0;
   min-width: 0;
-  margin: -6px -5px -4px 0;
-  padding: 6px 5px 4px 0;
+  margin: -5px -5px -3px 0;
+  padding: 5px 5px 3px 0;
   border-radius: 4px;
   cursor: pointer;
 }
@@ -142,6 +161,13 @@ body {
 }
 .group.collapsed > .group-cards {
   display: none;
+}
+/* A folded group is its header alone, so it takes the card gutter below it: the
+   header's own 6px is the gap to its first card, and between two folded
+   sections it is a tighter break than the one between an open section's last
+   card and the header after it. */
+.group.collapsed {
+  margin-bottom: var(--card-gap);
 }
 /* Primary weight and colour: a section name is not secondary text, it is what
    you scan the list by. */
