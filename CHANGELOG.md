@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.6.12
+
+### Changes
+
+- **Group headers have a border.** A folded section no longer floats on the
+  panel background, so where one group ends and the next begins is visible, and
+  so is the edge of the row that folds it.
+
 ## 4.6.11
 
 ### Changes
