@@ -282,6 +282,29 @@ test("titleFor keeps a title that has scrolled out of the tail", async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test("cwdFor follows the session's newest record, and outlives the tail", async () => {
+  const root = seed("s1", [
+    { type: "user", cwd: "/repo", message: { content: "hi" } },
+    { type: "assistant", cwd: "/repo/wt/feature", message: { content: "..." } },
+    // A tool result quoting a cwd is not the session's own.
+    { type: "user", message: { content: [{ type: "text", text: '{"cwd":"/nope"}' }] } },
+  ]);
+  const reader = new TranscriptReader(root);
+  assert.strictEqual(await reader.cwdFor("s1"), "/repo/wt/feature");
+
+  const file = await findTranscript(root, "s1");
+  fs.appendFileSync(file, PAST_TAIL.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  assert.strictEqual(
+    await reader.cwdFor("s1"),
+    "/repo/wt/feature",
+    "a tail with no cwd in it says nothing about a move"
+  );
+
+  fs.appendFileSync(file, JSON.stringify({ type: "user", cwd: "/repo/wt/other" }) + "\n");
+  assert.strictEqual(await reader.cwdFor("s1"), "/repo/wt/other");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test("TranscriptReader sees an append that did not move the mtime", async () => {
   // Filesystem stamps are coarse (NTFS reports two appends milliseconds apart
   // with one stamp), and Claude writes a burst of records per turn. Pin the

@@ -48,10 +48,30 @@ starting, transitioning or ending, which is exactly when a card needs redrawing.
 
 ## Which card a session lands on
 
-The registry gives a `cwd`. A session appears on the card whose worktree path
-contains it, longest match first, so a session working in a nested worktree
-lands on that worktree's card rather than the repo root's. A session working
-outside every worktree of this repo has no card to appear on and is skipped.
+A session appears on the card whose worktree path contains its working
+directory, longest match first, so a session working in a nested worktree lands
+on that worktree's card rather than the repo root's.
+
+Which working directory matters. The registry's `cwd` is where the session
+**started**, and Claude never rewrites it: a session that moves to another
+worktree (`/cd`, a `cd` in its shell, EnterWorktree) keeps the old one in its
+registry file for as long as it lives. Placing on that left an agent on the card
+it started on while it worked somewhere else. Every conversation record in the
+transcript carries the cwd it was written in, though, so the same tail read that
+finds the title also takes the newest record's `cwd`, and that is what places
+the row:
+
+- The live cwd wins when it lands on a card. It is remembered per session like
+  the title, so a tail filled by one large tool result (no `cwd` of its own)
+  does not send the row back to where it started.
+- A live cwd outside every worktree (a scratch directory) falls back to the
+  registry's, so the row stays on its start card rather than vanishing. It is
+  still reported as unplaced, so a worktree created after the last listing gets
+  its one re-gather.
+- A session with no transcript yet is placed by the registry's `cwd` alone.
+
+A session whose start directory is outside every worktree of this repo too has
+no card to appear on and is skipped.
 
 ## Work summaries come from the transcript
 

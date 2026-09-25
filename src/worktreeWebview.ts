@@ -1497,19 +1497,29 @@ export class WorktreeWebviewProvider
     const titles = new Map<string, string>();
     const subagents = new Map<string, SubagentVM[]>();
     const skills = new Map<string, string[]>();
+    const cwds = new Map<string, string>();
     await Promise.all(
       registry.map(async (session) => {
-        const [title, subs, used] = await Promise.all([
+        const [title, subs, used, cwd] = await Promise.all([
           this.reader.titleFor(session.sessionId),
           this.reader.subagentsFor(session.sessionId),
           this.reader.skillsFor(session.sessionId),
+          this.reader.cwdFor(session.sessionId),
         ]);
         if (title) titles.set(session.sessionId, title);
         if (subs.length) subagents.set(session.sessionId, subs);
         if (used.length) skills.set(session.sessionId, used);
+        if (cwd) cwds.set(session.sessionId, cwd);
       })
     );
-    return indexRegistry(registry, worktreePaths, titles, subagents, skills);
+    return indexRegistry(
+      registry,
+      worktreePaths,
+      titles,
+      subagents,
+      skills,
+      cwds
+    );
   }
 
   /**

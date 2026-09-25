@@ -136,6 +136,11 @@ export interface TranscriptTail {
   finished: string[];
   /** Skills invoked in the tail, bare names, in first-use order. */
   skills: string[];
+  /** The session's working directory as of its newest record, or "" when the
+   *  tail has none. Every conversation record carries the cwd it was written
+   *  in, so this follows the session when it moves (a `cd`, EnterWorktree);
+   *  the registry's `cwd` stays where the session started. */
+  cwd: string;
 }
 
 /**
@@ -147,7 +152,7 @@ export interface TranscriptTail {
  * stopping at the first, since several subagents can finish in one window.
  */
 export function readTail(file: string): TranscriptTail {
-  const out: TranscriptTail = { title: "", finished: [], skills: [] };
+  const out: TranscriptTail = { title: "", finished: [], skills: [], cwd: "" };
   let fd: number | undefined;
   try {
     fd = fs.openSync(file, "r");
@@ -165,13 +170,14 @@ export function readTail(file: string): TranscriptTail {
         (line.indexOf("ai-title") !== -1 || line.indexOf("custom-title") !== -1);
       const maybeResult = line.indexOf("tool_result") !== -1;
       const maybeSkill = line.indexOf(SKILL_MARK) !== -1;
+      const maybeCwd = !out.cwd && line.indexOf(CWD_MARK) !== -1;
       // A completion notification is XML inside a record's text, and it is
       // written twice (queued, then delivered), so it is read off the raw line
       // and deduped by the caller's set rather than parsed out of either shape.
       if (line.indexOf(TASK_MARK) !== -1) {
         for (const m of line.matchAll(TASK_ID)) out.finished.push(m[1]);
       }
-      if (!maybeTitle && !maybeResult && !maybeSkill) continue;
+      if (!maybeTitle && !maybeResult && !maybeSkill && !maybeCwd) continue;
       let rec: Record<string, unknown>;
       try {
         rec = JSON.parse(line);
@@ -183,6 +189,7 @@ export function readTail(file: string): TranscriptTail {
         if (title) out.title = title;
       }
       if (maybeSkill) out.skills.unshift(...skillsInLine(rec));
+      if (maybeCwd && typeof rec.cwd === "string" && rec.cwd) out.cwd = rec.cwd;
       if (!maybeResult) continue;
       const content = (rec.message as { content?: unknown })?.content;
       if (!Array.isArray(content)) continue;
@@ -214,6 +221,9 @@ const SCAN_CHUNK = 256 * 1024;
  *  rather than splitting it into records first. Both title kinds end the same
  *  way, so one mark finds either. */
 const SKILL_MARK = '"Skill"';
+/** A record's own `cwd` key. One quoted inside a tool's input or output is
+ *  escaped (`\"cwd\":`), so it does not match; the parse checks the rest. */
+const CWD_MARK = '"cwd":';
 const TITLE_MARK = '-title"';
 
 /** What one pass over a whole transcript yields. */
@@ -330,6 +340,10 @@ export class TranscriptReader {
    *  the session is still called something in Claude itself. A tail with no
    *  title says nothing new, so it leaves the remembered one alone. */
   private readonly titles = new Map<string, string>();
+  /** The newest cwd seen for this session, remembered for the same reason as
+   *  the title: one oversized record (a big tool result) can fill the tail
+   *  without carrying a cwd of its own, and that says nothing about a move. */
+  private readonly cwds = new Map<string, string>();
   /** Sessions whose one-time full scan is in flight, so the poll cannot pile up
    *  a scan of the same transcript on every tick. */
   private readonly scanning = new Set<string>();
@@ -378,7 +392,7 @@ export class TranscriptReader {
    */
   private async tailFor(sessionId: string): Promise<TranscriptTail> {
     const file = await this.transcript(sessionId);
-    if (!file) return { title: "", finished: [], skills: [] };
+    if (!file) return { title: "", finished: [], skills: [], cwd: "" };
     let mtimeMs: number;
     let size: number;
     try {
@@ -389,7 +403,8 @@ export class TranscriptReader {
       this.located.delete(sessionId);
       this.cache.delete(sessionId);
       this.titles.delete(sessionId);
-      return { title: "", finished: [], skills: [] };
+      this.cwds.delete(sessionId);
+      return { title: "", finished: [], skills: [], cwd: "" };
     }
     const hit = this.cache.get(sessionId);
     if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.tail;
@@ -406,6 +421,7 @@ export class TranscriptReader {
     // skills its tail mentions in the meantime rather than none, and the poll
     // reposts within a second of the scan finishing.
     if (tail.title) this.titles.set(sessionId, tail.title);
+    if (tail.cwd) this.cwds.set(sessionId, tail.cwd);
     const known = this.skills.get(sessionId);
     const skills = known ?? [];
     for (const skill of tail.skills) {
@@ -457,6 +473,18 @@ export class TranscriptReader {
     return this.titles.get(sessionId) ?? "";
   }
 
+  /**
+   * Where this session is working now, or "" before its transcript says.
+   *
+   * The registry's `cwd` is the directory the session started in and is never
+   * rewritten, so an agent that moves to another worktree (`/cd`, a `cd` in its
+   * shell, EnterWorktree) would otherwise stay on the card it started on.
+   */
+  async cwdFor(sessionId: string): Promise<string> {
+    await this.tailFor(sessionId);
+    return this.cwds.get(sessionId) ?? "";
+  }
+
   /** The skills this session has invoked, deduped, in first-use order. */
   async skillsFor(sessionId: string): Promise<string[]> {
     await this.tailFor(sessionId);
@@ -499,6 +527,7 @@ export class TranscriptReader {
       this.finished,
       this.skills,
       this.titles,
+      this.cwds,
       this.subagentDirs,
     ];
     for (const map of maps) {

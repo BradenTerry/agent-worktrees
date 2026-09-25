@@ -324,17 +324,20 @@ export async function gatherWorktrees(
   const summaries = new Map<string, string>();
   const subagents = new Map<string, SubagentVM[]>();
   const skills = new Map<string, string[]>();
+  const cwds = new Map<string, string>();
   if (reader) {
     await Promise.all(
       registry.map(async (session) => {
-        const [title, subs, used] = await Promise.all([
+        const [title, subs, used, cwd] = await Promise.all([
           reader.titleFor(session.sessionId),
           reader.subagentsFor(session.sessionId),
           reader.skillsFor(session.sessionId),
+          reader.cwdFor(session.sessionId),
         ]);
         if (title) summaries.set(session.sessionId, title);
         if (subs.length) subagents.set(session.sessionId, subs);
         if (used.length) skills.set(session.sessionId, used);
+        if (cwd) cwds.set(session.sessionId, cwd);
       })
     );
   }
@@ -343,7 +346,8 @@ export async function gatherWorktrees(
     worktrees.map((wt) => wt.path),
     summaries,
     subagents,
-    skills
+    skills,
+    cwds
   );
 
   const vms: WorktreeVM[] = worktrees.map((wt, i) => {

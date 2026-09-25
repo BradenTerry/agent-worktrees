@@ -42,7 +42,8 @@ export interface RegistrySession {
   sessionId: string;
   /** Pid of the Claude process; also the file's name. */
   pid: number;
-  /** Working directory the session was started in. */
+  /** Working directory the session was started in. Claude does not rewrite it
+   *  when the session moves; see indexRegistry's `cwds`. */
   cwd: string;
   /** `status` mapped onto the panel's three states, when Claude recorded one. */
   status?: AgentStatus;
@@ -265,9 +266,16 @@ function attributePrompt(subagents: SubagentVM[], status: AgentStatus): void {
  * by start time and labelled with Claude's work summary, falling back to an
  * ordinal until it has generated one.
  *
- * `titles`, `subagents` and `skills` are keyed by session id; the caller reads
- * them (see TranscriptReader) because doing so touches the filesystem and this
- * stays pure.
+ * `titles`, `subagents`, `skills` and `cwds` are keyed by session id; the
+ * caller reads them (see TranscriptReader) because doing so touches the
+ * filesystem and this stays pure.
+ *
+ * A session is placed by where it is working NOW (`cwds`, from its transcript)
+ * rather than the registry's `cwd`, which is only where it started: an agent
+ * that moves to another worktree (`/cd`, a `cd` in its shell, EnterWorktree)
+ * follows itself onto that card. A live cwd with no card at all (a scratch dir
+ * outside the repo) falls back to the start directory, so the row stays
+ * somewhere rather than vanishing.
  *
  * A subagent given a worktree of its own is indexed under THAT worktree rather
  * than its parent session's, so the panel can show it on the card for the code
@@ -280,13 +288,15 @@ export function indexRegistry(
   worktreePaths: string[],
   titles: Map<string, string> = new Map(),
   subagents: Map<string, SubagentVM[]> = new Map(),
-  skills: Map<string, string[]> = new Map()
+  skills: Map<string, string[]> = new Map(),
+  cwds: Map<string, string> = new Map()
 ): SessionIndex {
   const keys = worktreePaths.map(normalize);
   const byPath = new Map<string, RegistrySession[]>();
   const unplaced: string[] = [];
   for (const session of registry) {
-    const key = placeIn(session.cwd, keys);
+    const cwd = cwds.get(session.sessionId) || session.cwd;
+    const key = placeIn(cwd, keys) ?? placeIn(session.cwd, keys);
     // A `claude -w` session runs in a worktree it created itself, inside the
     // repo, after the panel last listed worktrees - so it looks exactly like an
     // isolated subagent's worktree does, and needs the same cue. "No card
@@ -297,7 +307,7 @@ export function indexRegistry(
     // a card and let one re-gather decide (see refreshAgents); a cwd that is
     // merely a subdirectory of a card, or in another repo entirely, costs one
     // re-gather and then settles.
-    if (!key || pathKey(key) !== pathKey(session.cwd)) unplaced.push(session.cwd);
+    if (!key || pathKey(key) !== pathKey(cwd)) unplaced.push(cwd);
     if (!key) continue;
     const list = byPath.get(key) ?? [];
     list.push(session);

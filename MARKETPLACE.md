@@ -12,7 +12,8 @@ and its running agents in one view.
   files, `+`/`-` lines and ahead/behind in the same place on every card.
 - Start a Claude agent in any worktree in one click, or create a worktree and an
   agent together.
-- Live agent status: active, waiting, idle. Activity Bar badge when one is
+- Live agent status: active, waiting, idle. An agent that moves to another
+  worktree moves to that worktree's card with it. Activity Bar badge when one is
   blocked on you, and a notification with an **Open terminal** button when one
   starts waiting while you are in another app. Two agents prompting at once
   raise two, each opening its own terminal.

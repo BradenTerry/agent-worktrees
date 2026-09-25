@@ -106,7 +106,9 @@ its running agents in one view.
   it in one step. The new worktree gets its card without a manual refresh: a
   session whose cwd is not itself a card is the cue to re-list worktrees (see
   [Refresh coalescing](docs/refresh-coalescing.md)).
-- Status per agent, read from Claude Code's own session registry (see
+- Status per agent, read from Claude Code's own session registry, on the card
+  for the worktree it is working in now: the transcript's newest `cwd`, since
+  the registry keeps the one it started in (see
   [Agent status](docs/agent-status.md)). Per-status counts on each card and once
   for the whole repo under its name, a bounded scrolling list so a busy worktree
   cannot push the others off screen, and a number badge on the Activity Bar icon

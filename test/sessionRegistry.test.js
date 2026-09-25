@@ -212,6 +212,42 @@ test("a session outside every worktree has no card and is skipped", () => {
   assert.strictEqual(idx.agents.size, 0);
 });
 
+test("a session that moved to another worktree follows itself onto that card", () => {
+  // The registry's cwd is where the session started and is never rewritten; the
+  // transcript's is where it is working now (`/cd`, `cd`, EnterWorktree).
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: REPO, status: "active", startedAt: 1, lastActivity: 1 }],
+    [REPO, FEATURE],
+    new Map(),
+    new Map(),
+    new Map(),
+    new Map([["s1", path.join(FEATURE, "src")]])
+  );
+  assert.strictEqual(idx.agents.get(REPO), undefined);
+  assert.deepStrictEqual(
+    idx.agents.get(normalize(FEATURE)).map((a) => a.sessionId),
+    ["s1"]
+  );
+});
+
+test("a session that moved outside every worktree stays on its start card", () => {
+  const elsewhere = path.join(os.tmpdir(), "elsewhere");
+  const idx = indexRegistry(
+    [{ sessionId: "s1", pid: 1, cwd: FEATURE, status: "idle", startedAt: 1, lastActivity: 1 }],
+    [REPO, FEATURE],
+    new Map(),
+    new Map(),
+    new Map(),
+    new Map([["s1", elsewhere]])
+  );
+  assert.deepStrictEqual(
+    idx.agents.get(normalize(FEATURE)).map((a) => a.sessionId),
+    ["s1"]
+  );
+  // Still reported, so a worktree created after the last listing gets a look.
+  assert.ok(idx.unplaced.includes(elsewhere));
+});
+
 test(
   "indexRegistry places a session whose cwd differs only in case",
   { skip: process.platform !== "win32" && process.platform !== "darwin" },
