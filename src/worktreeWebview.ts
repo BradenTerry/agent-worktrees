@@ -1267,10 +1267,13 @@ export class WorktreeWebviewProvider
     // waiting as work would put a card parked on a permission prompt on a
     // two-second git treadmill for as long as the user takes to read it, which is
     // the steady-state spawn cost this whole path exists to avoid.
+    const fired = (wt: WorktreeVM): boolean =>
+      (sessions.agents.get(normalize(wt.path)) ?? []).some((a: AgentVM) =>
+        changed.has(a.sessionId)
+      );
     const working = (wt: WorktreeVM): boolean => {
       const key = normalize(wt.path);
       const rows = sessions.agents.get(key) ?? [];
-      if (rows.some((a: AgentVM) => changed.has(a.sessionId))) return true;
       // A waiting parent whose subagents are still running is the one exception:
       // the parent is blocked on the user, but its fan-out keeps editing.
       if (
@@ -1292,6 +1295,7 @@ export class WorktreeWebviewProvider
         cards: data.worktrees.map((wt) => ({
           path: pathKey(wt.path),
           working: working(wt),
+          changed: fired(wt),
         })),
         watched: new Set(this.repoStateWatch.keys()),
         statusAt: this.statusAt,

@@ -37,6 +37,14 @@ export interface PollCard {
    * discrete signal (a save, a focus, the Refresh button) will not catch.
    */
   working: boolean;
+  /**
+   * A session on this card just wrote its registry file, i.e. changed status.
+   * That is a discrete event rather than a tick, so it is due whatever the
+   * interval says. Throttling it is what lost a branch switch: an agent runs
+   * `git switch` and ends its turn inside one interval, the closing write is
+   * skipped as "too soon", and the now-idle card is never polled again.
+   */
+  changed?: boolean;
 }
 
 export interface PollInput {
@@ -63,6 +71,10 @@ export function dueForStatus(input: PollInput): string[] {
   const { cards, watched, statusAt, now, pollMs, watchedMs } = input;
   const due: string[] = [];
   for (const card of cards) {
+    if (card.changed) {
+      due.push(card.path);
+      continue;
+    }
     if (!card.working) continue;
     const every = watched.has(card.path) ? watchedMs : pollMs;
     if (now - (statusAt.get(card.path) ?? 0) >= every) due.push(card.path);

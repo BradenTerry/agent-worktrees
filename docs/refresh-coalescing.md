@@ -199,6 +199,12 @@ standard only ever applied to tier one: a card the Source Control view is not
 showing cannot contradict it. So tier two can afford to be slow, and tier one
 does not need a timer at all.
 
+Both cadences only throttle the *poll*. A card whose agent just changed status
+(its registry file was rewritten) is re-stat'd on that write, in either tier. An
+agent that runs `git switch` and ends its turn inside one interval leaves that
+write as the last signal before its card goes idle and drops off the poll, so
+skipping it as "too soon" kept the old branch on the card indefinitely.
+
 The tier is read off the live subscription map rather than recorded separately,
 which is what makes the **Source Control scope button** work without knowing any
 of this. Scoping closes every other repository (see `applyScopeScm`), those
