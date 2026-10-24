@@ -2,6 +2,14 @@
 
 All notable changes to the Agent Worktrees extension are documented here.
 
+## 4.6.13
+
+### Changes
+
+- **A card follows its agent's branch switch.** An agent that switched branches
+  and then finished its turn could leave the card on the old branch until the
+  next Refresh.
+
 ## 4.6.12
 
 ### Changes
