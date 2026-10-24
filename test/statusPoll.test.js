@@ -105,6 +105,23 @@ test("a repository closing puts its card back on the poll", () => {
   assert.deepStrictEqual(due({ cards, watched: [], statusAt }), ["/a"]);
 });
 
+test("a card whose agent just changed status is due regardless of interval", () => {
+  const now = 1_000_000;
+  // The agent ran `git switch` and ended its turn a few seconds after the last
+  // poll. The closing registry write is the only signal left: once the card is
+  // idle nothing polls it, so skipping this one froze the old branch name.
+  const fired = { path: "/a", working: false, changed: true };
+  assert.deepStrictEqual(
+    due({ cards: [fired], statusAt: { "/a": now - 1 } }),
+    ["/a"]
+  );
+  assert.deepStrictEqual(
+    due({ cards: [fired], watched: ["/a"], statusAt: { "/a": now - 1 } }),
+    ["/a"],
+    "a watched card too"
+  );
+});
+
 test("pollIntervalMs clamps whatever settings.json actually contains", () => {
   assert.strictEqual(pollIntervalMs(10), 10_000);
   assert.strictEqual(pollIntervalMs(MIN_POLL_SECONDS), MIN_POLL_SECONDS * 1_000);
